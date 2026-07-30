@@ -26,12 +26,20 @@ export const Route = createFileRoute("/integrations")({
 function Integrations() {
   return (
     <AppShell>
-      <header className="mb-6">
-        <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Integrations</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Automated ingestion sources. Dashboards fall back to sample data until a source is
-          connected.
-        </p>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Integrations</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Automated ingestion sources. Dashboards fall back to sample data until a source is
+            connected.
+          </p>
+        </div>
+        <Link
+          to="/settings"
+          className="glass rounded-full px-4 py-2 text-xs font-medium transition-colors hover:text-primary"
+        >
+          + Add integration
+        </Link>
       </header>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
