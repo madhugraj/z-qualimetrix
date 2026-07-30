@@ -1,6 +1,7 @@
 import {
   Area,
   AreaChart,
+  ComposedChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -93,7 +94,7 @@ export function MttrChart() {
 export function VelocityChart() {
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <AreaChart data={VELOCITY_TREND}>
+      <ComposedChart data={VELOCITY_TREND}>
         <defs>
           <linearGradient id="velFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.5} />
@@ -112,6 +113,7 @@ export function VelocityChart() {
           stroke="var(--primary)"
           strokeWidth={2.2}
           fill="url(#velFill)"
+          isAnimationActive={false}
         />
         <Line
           type="monotone"
@@ -120,6 +122,7 @@ export function VelocityChart() {
           stroke="var(--critical)"
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
         />
         <Line
           type="monotone"
@@ -128,8 +131,9 @@ export function VelocityChart() {
           stroke="var(--good)"
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
         />
-      </AreaChart>
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }
