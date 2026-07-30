@@ -15,6 +15,9 @@ import {
   PortfolioRadar,
   VelocityChart,
 } from "@/components/qm/charts";
+import { SimilarBugs } from "@/components/qm/SimilarBugs";
+import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
+import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Role } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/")({
@@ -90,6 +93,17 @@ function Dashboard() {
           <GlassPanel title="Defect density heatmap" subtitle="Open defects per module">
             <DefectHeatmap />
           </GlassPanel>
+          <GlassPanel
+            title="Related / similar bugs"
+            subtitle="Duplicate screening on the newest report"
+            className="xl:col-span-2"
+          >
+            <SimilarBugs bug={BUGS[0]} />
+          </GlassPanel>
+          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers">
+            <BugDomainDonut />
+          </GlassPanel>
+
         </div>
       )}
 
@@ -115,6 +129,20 @@ function Dashboard() {
           >
             <VelocityChart />
           </GlassPanel>
+          <GlassPanel
+            title="Related / similar bugs"
+            subtitle="Check before you start: this may already be fixed"
+          >
+            <SimilarBugs bug={BUGS[2]} />
+          </GlassPanel>
+          <GlassPanel
+            title="Bug domain distribution"
+            subtitle="Where defects concentrate across layers"
+            className="xl:col-span-2"
+          >
+            <BugDomainDonut />
+          </GlassPanel>
+
         </div>
       )}
 

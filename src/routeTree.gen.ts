@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BugsRouteImport } from './routes/bugs'
+import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
 import { Route as ReportsRouteImport } from './routes/reports'
@@ -18,6 +20,16 @@ import { Route as SettingsRouteImport } from './routes/settings'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BugsRoute = BugsRouteImport.update({
+  id: '/bugs',
+  path: '/bugs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
+  id: '/engineering-health',
+  path: '/engineering-health',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -43,6 +55,8 @@ const SettingsRoute = SettingsRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bugs': typeof BugsRoute
+  '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
@@ -50,6 +64,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bugs': typeof BugsRoute
+  '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
@@ -58,6 +74,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bugs': typeof BugsRoute
+  '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
@@ -65,12 +83,28 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/integrations' | '/manual-log' | '/reports' | '/settings'
+  fullPaths:
+    | '/'
+    | '/bugs'
+    | '/engineering-health'
+    | '/integrations'
+    | '/manual-log'
+    | '/reports'
+    | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/integrations' | '/manual-log' | '/reports' | '/settings'
+  to:
+    | '/'
+    | '/bugs'
+    | '/engineering-health'
+    | '/integrations'
+    | '/manual-log'
+    | '/reports'
+    | '/settings'
   id:
     | '__root__'
     | '/'
+    | '/bugs'
+    | '/engineering-health'
     | '/integrations'
     | '/manual-log'
     | '/reports'
@@ -79,6 +113,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BugsRoute: typeof BugsRoute
+  EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
   ManualLogRoute: typeof ManualLogRoute
   ReportsRoute: typeof ReportsRoute
@@ -92,6 +128,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bugs': {
+      id: '/bugs'
+      path: '/bugs'
+      fullPath: '/bugs'
+      preLoaderRoute: typeof BugsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/engineering-health': {
+      id: '/engineering-health'
+      path: '/engineering-health'
+      fullPath: '/engineering-health'
+      preLoaderRoute: typeof EngineeringHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -127,6 +177,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BugsRoute: BugsRoute,
+  EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
   ManualLogRoute: ManualLogRoute,
   ReportsRoute: ReportsRoute,
