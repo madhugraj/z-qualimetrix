@@ -15,6 +15,9 @@ import {
   PortfolioRadar,
   VelocityChart,
 } from "@/components/qm/charts";
+import { SimilarBugs } from "@/components/qm/SimilarBugs";
+import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
+import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Role } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/")({
