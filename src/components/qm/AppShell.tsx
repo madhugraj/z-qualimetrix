@@ -17,10 +17,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="glass sticky top-0 z-20 hidden h-screen w-[76px] flex-col items-center gap-1 rounded-none border-y-0 border-l-0 py-5 md:flex">
-        <Link to="/" className="mb-6 flex flex-col items-center gap-1">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/15 text-primary shadow-[0_0_20px_-6px_var(--primary)]">
-            <Gauge className="h-5 w-5" strokeWidth={1.6} />
-          </span>
+        <Link to="/" className="mb-6 flex flex-col items-center gap-1" aria-label="YAVAR home">
+          <img
+            src={yavarLogo.url}
+            alt="YAVAR logo"
+            className="h-8 w-[54px] rounded-lg object-contain mix-blend-multiply"
+          />
         </Link>
         {NAV.map((item) => {
           const active = pathname === item.to;
