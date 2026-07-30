@@ -93,6 +93,17 @@ function Dashboard() {
           <GlassPanel title="Defect density heatmap" subtitle="Open defects per module">
             <DefectHeatmap />
           </GlassPanel>
+          <GlassPanel
+            title="Related / similar bugs"
+            subtitle="Duplicate screening on the newest report"
+            className="xl:col-span-2"
+          >
+            <SimilarBugs bug={BUGS[0]} />
+          </GlassPanel>
+          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers">
+            <BugDomainDonut />
+          </GlassPanel>
+
         </div>
       )}
 
