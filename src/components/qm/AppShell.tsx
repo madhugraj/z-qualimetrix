@@ -1,16 +1,29 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, LayoutDashboard, PlugZap, PenLine, Settings } from "lucide-react";
+import {
+  BarChart3,
+  Bug,
+  HeartPulse,
+  LayoutDashboard,
+  PlugZap,
+  PenLine,
+  Settings,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
+// `roles` documents the RBAC gate for each destination; Engineering Health is
+// limited to managers / leads / HR once auth is wired.
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/bugs", label: "Bug Intelligence", icon: Bug },
+  { to: "/engineering-health", label: "Engineering Health", icon: HeartPulse },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/integrations", label: "Integrations", icon: PlugZap },
   { to: "/manual-log", label: "Manual Log", icon: PenLine },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
+
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
