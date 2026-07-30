@@ -46,9 +46,15 @@ export function ExecutionTrendChart() {
         <YAxis {...axis} width={32} />
         <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="passed" stackId="a" fill="var(--good)" radius={[0, 0, 0, 0]} />
-        <Bar dataKey="failed" stackId="a" fill="var(--critical)" />
-        <Bar dataKey="blocked" stackId="a" fill="var(--warning)" radius={[6, 6, 0, 0]} />
+        <Bar dataKey="passed" stackId="a" fill="var(--good)" isAnimationActive={false} />
+        <Bar dataKey="failed" stackId="a" fill="var(--critical)" isAnimationActive={false} />
+        <Bar
+          dataKey="blocked"
+          stackId="a"
+          fill="var(--warning)"
+          radius={[6, 6, 0, 0]}
+          isAnimationActive={false}
+        />
       </BarChart>
     </ResponsiveContainer>
   );
