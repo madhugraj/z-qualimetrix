@@ -129,6 +129,20 @@ function Dashboard() {
           >
             <VelocityChart />
           </GlassPanel>
+          <GlassPanel
+            title="Related / similar bugs"
+            subtitle="Check before you start: this may already be fixed"
+          >
+            <SimilarBugs bug={BUGS[2]} />
+          </GlassPanel>
+          <GlassPanel
+            title="Bug domain distribution"
+            subtitle="Where defects concentrate across layers"
+            className="xl:col-span-2"
+          >
+            <BugDomainDonut />
+          </GlassPanel>
+
         </div>
       )}
 
