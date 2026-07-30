@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, LayoutDashboard, PlugZap, PenLine, Settings, Gauge } from "lucide-react";
+import { BarChart3, LayoutDashboard, PlugZap, PenLine, Settings } from "lucide-react";
 import type { ReactNode } from "react";
+import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
 const NAV = [
