@@ -138,10 +138,10 @@
   --muted-foreground: oklch(0.46 0.03 230);
   --accent: oklch(0.9 0.03 205 / 70%);
   --accent-foreground: oklch(0.26 0.035 230);
-  --good: oklch(0.62 0.12 195);
-  --warning: oklch(0.7 0.15 70);
-  --critical: oklch(0.58 0.2 22);
-  --ops: oklch(0.55 0.19 300);
+  --good: oklch(0.55 0.055 195);
+  --warning: oklch(0.72 0.085 88);
+  --critical: oklch(0.44 0.075 35);
+  --ops: oklch(0.42 0.045 255);
   --glass: oklch(1 0 0 / 55%);
   --glass-border: oklch(1 0 0 / 80%);
   --border: oklch(0.24 0.03 230 / 10%);
