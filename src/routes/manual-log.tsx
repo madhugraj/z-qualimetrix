@@ -22,7 +22,7 @@ export const Route = createFileRoute("/manual-log")({
       },
     ],
   }),
-  component: ManualLog;
+  component: ManualLog,
 });
 
 const TYPES: { id: DeliverableType; label: string }[] = [
