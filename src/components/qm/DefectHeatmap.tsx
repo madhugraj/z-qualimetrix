@@ -28,17 +28,22 @@ export function DefectHeatmap() {
           );
         })}
       </div>
-      <div className="mt-3 flex items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
         <span className="flex items-center gap-1">
-          <i className="h-2.5 w-2.5 rounded-full bg-good" /> Low
+          <i className="h-2.5 w-2.5 rounded-full bg-good" /> Low (1–5)
         </span>
         <span className="flex items-center gap-1">
-          <i className="h-2.5 w-2.5 rounded-full bg-warning" /> Medium
+          <i className="h-2.5 w-2.5 rounded-full bg-warning" /> Medium (6–12)
         </span>
         <span className="flex items-center gap-1">
-          <i className="h-2.5 w-2.5 rounded-full bg-critical" /> High
+          <i className="h-2.5 w-2.5 rounded-full bg-critical" /> High (13+)
         </span>
       </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+        Each cell is a feature/module. The number is its currently open defect count; the shade is
+        that count banded against the thresholds above, so hot cells flag where defects concentrate
+        and regression effort should be aimed.
+      </p>
     </div>
   );
 }
