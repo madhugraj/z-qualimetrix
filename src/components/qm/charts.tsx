@@ -67,10 +67,12 @@ export function MttrChart() {
       <LineChart data={MTTR_TREND}>
         <CartesianGrid vertical={false} stroke="var(--border)" />
         <XAxis dataKey="sprint" {...axis} />
-        <YAxis {...axis} width={32} />
+        <YAxis yAxisId="left" {...axis} width={32} />
+        <YAxis yAxisId="right" orientation="right" {...axis} width={36} domain={[60, 100]} />
         <Tooltip {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Line
+          yAxisId="left"
           type="monotone"
           dataKey="mttr"
           name="MTTR (hrs)"
@@ -79,6 +81,7 @@ export function MttrChart() {
           dot={false}
         />
         <Line
+          yAxisId="right"
           type="monotone"
           dataKey="fix"
           name="First-time fix %"
