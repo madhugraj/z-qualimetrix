@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
+import { ExportMenu } from "@/components/qm/ExportMenu";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import {
   ExecutionTrendChart,
@@ -32,11 +33,14 @@ export const Route = createFileRoute("/reports")({
 function Reports() {
   return (
     <AppShell>
-      <header className="mb-6">
-        <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Reports</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Cross-sprint analytics across products, squads and releases.
-        </p>
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Reports</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Cross-sprint analytics across products, squads and releases.
+          </p>
+        </div>
+        <ExportMenu />
       </header>
       <div className="mb-5">
         <FilterBar />

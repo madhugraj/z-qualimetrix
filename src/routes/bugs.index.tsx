@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
@@ -7,7 +7,7 @@ import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BUGS, BUG_DOMAINS, DOMAIN_COLOR, type BugDomain } from "@/lib/qm-bugs";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/bugs")({
+export const Route = createFileRoute("/bugs/")({
   head: () => ({
     meta: [
       { title: "Bug Intelligence — QualiMetrix" },
@@ -99,6 +99,13 @@ function BugsPage() {
                     {bug.severity} · {bug.status} · {bug.assignee}
                   </p>
                 </button>
+                <Link
+                  to="/bugs/$bugId"
+                  params={{ bugId: bug.id }}
+                  className="mt-1 ml-3 inline-block text-[11px] text-primary hover:underline"
+                >
+                  Open bug detail →
+                </Link>
               </li>
             ))}
           </ul>

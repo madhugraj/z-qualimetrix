@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import yavarLogo from "@/assets/yavar-logo.png.asset.json";
+import { GlobalSearch } from "@/components/qm/GlobalSearch";
+import { NotificationsBell } from "@/components/qm/NotificationsBell";
 import { cn } from "@/lib/utils";
 
 // `roles` documents the RBAC gate for each destination; Engineering Health is
@@ -68,7 +70,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <nav className="glass sticky top-0 z-20 flex gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-3 py-2 md:hidden">
+        <div className="glass sticky top-0 z-20 flex items-center gap-2 rounded-none border-x-0 border-t-0 px-3 py-2 md:px-7 md:py-3">
+          <GlobalSearch />
+          <div className="ml-auto">
+            <NotificationsBell />
+          </div>
+        </div>
+        <nav className="glass flex gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-3 py-2 md:hidden">
           {NAV.map((item) => (
             <Link
               key={item.to}
@@ -89,3 +97,4 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
