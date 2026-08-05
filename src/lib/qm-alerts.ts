@@ -64,8 +64,8 @@ function siloAlerts(): QmAlert[] {
   return SILOS.slice(0, 2).map((silo, i) => ({
     id: `silo-${i}`,
     severity: "info" as const,
-    title: `Knowledge silo: ${silo.area ?? "Module"}`,
-    detail: silo.detail ?? silo.recommendation ?? "Bus-factor risk detected.",
+    title: `Knowledge silo: ${silo.module}`,
+    detail: `${silo.owner} resolves ${silo.share}% — ${silo.note}`,
     time: "This sprint",
     to: "/engineering-health",
   }));
