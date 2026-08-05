@@ -54,9 +54,9 @@ const BugsIndexRoute = BugsIndexRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const BugsBugIdRoute = BugsBugIdRouteImport.update({
-  id: '/$bugId',
-  path: '/$bugId',
-  getParentRoute: () => BugsRoute,
+  id: '/bugs/$bugId',
+  path: '/bugs/$bugId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -130,6 +130,7 @@ export interface RootRouteChildren {
   ManualLogRoute: typeof ManualLogRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  BugsBugIdRoute: typeof BugsBugIdRoute
   BugsIndexRoute: typeof BugsIndexRoute
 }
 
@@ -186,10 +187,10 @@ declare module '@tanstack/react-router' {
     }
     '/bugs/$bugId': {
       id: '/bugs/$bugId'
-      path: '/$bugId'
+      path: '/bugs/$bugId'
       fullPath: '/bugs/$bugId'
       preLoaderRoute: typeof BugsBugIdRouteImport
-      parentRoute: typeof BugsRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
@@ -201,18 +202,9 @@ const rootRouteChildren: RootRouteChildren = {
   ManualLogRoute: ManualLogRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  BugsBugIdRoute: BugsBugIdRoute,
   BugsIndexRoute: BugsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
