@@ -7,7 +7,7 @@ import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BUGS, BUG_DOMAINS, DOMAIN_COLOR, type BugDomain } from "@/lib/qm-bugs";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/bugs")({
+export const Route = createFileRoute("/bugs/")({
   head: () => ({
     meta: [
       { title: "Bug Intelligence — QualiMetrix" },
