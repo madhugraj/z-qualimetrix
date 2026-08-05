@@ -3,7 +3,7 @@ import { ArrowLeft, Download, GitBranch, Layers, User } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
-import { BUGS, DOMAIN_COLOR } from "@/lib/qm-bugs";
+import { BUGS, DOMAIN_COLOR, type Bug, type BugDomain } from "@/lib/qm-bugs";
 import { exportJson } from "@/lib/qm-export";
 
 export const Route = createFileRoute("/bugs/$bugId")({
@@ -61,7 +61,8 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 function BugDetail() {
-  const { bug } = Route.useLoaderData();
+  const { bug } = Route.useLoaderData() as { bug: Bug };
+  const domain = bug.domain as BugDomain;
   const timeline = [
     { when: bug.reported, what: `Reported and auto-tagged as ${bug.domain}` },
     { when: bug.reported, what: `Duplicate screening run against ${BUGS.length - 1} historic defects` },
@@ -85,11 +86,11 @@ function BugDetail() {
             <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span
                 className="inline-flex items-center gap-1.5 rounded-full border border-glass-border px-2 py-0.5 text-[11px]"
-                style={{ color: DOMAIN_COLOR[bug.domain!] }}
+                style={{ color: DOMAIN_COLOR[domain] }}
               >
                 <span
                   className="h-2 w-2 rounded-full"
-                  style={{ background: DOMAIN_COLOR[bug.domain!] }}
+                  style={{ background: DOMAIN_COLOR[domain] }}
                 />
                 {bug.domain} · {Math.round((bug.confidence ?? 0) * 100)}% confidence
               </span>

@@ -16,6 +16,7 @@ import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -52,34 +53,42 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BugsBugIdRoute = BugsBugIdRouteImport.update({
+  id: '/$bugId',
+  path: '/$bugId',
+  getParentRoute: () => BugsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/bugs': typeof BugsRoute
+  '/bugs': typeof BugsRouteWithChildren
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/bugs/$bugId': typeof BugsBugIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/bugs': typeof BugsRoute
+  '/bugs': typeof BugsRouteWithChildren
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/bugs/$bugId': typeof BugsBugIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/bugs': typeof BugsRoute
+  '/bugs': typeof BugsRouteWithChildren
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/bugs/$bugId': typeof BugsBugIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/bugs/$bugId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/bugs/$bugId'
   id:
     | '__root__'
     | '/'
@@ -109,11 +120,12 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/bugs/$bugId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  BugsRoute: typeof BugsRoute
+  BugsRoute: typeof BugsRouteWithChildren
   EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
   ManualLogRoute: typeof ManualLogRoute
@@ -172,12 +184,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bugs/$bugId': {
+      id: '/bugs/$bugId'
+      path: '/$bugId'
+      fullPath: '/bugs/$bugId'
+      preLoaderRoute: typeof BugsBugIdRouteImport
+      parentRoute: typeof BugsRoute
+    }
   }
 }
 
+interface BugsRouteChildren {
+  BugsBugIdRoute: typeof BugsBugIdRoute
+}
+
+const BugsRouteChildren: BugsRouteChildren = {
+  BugsBugIdRoute: BugsBugIdRoute,
+}
+
+const BugsRouteWithChildren = BugsRoute._addFileChildren(BugsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  BugsRoute: BugsRoute,
+  BugsRoute: BugsRouteWithChildren,
   EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
   ManualLogRoute: ManualLogRoute,

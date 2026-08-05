@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import yavarLogo from "@/assets/yavar-logo.png.asset.json";
+import { GlobalSearch } from "@/components/qm/GlobalSearch";
+import { NotificationsBell } from "@/components/qm/NotificationsBell";
 import { cn } from "@/lib/utils";
 
 // `roles` documents the RBAC gate for each destination; Engineering Health is
