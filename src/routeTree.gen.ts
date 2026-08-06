@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
@@ -21,6 +22,11 @@ import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AiUsageRoute = AiUsageRouteImport.update({
+  id: '/ai-usage',
+  path: '/ai-usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
@@ -61,6 +67,7 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/ai-usage': typeof AiUsageRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -71,6 +78,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/ai-usage': typeof AiUsageRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -82,6 +90,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/ai-usage': typeof AiUsageRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -94,6 +103,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/ai-usage'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/ai-usage'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -114,6 +125,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/ai-usage'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -125,6 +137,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AiUsageRoute: typeof AiUsageRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
   ManualLogRoute: typeof ManualLogRoute
@@ -141,6 +154,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ai-usage': {
+      id: '/ai-usage'
+      path: '/ai-usage'
+      fullPath: '/ai-usage'
+      preLoaderRoute: typeof AiUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/engineering-health': {
@@ -197,6 +217,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AiUsageRoute: AiUsageRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
   ManualLogRoute: ManualLogRoute,
