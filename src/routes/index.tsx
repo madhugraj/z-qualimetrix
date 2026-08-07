@@ -162,11 +162,10 @@ function Landing() {
         <header className="sticky top-4 z-50 mx-auto w-[min(100%-1.5rem,64rem)]">
           <nav className="glass-panel grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-full px-4 py-2.5 sm:px-6">
             <Link to="/" className="flex min-w-0 items-center gap-3">
-              <img
-                src={yavarLogo.url}
-                alt="Yavar logo"
-                className="h-6 w-[44px] shrink-0 object-contain invert mix-blend-screen"
-              />
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/40 text-[11px] font-bold text-primary shadow-[0_0_24px_-8px_var(--primary)]">
+                Y
+              </span>
+
               <span className="truncate text-sm font-semibold tracking-tight">
                 Yavar QualiMetrix
               </span>
