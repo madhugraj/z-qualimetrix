@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
   head: () => ({
