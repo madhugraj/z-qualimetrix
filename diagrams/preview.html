@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QualiMetrix Diagrams Preview</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .diagram-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .diagram-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .diagram-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+
+        .diagram-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .diagram-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .diagram-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .diagram-content {
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mermaid {
+            font-size: 14px;
+        }
+
+        .controls {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .control-group {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
+        .control-item {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .control-item label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #555;
+        }
+
+        .control-item select,
+        .control-item input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            margin: 20px 0;
+        }
+
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #fcc;
+        }
+
+        @media (max-width: 768px) {
+            .diagram-grid {
+                grid-template-columns: 1fr;
+            }
+
+            header h1 {
+                font-size: 1.8rem;
+            }
+
+            .control-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 QualiMetrix Diagrams</h1>
+            <p>Interactive preview of all system architecture diagrams</p>
+        </header>
+
+        <div class="controls">
+            <div class="control-group">
+                <div class="control-item">
+                    <label for="theme-select">Theme:</label>
+                    <select id="theme-select">
+                        <option value="default">Default</option>
+                        <option value="forest">Forest</option>
+                        <option value="dark">Dark</option>
+                        <option value="neutral">Neutral</option>
+                    </select>
+                </div>
+                <div class="control-item">
+                    <label for="zoom-select">Zoom:</label>
+                    <select id="zoom-select">
+                        <option value="0.8">80%</option>
+                        <option value="1" selected>100%</option>
+                        <option value="1.2">120%</option>
+                        <option value="1.5">150%</option>
+                    </select>
+                </div>
+            </div>
+            <button class="btn" onclick="renderAllDiagrams()">🔄 Refresh Diagrams</button>
+            <button class="btn" onclick="window.print()">🖨️ Print/Export PDF</button>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="total-diagrams">0</div>
+                    <div class="stat-label">Total Diagrams</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="rendered-diagrams">0</div>
+                    <div class="stat-label">Successfully Rendered</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="diagrams-container"></div>
+    </div>
+
+    <script>
+        // Diagram data from our markdown files
+        const diagramFiles = [
+            {
+                name: 'ER Diagram',
+                file: 'er-diagram.md',
+                description: 'Complete Entity-Relationship diagram showing all database tables and relationships'
+            },
+            {
+                name: 'Data Flow Diagrams',
+                file: 'dfd-levels.md',
+                description: 'Multi-level DFDs covering authentication, integrations, analytics, and bug intelligence'
+            },
+            {
+                name: 'System Architecture',
+                file: 'system-architecture-summary.md',
+                description: 'High-level architecture overview with deployment and scaling strategies'
+            }
+        ];
+
+        let currentTheme = 'default';
+        let currentZoom = 1.0;
+        let renderedCount = 0;
+        let totalCount = 0;
+
+        // Initialize Mermaid
+        function initializeMermaid(theme) {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: theme,
+                securityLevel: 'loose',
+                logLevel: 'warn',
+                flowchart: {
+                    curve: 'basis',
+                    padding: 20
+                },
+                er: {
+                    entityPadding: 15,
+                    relationshipPadding: 5
+                }
+            });
+        }
+
+        // Extract mermaid code from markdown
+        function extractMermaidCode(markdown) {
+            const regex = /```mermaid\n([\s\S]*?)```/g;
+            const diagrams = [];
+            let match;
+
+            while ((match = regex.exec(markdown)) !== null) {
+                diagrams.push(match[1].trim());
+            }
+
+            return diagrams;
+        }
+
+        // Load markdown files
+        async function loadMarkdownFile(filename) {
+            try {
+                const response = await fetch(`diagrams/${filename}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to load ${filename}`);
+                }
+                return await response.text();
+            } catch (error) {
+                console.error(`Error loading ${filename}:`, error);
+                return null;
+            }
+        }
+
+        // Render a single diagram
+        async function renderDiagram(mermaidCode, containerId) {
+            try {
+                const id = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                const { svg } = await mermaid.render(id, mermaidCode);
+
+                const container = document.getElementById(containerId);
+                container.innerHTML = `<div class="mermaid" style="transform: scale(${currentZoom}); transform-origin: center;">${svg}</div>`;
+
+                return true;
+            } catch (error) {
+                console.error('Error rendering diagram:', error);
+                const container = document.getElementById(containerId);
+                container.innerHTML = `<div class="error">❌ Error rendering diagram: ${error.message}</div>`;
+                return false;
+            }
+        }
+
+        // Render all diagrams
+        async function renderAllDiagrams() {
+            const container = document.getElementById('diagrams-container');
+            container.innerHTML = '<div class="loading">Loading diagrams...</div>';
+
+            // Reinitialize with current theme
+            initializeMermaid(currentTheme);
+
+            renderedCount = 0;
+            totalCount = 0;
+
+            const diagramCards = [];
+
+            for (const diagramFile of diagramFiles) {
+                const markdown = await loadMarkdownFile(diagramFile.file);
+                if (!markdown) continue;
+
+                const mermaidDiagrams = extractMermaidCode(markdown);
+                totalCount += mermaidDiagrams.length;
+
+                for (let i = 0; i < mermaidDiagrams.length; i++) {
+                    const cardId = `card-${Date.now()}-${i}`;
+                    const contentId = `content-${Date.now()}-${i}`;
+
+                    const title = i === 0 ? diagramFile.name : `${diagramFile.name} (Part ${i + 1})`;
+                    const badge = i === 0 ? 'Main' : `Part ${i + 1}`;
+
+                    diagramCards.push(`
+                        <div class="diagram-card">
+                            <div class="diagram-header">
+                                <h3 class="diagram-title">${title}</h3>
+                                <span class="diagram-badge">${badge}</span>
+                            </div>
+                            <div class="diagram-content" id="${contentId}">
+                                <div class="loading">Loading...</div>
+                            </div>
+                            <p style="margin-top: 15px; color: #666; font-size: 0.9rem;">
+                                ${diagramFile.description}
+                            </p>
+                        </div>
+                    `);
+
+                    // Render diagram after a small delay to avoid overwhelming the browser
+                    setTimeout(async () => {
+                        const success = await renderDiagram(mermaidDiagrams[i], contentId);
+                        if (success) renderedCount++;
+                        updateStats();
+                    }, 100 * (diagramCards.length - 1));
+                }
+            }
+
+            container.innerHTML = `<div class="diagram-grid">${diagramCards.join('')}</div>`;
+            updateStats();
+        }
+
+        // Update statistics
+        function updateStats() {
+            document.getElementById('total-diagrams').textContent = totalCount;
+            document.getElementById('rendered-diagrams').textContent = renderedCount;
+        }
+
+        // Event listeners
+        document.getElementById('theme-select').addEventListener('change', (e) => {
+            currentTheme = e.target.value;
+            renderAllDiagrams();
+        });
+
+        document.getElementById('zoom-select').addEventListener('change', (e) => {
+            currentZoom = parseFloat(e.target.value);
+            // Update existing diagrams
+            document.querySelectorAll('.mermaid').forEach(el => {
+                el.style.transform = `scale(${currentZoom})`;
+            });
+        });
+
+        // Initial render
+        document.addEventListener('DOMContentLoaded', () => {
+            renderAllDiagrams();
+        });
+    </script>
+</body>
+</html>
