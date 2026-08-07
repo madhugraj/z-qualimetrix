@@ -20,7 +20,7 @@ import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Role } from "@/lib/qm-data";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/dashboard")({
   head: () => ({
     meta: [
       { title: "QualiMetrix — Quality & Team Performance Hub" },
