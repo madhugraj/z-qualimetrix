@@ -14,7 +14,7 @@ import { DEVELOPERS } from "@/lib/qm-people";
 import { DELIVERABLES, RTM } from "@/lib/qm-data";
 
 const PAGES = [
-  { label: "Dashboard", to: "/" },
+  { label: "Dashboard", to: "/dashboard" },
   { label: "Bug Intelligence", to: "/bugs" },
   { label: "Engineering Health", to: "/engineering-health" },
   { label: "Reports", to: "/reports" },
