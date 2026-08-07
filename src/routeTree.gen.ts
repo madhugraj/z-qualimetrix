@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
@@ -19,6 +20,11 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as BugsIndexRouteImport } from './routes/bugs.index'
 import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
 
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AiUsageRoute = AiUsageRouteImport.update({
   id: '/ai-usage',
   path: '/ai-usage',
@@ -66,6 +72,7 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -77,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/bugs/': typeof BugsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -89,6 +97,7 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -102,6 +111,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -113,6 +123,7 @@ export interface FileRouteTypes {
     | '/bugs/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -124,6 +135,7 @@ export interface FileRouteTypes {
     | '/bugs'
   id:
     | '__root__'
+    | '/'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -136,6 +148,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
   AiUsageRoute: typeof AiUsageRoute
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
@@ -149,6 +162,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ai-usage': {
       id: '/ai-usage'
       path: '/ai-usage'
@@ -216,6 +236,7 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
   AiUsageRoute: AiUsageRoute,
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
@@ -229,13 +250,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
