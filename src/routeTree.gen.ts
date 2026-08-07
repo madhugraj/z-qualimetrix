@@ -9,8 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
@@ -19,14 +19,14 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as BugsIndexRouteImport } from './routes/bugs.index'
 import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AiUsageRoute = AiUsageRouteImport.update({
   id: '/ai-usage',
   path: '/ai-usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
@@ -66,8 +66,8 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -77,8 +77,8 @@ export interface FileRoutesByFullPath {
   '/bugs/': typeof BugsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -89,8 +89,8 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
   '/manual-log': typeof ManualLogRoute
@@ -102,8 +102,8 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -113,8 +113,8 @@ export interface FileRouteTypes {
     | '/bugs/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -124,8 +124,8 @@ export interface FileRouteTypes {
     | '/bugs'
   id:
     | '__root__'
-    | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
     | '/manual-log'
@@ -136,8 +136,8 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AiUsageRoute: typeof AiUsageRoute
+  DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
   ManualLogRoute: typeof ManualLogRoute
@@ -149,18 +149,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/ai-usage': {
       id: '/ai-usage'
       path: '/ai-usage'
       fullPath: '/ai-usage'
       preLoaderRoute: typeof AiUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/engineering-health': {
@@ -216,8 +216,8 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AiUsageRoute: AiUsageRoute,
+  DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
   ManualLogRoute: ManualLogRoute,
