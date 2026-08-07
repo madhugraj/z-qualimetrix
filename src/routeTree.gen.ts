@@ -14,6 +14,7 @@ import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -43,6 +44,11 @@ const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ManualLogRoute = ManualLogRouteImport.update({
@@ -77,6 +83,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -128,6 +138,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -140,6 +151,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -153,6 +165,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
+  LoginRoute: typeof LoginRoute
   ManualLogRoute: typeof ManualLogRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
@@ -195,6 +208,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/manual-log': {
@@ -241,6 +261,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
+  LoginRoute: LoginRoute,
   ManualLogRoute: ManualLogRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,

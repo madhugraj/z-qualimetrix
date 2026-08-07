@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 // limited to managers / leads / HR once auth is wired. AI Usage is visible to
 // everyone but the depth of analytics is gated inside the page.
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
   { to: "/engineering-health", label: "Engineering Health", icon: HeartPulse },
