@@ -150,33 +150,26 @@ function DashboardMockup() {
 
 function Landing() {
   return (
-    <div className="qm-night relative min-h-screen overflow-hidden">
-      <div className="night-mesh" aria-hidden="true" />
-      <div
-        className="night-orb h-[32rem] w-[32rem] bg-[radial-gradient(circle,oklch(0.6_0.14_250_/_35%),transparent_70%)] bottom-[-10rem] left-1/3"
-        aria-hidden="true"
-      />
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-4 z-50 mx-auto w-[min(100%-1.5rem,64rem)]">
+        <nav className="glass-panel grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-full px-4 py-2.5 sm:px-6">
+          <Link to="/" className="flex min-w-0 items-center gap-3">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/40 text-[11px] font-bold text-primary shadow-[0_0_24px_-8px_var(--primary)]">
+              Y
+            </span>
 
-      <div className="relative z-10">
-        <header className="sticky top-4 z-50 mx-auto w-[min(100%-1.5rem,64rem)]">
-          <nav className="glass-panel grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-full px-4 py-2.5 sm:px-6">
-            <Link to="/" className="flex min-w-0 items-center gap-3">
-              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-primary/40 text-[11px] font-bold text-primary shadow-[0_0_24px_-8px_var(--primary)]">
-                Y
-              </span>
-
-              <span className="truncate text-sm font-semibold tracking-tight">
-                Yavar QualiMetrix
-              </span>
-            </Link>
-            <Link
-              to="/login"
-              className="rounded-full border border-border px-4 py-2 text-sm font-medium transition-all hover:border-primary/50 hover:text-primary hover:shadow-[0_0_28px_-8px_var(--primary)]"
-            >
-              Sign in
-            </Link>
-          </nav>
-        </header>
+            <span className="truncate text-sm font-semibold tracking-tight">
+              Yavar QualiMetrix
+            </span>
+          </Link>
+          <Link
+            to="/login"
+            className="rounded-full border border-border px-4 py-2 text-sm font-medium transition-all hover:border-primary/50 hover:text-primary hover:shadow-[0_0_28px_-8px_var(--primary)]"
+          >
+            Sign in
+          </Link>
+        </nav>
+      </header>
 
         <main className="mx-auto max-w-6xl px-5 pb-28">
           <section className="pt-20 pb-10 text-center md:pt-28">
@@ -255,10 +248,9 @@ function Landing() {
           </section>
         </main>
 
-        <footer className="relative z-10 mx-auto max-w-6xl px-5 pb-10 text-xs text-muted-foreground">
+        <footer className="mx-auto max-w-6xl px-5 pb-10 text-xs text-muted-foreground">
           YAVAR™ · QualiMetrix — Quality Intelligence Platform
         </footer>
-      </div>
     </div>
   );
 }
