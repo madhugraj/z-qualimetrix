@@ -200,14 +200,14 @@ function Landing() {
                 to="/login"
                 className="glow-cyan inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
               >
-                Enter the platform
+                Get started
                 <ArrowRight className="h-4 w-4" strokeWidth={2} />
               </Link>
               <Link
-                to="/dashboard"
+                to="#capabilities"
                 className="glass-panel glass-lift inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium"
               >
-                View a live dashboard
+                Explore features
               </Link>
             </div>
           </section>
@@ -227,7 +227,7 @@ function Landing() {
             ))}
           </section>
 
-          <section className="mt-24">
+          <section id="capabilities" className="mt-24">
             <h2 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-4xl">
               Built for the parts of quality nobody instruments
             </h2>
@@ -251,26 +251,6 @@ function Landing() {
                   <p className="mt-2 text-sm text-muted-foreground">{c.body}</p>
                 </article>
               ))}
-            </div>
-          </section>
-
-          <section className="mt-24">
-            <div className="glass-panel rounded-[2rem] px-6 py-12 text-center sm:px-12">
-              <span className="glow-cyan mx-auto inline-flex h-14 w-14 items-center justify-center rounded-2xl">
-                <ShieldCheck className="h-7 w-7 text-primary" strokeWidth={1.4} />
-              </span>
-              <h2 className="mt-6 text-3xl font-semibold tracking-tight">Ready when you are</h2>
-              <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">
-                Sign in with two-factor verification and start from the perspective that
-                matches your role.
-              </p>
-              <Link
-                to="/login"
-                className="glow-cyan mt-8 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-transform hover:-translate-y-0.5"
-              >
-                Sign in
-                <ArrowRight className="h-4 w-4" strokeWidth={2} />
-              </Link>
             </div>
           </section>
         </main>
