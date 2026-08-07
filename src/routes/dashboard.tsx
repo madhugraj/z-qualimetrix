@@ -45,9 +45,17 @@ function Dashboard() {
   const current = ROLES.find((r) => r.id === role)!;
 
   return (
-    <AppShell>
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+    <div className="qm-night relative min-h-screen overflow-hidden">
+      <div className="night-mesh" aria-hidden="true" />
+      <div
+        className="night-orb h-[32rem] w-[32rem] bg-[radial-gradient(circle,oklch(0.6_0.14_250_/_35%),transparent_70%)] bottom-[-10rem] left-1/3"
+        aria-hidden="true"
+      />
+
+      <div className="relative z-10">
+        <AppShell>
+          <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div>
           <h1 className="text-gradient text-2xl font-semibold md:text-3xl">
             Quality &amp; Performance Hub
           </h1>
@@ -218,6 +226,8 @@ function Dashboard() {
           </GlassPanel>
         </div>
       )}
-    </AppShell>
+      </AppShell>
+      </div>
+    </div>
   );
 }
