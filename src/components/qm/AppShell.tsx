@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 // limited to managers / leads / HR once auth is wired. AI Usage is visible to
 // everyone but the depth of analytics is gated inside the page.
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
   { to: "/engineering-health", label: "Engineering Health", icon: HeartPulse },
@@ -37,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen">
       <aside className="glass sticky top-0 z-20 hidden h-screen w-[76px] flex-col items-center gap-1 rounded-none border-y-0 border-l-0 py-5 md:flex">
-        <Link to="/" className="mb-6 flex flex-col items-center gap-1" aria-label="YAVAR home">
+        <Link to="/dashboard" className="mb-6 flex flex-col items-center gap-1" aria-label="YAVAR home">
           <img
             src={yavarLogo.url}
             alt="YAVAR logo"

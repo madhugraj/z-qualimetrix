@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -29,6 +31,11 @@ const AiUsageRoute = AiUsageRouteImport.update({
   path: '/ai-usage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
   id: '/engineering-health',
   path: '/engineering-health',
@@ -37,6 +44,11 @@ const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ManualLogRoute = ManualLogRouteImport.update({
@@ -68,8 +80,10 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -79,8 +93,10 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -91,8 +107,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ai-usage': typeof AiUsageRoute
+  '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
   '/integrations': typeof IntegrationsRoute
+  '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
@@ -104,8 +122,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -115,8 +135,10 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -126,8 +148,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/ai-usage'
+    | '/dashboard'
     | '/engineering-health'
     | '/integrations'
+    | '/login'
     | '/manual-log'
     | '/reports'
     | '/settings'
@@ -138,8 +162,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AiUsageRoute: typeof AiUsageRoute
+  DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
   IntegrationsRoute: typeof IntegrationsRoute
+  LoginRoute: typeof LoginRoute
   ManualLogRoute: typeof ManualLogRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
@@ -163,6 +189,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AiUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/engineering-health': {
       id: '/engineering-health'
       path: '/engineering-health'
@@ -175,6 +208,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/manual-log': {
@@ -218,8 +258,10 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AiUsageRoute: AiUsageRoute,
+  DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
   IntegrationsRoute: IntegrationsRoute,
+  LoginRoute: LoginRoute,
   ManualLogRoute: ManualLogRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
