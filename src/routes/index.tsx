@@ -37,7 +37,7 @@ const CAPABILITIES = [
     body: "Execution coverage, defect leakage, MTTR and release readiness computed per sprint, per product, per team — no spreadsheet archaeology.",
     glow: "text-primary",
     ring: "shadow-[0_0_40px_-12px_var(--primary)]",
-    span: "lg:col-span-3 lg:row-span-2",
+    span: "lg:col-span-3",
   },
   {
     icon: Bug,
@@ -165,10 +165,10 @@ function Landing() {
               <img
                 src={yavarLogo.url}
                 alt="Yavar logo"
-                className="h-6 w-[44px] shrink-0 object-contain brightness-0 invert"
+                className="h-6 w-[44px] shrink-0 object-contain invert mix-blend-screen"
               />
               <span className="truncate text-sm font-semibold tracking-tight">
-                QualiMetrix
+                Yavar QualiMetrix
               </span>
             </Link>
             <Link
