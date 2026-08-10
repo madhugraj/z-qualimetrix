@@ -9,11 +9,11 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pg_trgm, vector, uuid_ossp]
+  extensions = [pg_trgm]
 }
 
 // ============================================================================
-// TENANT & ORGANIZATION MANAGEMENT
+// CORE TENANT & USER MANAGEMENT
 // ============================================================================
 
 model Tenant {
@@ -32,138 +32,39 @@ model Tenant {
 
   products              Product[]
   tenantMemberships     TenantMembership[]
-  integrations          Integration[]
-  webhookEvents         WebhookEvent[]
+  users                 User[]
   workItems             WorkItem[]
   testCases             TestCase[]
-  manualDeliverables    ManualDeliverable[]
+  deliverables          ManualDeliverable[]
   sprints               Sprint[]
-  releases              Release[]
-  qualityMetricsSnapshots QualityMetricsSnapshot[]
-  teamPerformanceMetrics TeamPerformanceMetric[]
-  backgroundJobs        BackgroundJob[]
-  syncStates            SyncState[]
-  auditLogs             AuditLog[]
-  activityTimeline      ActivityTimeline[]
-  notifications         Notification[]
-  notificationPreferences NotificationPreference[]
-  refreshTokens         RefreshToken[]
-  userSettings          UserSettings[]
-  aiModels              AIModel[]
-  aiBudgets             AIBudget[]
-  aiSettings            AISettings?
-  tenantConfiguration   TenantConfiguration?
-  alertRules            AlertRule[]
-  alertIncidents        AlertIncident[]
-  searchAnalytics       SearchAnalytics[]
-  searchSuggestions     SearchSuggestion[]
-  exportJobs            ExportJob[]
-  reportTemplates       ReportTemplate[]
-  scheduledReports      ScheduledReport[]
-  reportLibrary         ReportLibrary[]
-  ciPipelineIntegrations CIPipelineIntegration[]
-  knowledgeSiloAnalysis  KnowledgeSiloAnalysis[]
-  skillGaps             SkillGap[]
-  teamHealthMetrics     TeamHealthMetrics[]
-  workloadAnalysis       WorkloadAnalysis[]
-  aiUsageSnapshots      AIUsageSnapshot[]
-  alertMaintenanceWindows AlertMaintenanceWindow[]
 
   @@index([slug])
   @@index([domain])
   @@map("tenants")
 }
 
-model Product {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @map("tenant_id") @db.Uuid
-  name               String   @db.VarChar(255)
-  key                String   @db.VarChar(50)
-  description        String?  @db.Text
-  iconUrl            String?  @map("icon_url") @db.VarChar(500)
-  color              String?  @db.VarChar(7)
-  jiraProjectKey     String?  @map("jira_project_key") @db.VarChar(20)
-  azureDevopsAreaPath String?  @map("azure_devops_area_path") @db.VarChar(255)
-  githubRepoFullName String?  @map("github_repo_full_name") @db.VarChar(255)
-  settings           Json?    @default("{}")
-  isActive           Boolean  @default(true) @map("is_active")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workItems           WorkItem[]
-  testCases           TestCase[]
-  manualDeliverables  ManualDeliverable[]
-  sprints             Sprint[]
-  releases            Release[]
-  qualityMetricsSnapshots QualityMetricsSnapshot[]
-  teamPerformanceMetrics TeamPerformanceMetric[]
-  aiBudgets           AIBudget[]
-  aiUsageSnapshots    AIUsageSnapshot[]
-  alertIncidents      AlertIncident[]
-  ciPipelineIntegrations CIPipelineIntegration[]
-  knowledgeSiloAnalysis KnowledgeSiloAnalysis[]
-  teamHealthMetrics    TeamHealthMetrics[]
-  userSettingsDefaults UserSettings[]
-  ciBuildRuns         CIBuildRun[]
-
-  @@unique([tenantId, key])
-  @@index([tenantId])
-  @@index([jiraProjectKey])
-  @@index([azureDevopsAreaPath])
-  @@map("products")
-}
-
-// ============================================================================
-// AUTHENTICATION & USER MANAGEMENT
-// ============================================================================
-
 model User {
-  id                String   @id @default(uuid()) @db.Uuid
-  email             String   @unique @db.VarChar(255)
-  passwordHash      String?  @map("password_hash") @db.VarChar(255)
-  authProvider      String   @default("local") @map("auth_provider") @db.VarChar(20)
-  fullName          String?  @map("full_name") @db.VarChar(255)
-  avatarUrl         String?  @map("avatar_url") @db.VarChar(500)
-  timezone          String   @default("UTC") @db.VarChar(50)
-  language          String   @default("en") @db.VarChar(10)
-  googleId          String?  @map("google_id") @db.VarChar(255)
-  githubId          String?  @map("github_id") @db.VarChar(255)
-  samlIdp           String?  @map("saml_idp") @db.VarChar(255)
-  emailVerified     Boolean  @default(false) @map("email_verified")
-  isSystemAdmin     Boolean  @default(false) @map("is_system_admin")
-  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String?  @map("tenant_id") @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  name         String?  @db.VarChar(255)
+  avatarUrl    String?  @map("avatar_url") @db.VarChar(500)
+  role         String   @default("viewer") @db.VarChar(50)
+  isActive     Boolean  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenantMemberships  TenantMembership[]
-  workItems          WorkItem[]          @relation("AssignedWorkItems")
-  reportedWorkItems  WorkItem[]          @relation("ReportedWorkItems")
-  workItemComments   WorkItemComment[]
-  testCases          TestCase[]
-  manualDeliverables ManualDeliverable[]
-  refreshTokens      RefreshToken[]
-  auditLogs          AuditLog[]
-  activityTimeline   ActivityTimeline[]
-  notifications      Notification[]
-  notificationPreferences NotificationPreference[]
-  userSettings       UserSettings?
-  aiUsageRecords     AIUsageRecord[]
-  teamPerformanceMetrics TeamPerformanceMetric[]
-  aiSettingsUpdater  AISettings?
-  tenantConfigurationUpdater TenantConfiguration?
-  featureFlags       FeatureFlag[]
-  featureFlagUsages  FeatureFlagUsage[]
-  alertCreator        AlertRule[]         @relation("AlertCreator")
-  alertUpdater        AlertRule[]         @relation("AlertUpdater")
-  incidentAcknowledger AlertIncident[]   @relation("IncidentAcknowledger")
-  incidentResolver    AlertIncident[]   @relation("IncidentResolver")
-  incidentFalsePositiveMarker AlertIncident[] @relation("IncidentFalsePositiveMarker")
-  skillGaps           SkillGap[]
+  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenantMemberships TenantMembership[]
+  createdWorkItems  WorkItem[]        @relation("WorkItemCreator")
+  updatedWorkItems  WorkItem[]        @relation("WorkItemUpdater")
+  createdTestCases  TestCase[]        @relation("TestCaseCreator")
+  updatedTestCases  TestCase[]        @relation("TestCaseUpdater")
+  createdDeliverables ManualDeliverable[] @relation("DeliverableCreator")
+  refreshTokens     RefreshToken[]
 
   @@index([email])
-  @@index([googleId])
-  @@index([githubId])
   @@map("users")
 }
 
@@ -182,1506 +83,195 @@ model TenantMembership {
 
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  defaultProduct Product? @relation(fields: [defaultProductId], references: [id])
 
   @@unique([tenantId, userId])
   @@index([tenantId])
   @@index([userId])
-  @@index([role])
   @@map("tenant_memberships")
 }
 
 model RefreshToken {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
-  tenantId     String?   @map("tenant_id") @db.Uuid
-  tokenHash    String    @unique @map("token_hash") @db.VarChar(255)
-  expiresAt    DateTime  @map("expires_at") @db.Timestamptz
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
-  deviceInfo   Json?     @map("device_info")
+  id        String   @id @default(uuid()) @db.Uuid
+  token     String   @unique @db.VarChar(500)
+  userId    String   @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([tokenHash])
+  @@index([token])
   @@map("refresh_tokens")
 }
 
 // ============================================================================
-// EXTERNAL INTEGRATION CONFIGURATIONS
+// PRODUCT MANAGEMENT
 // ============================================================================
 
-model Integration {
-  id                      String    @id @default(uuid()) @db.Uuid
-  tenantId                String    @map("tenant_id") @db.Uuid
-  integrationType         String    @map("integration_type") @db.VarChar(50)
-  clientId                String?   @map("client_id") @db.VarChar(255)
-  clientSecretEncrypted   String?   @map("client_secret_encrypted") @db.Text
-  accessTokenEncrypted    String?   @map("access_token_encrypted") @db.Text
-  refreshTokenEncrypted  String?   @map("refresh_token_encrypted") @db.Text
-  tokenExpiresAt         DateTime? @map("token_expires_at") @db.Timestamptz
-  apiBaseUrl              String?   @map("api_base_url") @db.VarChar(500)
-  webhookSecretEncrypted  String?   @map("webhook_secret_encrypted") @db.Text
-  syncEnabled             Boolean   @default(true) @map("sync_enabled")
-  syncFrequency           String    @default("15min") @map("sync_frequency") @db.VarChar(20)
-  lastSyncAt              DateTime? @map("last_sync_at") @db.Timestamptz
-  syncStatus              String    @default("pending") @map("sync_status") @db.VarChar(50)
-  lastError               String?   @map("last_error") @db.Text
-  errorCount              Int       @default(0) @map("error_count")
-  lastSuccessfulSync      DateTime? @map("last_successful_sync") @db.Timestamptz
-  configuration           Json?     @default("{}")
-  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+model Product {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  name               String   @db.VarChar(255)
+  key                String   @db.VarChar(50)
+  description        String?  @db.Text
+  iconUrl            String?  @map("icon_url") @db.VarChar(500)
+  color              String?  @db.VarChar(7)
+  jiraProjectKey     String?  @map("jira_project_key") @db.VarChar(20)
+  azureDevopsAreaPath String?  @map("azure_devops_area_path") @db.VarChar(255)
+  settings           Json?    @default("{}")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  webhookEvents WebhookEvent[]
-  syncStates    SyncState[]
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workItems    WorkItem[]
+  testCases    TestCase[]
+  deliverables ManualDeliverable[]
+  sprints      Sprint[]
 
-  @@unique([tenantId, integrationType])
+  @@unique([tenantId, key])
   @@index([tenantId])
-  @@index([integrationType])
-  @@map("integrations")
-}
-
-model WebhookEvent {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  integrationType   String   @map("integration_type") @db.VarChar(50)
-  eventType         String   @map("event_type") @db.VarChar(100)
-  rawPayload        Json     @map("raw_payload")
-  processed         Boolean  @default(false)
-  processingAttempts Int      @default(0) @map("processing_attempts")
-  externalId        String?  @map("external_id") @db.VarChar(255)
-  receivedAt        DateTime @default(now()) @map("received_at") @db.Timestamptz
-  processedAt       DateTime? @map("processed_at") @db.Timestamptz
-  errorMessage      String?  @map("error_message") @db.Text
-
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  integration Integration? @relation(fields: [tenantId, integrationType], references: [tenantId, integrationType])
-
-  @@index([tenantId])
-  @@index([processed])
-  @@index([externalId])
-  @@map("webhook_events")
+  @@index([jiraProjectKey])
+  @@map("products")
 }
 
 // ============================================================================
-// WORK ITEMS & BUG INTELLIGENCE
+// WORK ITEMS & TEST CASES
 // ============================================================================
 
 model WorkItem {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  externalSystem        String?  @map("external_system") @db.VarChar(20)
-  externalId            String?  @map("external_id") @db.VarChar(100)
-  externalUrl           String?  @map("external_url") @db.VarChar(500)
-  itemType              String   @map("item_type") @db.VarChar(20)
-  status                String   @db.VarChar(50)
-  priority              String?  @db.VarChar(10)
-  title                 String   @db.VarChar(500)
-  description           String?  @db.Text
-  acceptanceCriteria    String?  @map("acceptance_criteria") @db.Text
-  domain                String?  @db.VarChar(50)
-  domainConfidence      Decimal? @map("domain_confidence") @db.Decimal(3,2)
-  tags                  String[] @default([])
-  component             String?  @db.VarChar(100)
-  parentId              String?  @map("parent_id") @db.Uuid
-  sprintId              String?  @map("sprint_id") @db.Uuid
-  assigneeId            String?  @map("assignee_id") @db.Uuid
-  reporterId            String?  @map("reporter_id") @db.Uuid
-  resolution            String?  @db.VarChar(100)
-  resolvedAt            DateTime? @map("resolved_at") @db.Timestamptz
-  resolutionDurationHours Decimal? @map("resolution_duration_hours") @db.Decimal(10,2)
-  isEscapedDefect        Boolean  @default(false) @map("is_escaped_defect")
-  isReopened            Boolean  @default(false) @map("is_reopened")
-  qaRejectionCount       Int      @default(0) @map("qa_rejection_count")
-  firstTimeFix           Boolean  @default(true) @map("first_time_fix")
-  externalCreatedAt      DateTime? @map("external_created_at") @db.Timestamptz
-  externalUpdatedAt      DateTime? @map("external_updated_at") @db.Timestamptz
-  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  productId         String   @map("product_id") @db.Uuid
+  externalId        String?  @map("external_id") @db.VarChar(100)
+  type              String   @db.VarChar(50)
+  status            String   @db.VarChar(50)
+  priority          String?  @db.VarChar(20)
+  title             String   @db.VarChar(500)
+  description       String?  @db.Text
+  assigneeId        String?  @map("assignee_id") @db.Uuid
+  sprintId          String?  @map("sprint_id") @db.Uuid
+  storyPoints       Int?     @map("story_points")
+  createdBy         String   @map("created_by") @db.Uuid
+  updatedBy         String?  @map("updated_by") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz
+  closedAt          DateTime? @map("closed_at") @db.Timestamptz
 
-  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product             Product?             @relation(fields: [productId], references: [id], onDelete: SetNull)
-  parent               WorkItem?            @relation("WorkItemHierarchy", fields: [parentId], references: [id])
-  children             WorkItem[]           @relation("WorkItemHierarchy")
-  sprint               Sprint?              @relation(fields: [sprintId], references: [id])
-  assignee             User?                @relation("AssignedWorkItems", fields: [assigneeId], references: [id])
-  reporter             User?                @relation("ReportedWorkItems", fields: [reporterId], references: [id])
-  similarSourceBugs    BugSimilarity[]     @relation("SourceBugs")
-  similarTargetBugs    BugSimilarity[]     @relation("TargetBugs")
-  comments             WorkItemComment[]
-  attachments          WorkItemAttachment[]
-  coveredByTestCases   TestCase[]          @relation("TestCaseCoveredStory")
-  manualDeliverables   ManualDeliverable[]  @relation("WorkItemDeliverables")
-  aiUsageRecords      AIUsageRecord[]
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sprint   Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  creator  User     @relation("WorkItemCreator", fields: [createdBy], references: [id])
+  updater  User?    @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
 
-  @@unique([tenantId, externalSystem, externalId])
   @@index([tenantId])
   @@index([productId])
-  @@index([externalSystem, externalId])
-  @@index([itemType, status])
+  @@index([externalId])
+  @@index([status])
   @@index([assigneeId])
-  @@index([sprintId])
   @@map("work_items")
 }
 
-model BugSimilarity {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  sourceBugId      String   @map("source_bug_id") @db.Uuid
-  similarBugId     String   @map("similar_bug_id") @db.Uuid
-  similarityScore  Decimal  @map("similarity_score") @db.Decimal(3,2)
-  similarityMethod String   @default("tfidf") @map("similarity_method") @db.VarChar(50)
-  userConfirmed    Boolean? @map("user_confirmed")
-  userRejected     Boolean? @map("user_rejected")
-  reviewedBy       String?  @map("reviewed_by") @db.Uuid
-  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  sourceBug WorkItem @relation("SourceBugs", fields: [sourceBugId], references: [id], onDelete: Cascade)
-  similarBug WorkItem @relation("TargetBugs", fields: [similarBugId], references: [id], onDelete: Cascade)
-
-  @@unique([sourceBugId, similarBugId])
-  @@index([sourceBugId])
-  @@index([similarityScore])
-  @@map("bug_similarities")
-}
-
-model WorkItemComment {
-  id              String   @id @default(uuid()) @db.Uuid
-  workItemId      String   @map("work_item_id") @db.Uuid
-  userId          String   @map("user_id") @db.Uuid
-  externalCommentId String? @map("external_comment_id") @db.VarChar(100)
-  commentBody     String   @map("comment_body") @db.Text
-  isInternal      Boolean  @default(false) @map("is_internal")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  externalCreatedAt DateTime? @map("external_created_at") @db.Timestamptz
-
-  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id])
-
-  @@index([workItemId])
-  @@index([externalCommentId])
-  @@map("work_item_comments")
-}
-
-model WorkItemAttachment {
-  id          String   @id @default(uuid()) @db.Uuid
-  workItemId  String   @map("work_item_id") @db.Uuid
-  fileName    String   @map("file_name") @db.VarChar(255)
-  fileUrl     String   @map("file_url") @db.VarChar(500)
-  fileSizeBytes BigInt  @map("file_size_bytes")
-  mimeType    String?  @map("mime_type") @db.VarChar(100)
-  externalAttachmentId String? @map("external_attachment_id") @db.VarChar(100)
-  uploadedBy  String?  @map("uploaded_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
-
-  @@index([workItemId])
-  @@map("work_item_attachments")
-}
-
-// ============================================================================
-// TEST MANAGEMENT & EXECUTION
-// ============================================================================
-
 model TestCase {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String?  @map("product_id") @db.Uuid
-  externalSystem    String?  @map("external_system") @db.VarChar(20)
-  externalId         String?  @map("external_id") @db.VarChar(100)
-  externalUrl        String?  @map("external_url") @db.VarChar(500)
-  name              String   @db.VarChar(500)
-  description       String?  @db.Text
-  testType          String   @default("functional") @map("test_type") @db.VarChar(50)
-  automationStatus  String   @default("manual") @map("automation_status") @db.VarChar(20)
-  coveredStoryIds   String[] @default([]) @map("covered_story_ids") @db.Uuid
-  requirementIds    String[] @default([]) @map("requirement_ids") @db.VarChar(100)
-  testSteps         Json?    @map("test_steps")
-  priority          String?  @db.VarChar(10)
-  tags              String[] @default([])
-  component         String?  @db.VarChar(100)
-  createdBy         String?  @map("created_by") @db.Uuid
-  updatedBy         String?  @map("updated_by") @db.Uuid
-  externalCreatedAt DateTime? @map("external_created_at") @db.Timestamptz
-  externalUpdatedAt DateTime? @map("external_updated_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  externalId  String?  @map("external_id") @db.VarChar(100)
+  name        String   @db.VarChar(500)
+  description String?  @db.Text
+  type        String   @default("functional") @db.VarChar(50)
+  status      String   @default("draft") @db.VarChar(50)
+  priority    String?  @db.VarChar(20)
+  automationStatus String? @map("automation_status") @db.VarChar(50)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
-  creator      User?        @relation(fields: [createdBy], references: [id])
-  updater      User?        @relation(fields: [updatedBy], references: [id])
-  executions   TestExecution[]
-  coveredWorkItems WorkItem[] @relation("TestCaseCoveredStory")
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator    User       @relation("TestCaseCreator", fields: [createdBy], references: [id])
+  updater    User?      @relation("TestCaseUpdater", fields: [updatedBy], references: [id])
+  executions TestExecution[]
 
-  @@unique([tenantId, externalSystem, externalId])
   @@index([tenantId])
   @@index([productId])
-  @@index([coveredStoryIds])
+  @@index([externalId])
+  @@index([status])
   @@map("test_cases")
 }
 
 model TestExecution {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  testCaseId        String   @map("test_case_id") @db.Uuid
-  executionRun      String?  @map("execution_run") @db.VarChar(100)
-  sprintId          String?  @map("sprint_id") @db.Uuid
-  environment       String   @default("QA") @db.VarChar(50)
-  executedBy        String?  @map("executed_by") @db.Uuid
-  status            String   @db.VarChar(20)
-  durationSeconds   Int?     @map("duration_seconds")
-  executionNotes    String?  @map("execution_notes") @db.Text
-  failureReason     String?  @map("failure_reason") @db.VarChar(255)
-  isFlake           Boolean  @default(false) @map("is_flake")
-  externalRunId     String?  @map("external_run_id") @db.VarChar(100)
-  externalTestId     String?  @map("external_test_id") @db.VarChar(100)
-  executedAt        DateTime @default(now()) @map("executed_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id          String   @id @default(uuid()) @db.Uuid
+  testCaseId  String   @map("test_case_id") @db.Uuid
+  status      String   @db.VarChar(20)
+  executedBy  String   @map("executed_by") @db.Uuid
+  executedAt  DateTime @default(now()) @map("executed_at") @db.Timestamptz
+  notes       String?  @db.Text
+  duration    Int?     // in seconds
+  buildUrl    String?  @map("build_url") @db.VarChar(500)
 
   testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  evidences TestExecutionEvidence[]
 
-  @@index([tenantId])
   @@index([testCaseId])
-  @@index([executionRun])
-  @@index([sprintId])
   @@index([status])
   @@map("test_executions")
 }
 
-model TestExecutionEvidence {
-  id             String   @id @default(uuid()) @db.Uuid
-  testExecutionId String  @map("test_execution_id") @db.Uuid
-  evidenceType    String  @map("evidence_type") @db.VarChar(20)
-  fileUrl        String   @map("file_url") @db.VarChar(500)
-  description    String?  @db.Text
-  capturedAt     DateTime @default(now()) @map("captured_at") @db.Timestamptz
-
-  testExecution TestExecution @relation(fields: [testExecutionId], references: [id], onDelete: Cascade)
-
-  @@index([testExecutionId])
-  @@map("test_execution_evidence")
-}
-
 // ============================================================================
-// MANUAL DELIVERABLES & ACTIVITIES
+// MANUAL DELIVERABLES
 // ============================================================================
 
 model ManualDeliverable {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String?  @map("product_id") @db.Uuid
-  deliverableType   String   @map("deliverable_type") @db.VarChar(20)
-  title             String   @db.VarChar(500)
-  description       String?  @db.Text
-  metadata          Json?    @default("{}")
-  externalUrls      String[] @default([]) @map("external_urls")
-  relatedWorkItemIds String[] @default([]) @map("related_work_item_ids") @db.Uuid
-  createdBy         String   @map("created_by") @db.Uuid
-  deliveredAt       DateTime @map("delivered_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  type        String   @db.VarChar(50) // demo, documentation, rca, training
+  title       String   @db.VarChar(500)
+  description String?  @db.Text
+  metadata    Json?    @default("{}")
+  rating      Float?   // for demos, 1-5
+  links       String[] @default([])
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  creator    User       @relation(fields: [createdBy], references: [id])
-  workItems  WorkItem[]  @relation("WorkItemDeliverables")
-  collaborators DeliverableCollaborator[]
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator  User     @relation("DeliverableCreator", fields: [createdBy], references: [id])
 
   @@index([tenantId])
-  @@index([deliverableType])
   @@index([productId])
+  @@index([type])
   @@index([createdBy])
   @@map("manual_deliverables")
 }
 
-model DeliverableCollaborator {
-  id             String   @id @default(uuid()) @db.Uuid
-  deliverableId  String   @map("deliverable_id") @db.Uuid
-  userId         String   @map("user_id") @db.Uuid
-  role           String   @default("contributor") @db.VarChar(50)
-
-  deliverable ManualDeliverable @relation(fields: [deliverableId], references: [id], onDelete: Cascade)
-
-  @@unique([deliverableId, userId])
-  @@index([deliverableId])
-  @@map("deliverable_collaborators")
-}
-
 // ============================================================================
-// SPRINTS & RELEASES
+// SPRINT MANAGEMENT
 // ============================================================================
 
 model Sprint {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String?  @map("product_id") @db.Uuid
-  name              String   @db.VarChar(100)
-  sequence          Int
-  startDate         DateTime @map("start_date") @db.Date
-  endDate           DateTime @map("end_date") @db.Date
-  state             String   @default("active") @db.VarChar(20)
-  externalSystem    String?  @map("external_system") @db.VarChar(20)
-  externalId        String?  @map("external_id") @db.VarChar(100)
-  sprintGoal        String?  @map("sprint_goal") @db.Text
-  retrospectiveNotes String? @map("retrospective_notes") @db.Text
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  externalId  String?  @map("external_id") @db.VarChar(100)
+  status      String   @default("planning") @db.VarChar(50)
+  startDate   DateTime @map("start_date") @db.Timestamptz
+  endDate     DateTime @map("end_date") @db.Timestamptz
+  goal        String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant              Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product             Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  workItems           WorkItem[]
-  testExecutions      TestExecution[]
-  qualityMetricsSnapshots QualityMetricsSnapshot[]
-  teamPerformanceMetrics TeamPerformanceMetric[]
-  aiBudgets           AIBudget[]
-  aiUsageSnapshots    AIUsageSnapshot[]
-  alertIncidents      AlertIncident[]
-  ciBuildRuns         CIBuildRun[]
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItems  WorkItem[]
 
-  @@unique([tenantId, productId, sequence])
   @@index([tenantId])
   @@index([productId])
-  @@index([startDate, endDate])
+  @@index([status])
   @@map("sprints")
-}
-
-model Release {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  version               String   @db.VarChar(50)
-  name                  String?  @db.VarChar(255)
-  targetDate            DateTime? @map("target_date") @db.Date
-  actualDate            DateTime? @map("actual_date") @db.Date
-  state                 String   @default("planned") @db.VarChar(20)
-  storiesCompleted      Int      @default(0) @map("stories_completed")
-  bugsResolved         Int      @default(0) @map("bugs_resolved")
-  testExecutionRate    Decimal? @map("test_execution_rate") @db.Decimal(5,2)
-  releaseReadinessScore Decimal? @map("release_readiness_score") @db.Decimal(5,2)
-  releaseNotes          String?  @map("release_notes") @db.Text
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant                  Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product                 Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  qualityMetricsSnapshots QualityMetricsSnapshot[]
-
-  @@index([tenantId])
-  @@index([productId])
-  @@map("releases")
-}
-
-// ============================================================================
-// QUALITY METRICS & ANALYTICS
-// ============================================================================
-
-model QualityMetricsSnapshot {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  snapshotType          String   @map("snapshot_type") @db.VarChar(50)
-  snapshotDate          DateTime @map("snapshot_date") @db.Date
-  sprintId              String?  @map("sprint_id") @db.Uuid
-  releaseId             String?  @map("release_id") @db.Uuid
-
-  // Test Execution Metrics
-  testCasesExecuted     Int      @default(0) @map("test_cases_executed")
-  testCasesPassed       Int      @default(0) @map("test_cases_passed")
-  testCasesFailed       Int      @default(0) @map("test_cases_failed")
-  testCasesBlocked      Int      @default(0) @map("test_cases_blocked")
-  testAutomationRate    Decimal? @map("test_automation_rate") @db.Decimal(5,2)
-
-  // Bug Metrics
-  bugsCreated           Int      @default(0) @map("bugs_created")
-  bugsResolved          Int      @default(0) @map("bugs_resolved")
-  bugsEscaped           Int      @default(0) @map("bugs_escaped")
-  bugsReopened          Int      @default(0) @map("bugs_reopened")
-  defectLeakageRate     Decimal? @map("defect_leakage_rate") @db.Decimal(5,2)
-
-  // Time Metrics
-  mttr                  Decimal? @db.Decimal(10,2)
-  mttf                  Decimal? @db.Decimal(10,2)
-
-  // Quality Indicators
-  firstTimeFixRate      Decimal? @map("first_time_fix_rate") @db.Decimal(5,2)
-  qaRejectionRate       Decimal? @map("qa_rejection_rate") @db.Decimal(5,2)
-  defectDensity         Decimal? @map("defect_density") @db.Decimal(10,2)
-
-  // Coverage Metrics
-  rtmCoverageRate       Decimal? @map("rtm_coverage_rate") @db.Decimal(5,2)
-  automationRoi         Decimal? @map("automation_roi") @db.Decimal(10,2)
-
-  // Release Readiness
-  releaseReadinessScore Decimal? @map("release_readiness_score") @db.Decimal(5,2)
-  openP0P1Count         Int      @default(0) @map("open_p0_p1_count")
-  regressionPassRate    Decimal? @map("regression_pass_rate") @db.Decimal(5,2)
-
-  // Cost of Quality
-  costOfQuality         Decimal? @map("cost_of_quality") @db.Decimal(15,2)
-
-  metadata             Json?    @default("{}")
-  calculatedAt         DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sprint     Sprint?    @relation(fields: [sprintId], references: [id])
-  release    Release?   @relation(fields: [releaseId], references: [id])
-
-  @@unique([tenantId, productId, snapshotType, snapshotDate])
-  @@index([tenantId])
-  @@index([productId])
-  @@index([snapshotDate])
-  @@index([sprintId])
-  @@map("quality_metrics_snapshots")
-}
-
-model TeamPerformanceMetric {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  userId                String?  @map("user_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  sprintId              String?  @map("sprint_id") @db.Uuid
-  periodType            String   @map("period_type") @db.VarChar(20)
-  periodStart           DateTime @map("period_start") @db.Date
-  periodEnd             DateTime @map("period_end") @db.Date
-
-  // Individual Performance
-  bugsAssigned          Int      @default(0) @map("bugs_assigned")
-  bugsResolved          Int      @default(0) @map("bugs_resolved")
-  avgMttrHours          Decimal? @map("avg_mttr_hours") @db.Decimal(10,2)
-  firstTimeFixRate      Decimal? @map("first_time_fix_rate") @db.Decimal(5,2)
-  qaRejections          Int      @default(0) @map("qa_rejections")
-
-  // Test Performance
-  testsExecuted         Int      @default(0) @map("tests_executed")
-  testPassRate          Decimal? @map("test_pass_rate") @db.Decimal(5,2)
-  demosDelivered        Int      @default(0) @map("demos_delivered")
-  docsCreated           Int      @default(0) @map("docs_created")
-
-  // Deliverable Performance
-  manualHoursLogged     Decimal? @map("manual_hours_logged") @db.Decimal(10,2)
-  automationHoursSaved  Decimal? @map("automation_hours_saved") @db.Decimal(10,2)
-
-  calculatedAt          DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sprint     Sprint?    @relation(fields: [sprintId], references: [id])
-  user       User?      @relation(fields: [userId], references: [id])
-
-  @@unique([tenantId, userId, productId, periodType, periodStart])
-  @@index([tenantId])
-  @@index([userId])
-  @@index([periodStart, periodEnd])
-  @@map("team_performance_metrics")
-}
-
-// ============================================================================
-// BACKGROUND JOBS & SYNC TRACKING
-// ============================================================================
-
-model BackgroundJob {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String?  @map("tenant_id") @db.Uuid
-  jobType           String   @map("job_type") @db.VarChar(50)
-  jobName           String   @map("job_name") @db.VarChar(255)
-  payload           Json?    @default("{}")
-  priority          Int      @default(5)
-  status            String   @default("pending") @db.VarChar(20)
-  progress          Int      @default(0)
-  result            Json?
-  errorMessage      String?  @map("error_message") @db.Text
-  retryCount        Int      @default(0) @map("retry_count")
-  maxRetries        Int      @default(3) @map("max_retries")
-  scheduledAt       DateTime @map("scheduled_at") @db.Timestamptz
-  startedAt         DateTime? @map("started_at") @db.Timestamptz
-  completedAt       DateTime? @map("completed_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId])
-  @@index([status])
-  @@index([scheduledAt])
-  @@index([jobType])
-  @@map("background_jobs")
-}
-
-model SyncState {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  integrationType       String   @map("integration_type") @db.VarChar(50)
-  resourceType          String   @map("resource_type") @db.VarChar(50)
-  lastSyncCursor        String?  @map("last_sync_cursor") @db.Text
-  totalRecords          Int      @default(0) @map("total_records")
-  lastSyncCount         Int      @default(0) @map("last_sync_count")
-  lastSyncDurationMs    Int?     @map("last_sync_duration_ms")
-  lastSuccessfulSync    DateTime? @map("last_successful_sync") @db.Timestamptz
-  lastFailedSync        DateTime? @map("last_failed_sync") @db.Timestamptz
-  consecutiveFailures    Int      @default(0) @map("consecutive_failures")
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  integration Integration? @relation(fields: [tenantId, integrationType], references: [tenantId, integrationType])
-
-  @@unique([tenantId, integrationType, resourceType])
-  @@index([tenantId])
-  @@index([integrationType])
-  @@map("sync_states")
-}
-
-// ============================================================================
-// AUDIT LOGGING & ACTIVITY TRACKING
-// ============================================================================
-
-model AuditLog {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String?  @map("tenant_id") @db.Uuid
-  userId        String?  @map("user_id") @db.Uuid
-  action        String   @db.VarChar(100)
-  resourceType  String?  @map("resource_type") @db.VarChar(50)
-  resourceId    String?  @map("resource_id") @db.Uuid
-  ipAddress     String?  @map("ip_address") @db.Inet
-  userAgent     String?  @map("user_agent") @db.Text
-  requestId     String?  @map("request_id") @db.Uuid
-  oldValues     Json?     @map("old_values")
-  newValues     Json?     @map("new_values")
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tenant   Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User?    @relation(fields: [userId], references: [id])
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([resourceType, resourceId])
-  @@index([createdAt])
-  @@map("audit_logs")
-}
-
-model ActivityTimeline {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  userId          String   @map("user_id") @db.Uuid
-  activityType    String   @map("activity_type") @db.VarChar(50)
-  title           String   @db.VarChar(255)
-  description     String?  @db.Text
-  entityType      String?  @map("entity_type") @db.VarChar(50)
-  entityId        String?  @map("entity_id") @db.Uuid
-  productId       String?  @map("product_id") @db.Uuid
-  visibility      String   @default("tenant") @db.VarChar(20)
-  metadata        Json?    @default("{}")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id])
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([createdAt(sort: Desc)])
-  @@index([entityType, entityId])
-  @@map("activity_timeline")
-}
-
-// ============================================================================
-// NOTIFICATION MANAGEMENT
-// ============================================================================
-
-model Notification {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  userId            String   @map("user_id") @db.Uuid
-  notificationType  String   @map("notification_type") @db.VarChar(50)
-  title             String   @db.VarChar(255)
-  body              String?  @db.Text
-  actionUrl         String?  @map("action_url") @db.VarChar(500)
-  actionLabel       String?  @map("action_label") @db.VarChar(50)
-  priority          String   @default("normal") @db.VarChar(20)
-  deliveryMethods   String[] @default(["in_app"]) @map("delivery_methods") @db.VarChar(20)
-  readAt            DateTime? @map("read_at") @db.Timestamptz
-  deliveredEmail    Boolean  @default(false) @map("delivered_email")
-  deliveredSlack    Boolean  @default(false) @map("delivered_slack")
-  expiresAt         DateTime? @map("expires_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([readAt])
-  @@index([createdAt(sort: Desc)])
-  @@map("notifications")
-}
-
-model NotificationPreference {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String   @map("user_id") @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  notificationType String   @map("notification_type") @db.VarChar(50)
-  enabled          Boolean  @default(true)
-  deliveryMethods  String[] @default(["in_app"]) @map("delivery_methods") @db.VarChar(20)
-  thresholdConfig  Json?    @default("{}") @map("threshold_config")
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, tenantId, notificationType])
-  @@index([userId])
-  @@index([tenantId])
-  @@map("notification_preferences")
-}
-
-// ============================================================================
-// SETTINGS & CONFIGURATION MANAGEMENT
-// ============================================================================
-
-model UserSettings {
-  id                       String   @id @default(uuid()) @db.Uuid
-  userId                   String   @unique @map("user_id") @db.Uuid
-  theme                    String   @default("system") @db.VarChar(20)
-  timezone                 String   @default("UTC") @db.VarChar(50)
-  dateFormat               String   @default("MM/DD/YYYY") @db.VarChar(20)
-  timeFormat               String   @default("12h") @db.VarChar(10)
-  language                 String   @default("en") @db.VarChar(10)
-  defaultDashboardRole     String?  @map("default_dashboard_role") @db.VarChar(50)
-  dashboardLayout          Json?    @default("{}")
-  notificationChannels     Json?    @default("{\"in_app\":true,\"email\":true,\"slack\":false}")
-  emailDigestFrequency     String   @default("daily") @map("email_digest_frequency") @db.VarChar(20)
-  quietHoursStart          DateTime? @map("quiet_hours_start") @db.Time
-  quietHoursEnd            DateTime? @map("quiet_hours_end") @db.Time
-  defaultDateRange         String   @default("last_30_days") @map("default_date_range") @db.VarChar(20)
-  defaultProductId         String?  @map("default_product_id") @db.Uuid
-  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  defaultProduct Product?          @relation(fields: [defaultProductId], references: [id])
-
-  @@index([userId])
-  @@map("user_settings")
-}
-
-model TenantConfiguration {
-  id                            String   @id @default(uuid()) @db.Uuid
-  tenantId                      String   @unique @map("tenant_id") @db.Uuid
-  workingDays                   String[] @default(["Mon","Tue","Wed","Thu","Fri"]) @map("working_days")
-  workingHoursStart             DateTime @default("09:00:00") @map("working_hours_start") @db.Time
-  workingHoursEnd               DateTime @default("17:00:00") @map("working_hours_end") @db.Time
-  timezone                      String   @default("UTC") @db.VarChar(50)
-  defaultSprintLength           Int      @default(14) @map("default_sprint_length")
-  sprintStartDay                String   @default("Monday") @map("sprint_start_day") @db.VarChar(10)
-  sprintReviewDaysBeforeEnd     Int      @default(2) @map("sprint_review_days_before_end")
-  mttrThresholdHours            Decimal  @default(24.0) @map("mttr_threshold_hours") @db.Decimal(10,2)
-  defectLeakageThresholdPercent Decimal  @default(5.0) @map("defect_leakage_threshold_percent") @db.Decimal(5,2)
-  testExecutionThresholdPercent Decimal  @default(80.0) @map("test_execution_threshold_percent") @db.Decimal(5,2)
-  releaseReadinessRequirements  Json?    @default("{\"min_test_execution_rate\":95,\"max_open_p0_p1\":0,\"min_regression_pass_rate\":90,\"max_defect_leakage\":2}")
-  autoSyncEnabled              Boolean  @default(true) @map("auto_sync_enabled")
-  syncFrequencyMinutes          Int      @default(15) @map("sync_frequency_minutes")
-  webhookRetentionDays         Int      @default(30) @map("webhook_retention_days")
-  auditLogRetentionDays        Int      @default(90) @map("audit_log_retention_days")
-  metricsSnapshotRetentionDays Int      @default(365) @map("metrics_snapshot_retention_days")
-  updatedAt                    DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  updatedBy                    String?  @map("updated_by") @db.Uuid
-
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  updater   User?  @relation(fields: [updatedBy], references: [id])
-
-  @@index([tenantId])
-  @@map("tenant_configuration")
-}
-
-model FeatureFlag {
-  id               String   @id @default(uuid()) @db.Uuid
-  flagName         String   @unique @map("flag_name") @db.VarChar(100)
-  description      String?  @db.Text
-  isEnabled        Boolean  @default(false) @map("is_enabled")
-  flagType         String   @default("feature") @map("flag_type") @db.VarChar(20)
-  targetTenantIds  String[] @default([]) @map("target_tenant_ids") @db.Uuid
-  targetUserIds    String[] @default([]) @map("target_user_ids") @db.Uuid
-  targetRoles      String[] @default([]) @map("target_roles") @db.VarChar(50)
-  rolloutPercentage Int     @default(0) @map("rollout_percentage")
-  environment      String   @default("development") @db.VarChar(20)
-  experimentName   String?  @map("experiment_name") @db.VarChar(100)
-  variantA         Json?
-  variantB         Json?
-  createdBy        String?  @map("created_by") @db.Uuid
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  expiresAt        DateTime? @map("expires_at") @db.Timestamptz
-
-  creator   User?              @relation(fields: [createdBy], references: [id])
-  usages    FeatureFlagUsage[]
-
-  @@index([flagName])
-  @@index([environment])
-  @@map("feature_flags")
-}
-
-model FeatureFlagUsage {
-  id             String   @id @default(uuid()) @db.Uuid
-  flagId         String   @map("flag_id") @db.Uuid
-  userId         String?  @map("user_id") @db.Uuid
-  tenantId       String?  @map("tenant_id") @db.Uuid
-  flagEvaluation Boolean  @map("flag_evaluation")
-  context        Json?    @default("{}")
-  accessedAt     DateTime @default(now()) @map("accessed_at") @db.Timestamptz
-
-  flag FeatureFlag @relation(fields: [flagId], references: [id], onDelete: Cascade)
-
-  @@index([flagId])
-  @@index([userId])
-  @@map("feature_flag_usage")
-}
-
-// ============================================================================
-// AI USAGE & COST MANAGEMENT
-// ============================================================================
-
-model AIModel {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  modelId               String   @map("model_id") @db.VarChar(100)
-  modelName              String   @map("model_name") @db.VarChar(100)
-  vendor                String   @db.VarChar(50)
-  modelVersion          String?  @map("model_version") @db.VarChar(50)
-  inputPricePer1kTokens Decimal  @map("input_price_per_1k_tokens") @db.Decimal(10,4)
-  outputPricePer1kTokens Decimal @map("output_price_per_1k_tokens") @db.Decimal(10,4)
-  isSelfHosted          Boolean  @default(false) @map("is_self_hosted")
-  apiEndpoint           String?  @map("api_endpoint") @db.VarChar(500)
-  primaryPurpose        String?  @map("primary_purpose") @db.VarChar(100)
-  supportedActivities   String[] @default([]) @map("supported_activities")
-  isActive              Boolean  @default(true) @map("is_active")
-  deprecationDate       DateTime? @map("deprecation_date") @db.Date
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  usageRecords AIUsageRecord[]
-  snapshots    AIUsageSnapshot[]
-  budgets      AIBudget[]
-
-  @@unique([tenantId, modelId])
-  @@index([tenantId])
-  @@index([vendor])
-  @@map("ai_models")
-}
-
-model AIBudget {
-  id                      String   @id @default(uuid()) @db.Uuid
-  tenantId                String   @map("tenant_id") @db.Uuid
-  productId               String?  @map("product_id") @db.Uuid
-  sprintId                String?  @map("sprint_id") @db.Uuid
-  budgetType              String   @default("sprint") @map("budget_type") @db.VarChar(20)
-  budgetUsd               Decimal  @map("budget_usd") @db.Decimal(15,2)
-  alertThresholdPercent   Decimal  @default(80.0) @map("alert_threshold_percent") @db.Decimal(5,2)
-  alertSent               Boolean  @default(false) @map("alert_sent")
-  periodStart             DateTime @map("period_start") @db.Date
-  periodEnd               DateTime @map("period_end") @db.Date
-  modelBudgets            Json?    @default("{}") @map("model_budgets")
-  createdBy               String?  @map("created_by") @db.Uuid
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sprint   Sprint?  @relation(fields: [sprintId], references: [id])
-  model    AIModel @relation(fields: [tenantId, sprintId], references: [tenantId])
-  creator  User?    @relation(fields: [createdBy], references: [id])
-
-  @@unique([tenantId, sprintId])
-  @@index([tenantId])
-  @@index([sprintId])
-  @@map("ai_budgets")
-}
-
-model AIUsageRecord {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  userId                String   @map("user_id") @db.Uuid
-  modelId               String   @map("model_id") @db.Uuid
-  activityType          String   @map("activity_type") @db.VarChar(50)
-  requestId             String?  @unique @map("request_id") @db.VarChar(255)
-  integrationContext    Json?    @default("{}") @map("integration_context")
-  inputTokens           Int      @map("input_tokens")
-  outputTokens          Int      @map("output_tokens")
-  cachedInputTokens     Int      @default(0) @map("cached_input_tokens")
-  totalTokens           Int      @map("total_tokens")
-  latencyMs             Int?     @map("latency_ms")
-  wasCached             Boolean  @default(false) @map("was_cached")
-  cacheHitTokens        Int      @default(0) @map("cache_hit_tokens")
-  costUsd               Decimal  @map("cost_usd") @db.Decimal(10,4)
-  suggestionAccepted    Boolean? @map("suggestion_accepted")
-  suggestionUsed        Boolean  @default(false) @map("suggestion_used")
-  reworkRequired        Boolean  @default(false) @map("rework_required")
-  workItemId            String?  @map("work_item_id") @db.Uuid
-  deliverableId         String?  @map("deliverable_id") @db.Uuid
-  requestedAt           DateTime @map("requested_at") @db.Timestamptz
-  respondedAt           DateTime? @map("responded_at") @db.Timestamptz
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user         User                @relation(fields: [userId], references: [id])
-  model        AIModel             @relation(fields: [modelId], references: [id])
-  workItem     WorkItem?           @relation(fields: [workItemId], references: [id])
-  deliverable  ManualDeliverable?  @relation(fields: [deliverableId], references: [id])
-
-  @@index([tenantId, userId])
-  @@index([modelId])
-  @@index([activityType])
-  @@index([requestedAt])
-  @@index([workItemId])
-  @@map("ai_usage_records")
-}
-
-model AIUsageSnapshot {
-  id                       String   @id @default(uuid()) @db.Uuid
-  tenantId                 String   @map("tenant_id") @db.Uuid
-  userId                   String?  @map("user_id") @db.Uuid
-  modelId                  String?  @map("model_id") @db.Uuid
-  productId                String?  @map("product_id") @db.Uuid
-  sprintId                 String?  @map("sprint_id") @db.Uuid
-  snapshotType             String   @map("snapshot_type") @db.VarChar(20)
-  snapshotDate             DateTime @map("snapshot_date") @db.Date
-  totalInputTokens         BigInt   @default(0) @map("total_input_tokens")
-  totalOutputTokens        BigInt   @default(0) @map("total_output_tokens")
-  totalCachedTokens        BigInt   @default(0) @map("total_cached_tokens")
-  totalRequests            Int      @default(0) @map("total_requests")
-  totalCostUsd             Decimal  @default(0.0) @map("total_cost_usd") @db.Decimal(15,2)
-  suggestionsAccepted     Int      @default(0) @map("suggestions_accepted")
-  suggestionsTotal         Int      @default(0) @map("suggestions_total")
-  acceptanceRate           Decimal? @map("acceptance_rate") @db.Decimal(5,2)
-  aiAssistedOutputPercent  Decimal? @map("ai_assisted_output_percent") @db.Decimal(5,2)
-  reworkRate               Decimal? @map("rework_rate") @db.Decimal(5,2)
-  avgLatencyMs             Decimal? @map("avg_latency_ms") @db.Decimal(10,2)
-  activityBreakdown        Json?    @default("{}") @map("activity_breakdown")
-  calculatedAt             DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  model    AIModel?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
-  product  Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
-  sprint   Sprint?   @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-
-  @@unique([tenantId, snapshotType, snapshotDate, userId, modelId, sprintId])
-  @@index([tenantId])
-  @@index([userId])
-  @@index([sprintId])
-  @@index([snapshotDate])
-  @@map("ai_usage_snapshots")
-}
-
-model AISettings {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @unique @map("tenant_id") @db.Uuid
-  defaultVisibilityLevel String   @default("self") @map("default_visibility_level") @db.VarChar(20)
-  visibilityRoleMappings Json?   @default("{}") @map("visibility_role_mappings")
-  enableBudgetAlerts    Boolean  @default(true) @map("enable_budget_alerts")
-  budgetAlertEmail      Boolean  @default(true) @map("budget_alert_email")
-  budgetAlertSlack      Boolean  @default(false) @map("budget_alert_slack")
-  overageAction         String   @default("alert") @map("overage_action") @db.VarChar(50)
-  enablePromptCaching   Boolean  @default(true) @map("enable_prompt_caching")
-  cacheStrategy         String   @default("auto") @map("cache_strategy") @db.VarChar(50)
-  trackIndividualUsage  Boolean  @default(true) @map("track_individual_usage")
-  trackOutcomes         Boolean  @default(true) @map("track_outcomes")
-  retentionDays         Int      @default(90) @map("retention_days")
-  enabledIntegrations   Json?    @default("{}") @map("enabled_integrations")
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  updatedBy             String?  @map("updated_by") @db.Uuid
-
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  updater  User?  @relation(fields: [updatedBy], references: [id])
-
-  @@index([tenantId])
-  @@map("ai_settings")
-}
-
-// ============================================================================
-// SEARCH INFRASTRUCTURE
-// ============================================================================
-
-model SearchAnalytics {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  userId           String?  @map("user_id") @db.Uuid
-  searchQuery      String   @map("search_query") @db.Text
-  searchType       String?  @map("search_type") @db.VarChar(50)
-  searchFilters    Json?    @default("{}") @map("search_filters")
-  resultsCount     Int      @default(0) @map("results_count")
-  resultTypes      Json?    @default("{}") @map("result_types")
-  clickedResultType String? @map("clicked_result_type") @db.VarChar(50)
-  clickedResultId  String?  @map("clicked_result_id") @db.Uuid
-  clickedPosition  Int?     @map("clicked_position")
-  timeToClickMs    Int?     @map("time_to_click_ms")
-  searchDurationMs Int      @map("search_duration_ms")
-  searchSource     String?  @map("search_source") @db.VarChar(20)
-  searchedAt       DateTime @default(now()) @map("searched_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([searchedAt(sort: Desc)])
-  @@map("search_analytics")
-}
-
-model SearchSuggestion {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  suggestionType  String   @map("suggestion_type") @db.VarChar(50)
-  title           String   @db.VarChar(255)
-  description     String?  @db.Text
-  searchQuery     String?  @map("search_query") @db.Text
-  searchFilters   Json?    @default("{}") @map("search_filters")
-  icon            String?  @db.VarChar(50)
-  targetRoles     String[] @default([]) @map("target_roles") @db.VarChar(50)
-  displayOrder    Int      @default(0) @map("display_order")
-  clickCount      Int      @default(0) @map("click_count")
-  lastClickedAt   DateTime? @map("last_clicked_at") @db.Timestamptz
-  isActive        Boolean  @default(true) @map("is_active")
-  createdBy        String?  @map("created_by") @db.Uuid
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([isActive, displayOrder])
-  @@map("search_suggestions")
-}
-
-// ============================================================================
-// ALERT MANAGEMENT SYSTEM
-// ============================================================================
-
-model AlertRule {
-  id                       String   @id @default(uuid()) @db.Uuid
-  tenantId                 String   @map("tenant_id") @db.Uuid
-  ruleName                 String   @unique @map("rule_name") @db.VarChar(100)
-  ruleDescription          String?  @map("rule_description") @db.Text
-  ruleCategory             String   @map("rule_category") @db.VarChar(50)
-  metricType               String   @map("metric_type") @db.VarChar(50)
-  operator                 String   @db.VarChar(10)
-  thresholdValue           Decimal  @map("threshold_value") @db.Decimal(10,2)
-  thresholdUnit            String   @map("threshold_unit") @db.VarChar(20)
-  aggregationWindow        String   @map("aggregation_window") @db.VarChar(50)
-  secondaryMetricType      String?  @map("secondary_metric_type") @db.VarChar(50)
-  secondaryOperator        String?  @map("secondary_operator") @db.VarChar(10)
-  secondaryThresholdValue  Decimal? @map("secondary_threshold_value") @db.Decimal(10,2)
-  conditionLogic           String   @default("AND") @map("condition_logic") @db.VarChar(10)
-  severity                 String   @default("warning") @db.VarChar(20)
-  priority                 Int      @default(5)
-  notificationChannels     Json?    @default("{\"email\":true,\"slack\":false,\"in_app\":true}")
-  emailRecipients          String[] @default([]) @map("email_recipients") @db.VarChar(255)
-  slackChannels            String[] @default([]) @map("slack_channels") @db.VarChar(100)
-  notificationTitleTemplate String? @map("notification_title_template") @db.Text
-  notificationBodyTemplate  String? @map("notification_body_template") @db.Text
-  targetRoles              String[] @default([]) @map("target_roles") @db.VarChar(50)
-  targetUsers              String[] @default([]) @map("target_users") @db.Uuid
-  escalationEnabled        Boolean  @default(false) @map("escalation_enabled")
-  escalationRules          Json?    @default("{}") @map("escalation_rules")
-  cooldownPeriodMinutes   Int      @default(60) @map("cooldown_period_minutes")
-  suppressionRules         Json?    @default("{}") @map("suppression_rules")
-  autoResolve              Boolean  @default(true) @map("auto_resolve")
-  autoResolveAfterMinutes  Int?     @map("auto_resolve_after_minutes")
-  isEnabled               Boolean  @default(true) @map("is_enabled")
-  lastTriggeredAt          DateTime? @map("last_triggered_at") @db.Timestamptz
-  triggerCount             Int      @default(0) @map("trigger_count")
-  lastResolvedAt           DateTime? @map("last_resolved_at") @db.Timestamptz
-  createdBy                String?  @map("created_by") @db.Uuid
-  updatedBy                String?  @map("updated_by") @db.Uuid
-  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  incidents          AlertIncident[]
-  creator            User?           @relation("AlertCreator", fields: [createdBy], references: [id])
-  updater            User?           @relation("AlertUpdater", fields: [updatedBy], references: [id])
-
-  @@unique([tenantId, ruleName])
-  @@index([tenantId])
-  @@index([isEnabled])
-  @@index([severity])
-  @@index([metricType])
-  @@map("alert_rules")
-}
-
-model AlertIncident {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  alertRuleId           String   @map("alert_rule_id") @db.Uuid
-  incidentStatus        String   @default("active") @map("incident_status") @db.VarChar(20)
-  severity              String   @db.VarChar(20)
-  metricValue           Decimal  @map("metric_value") @db.Decimal(10,2)
-  thresholdValue        Decimal  @map("threshold_value") @db.Decimal(10,2)
-  violationMagnitude    Decimal  @map("violation_magnitude") @db.Decimal(10,2)
-  contextData           Json?    @default("{}") @map("context_data")
-  affectedProductId     String?  @map("affected_product_id") @db.Uuid
-  affectedSprintId      String?  @map("affected_sprint_id") @db.Uuid
-  affectedUserIds       String[] @default([]) @map("affected_user_ids") @db.Uuid
-  acknowledgedBy        String?  @map("acknowledged_by") @db.Uuid
-  acknowledgedAt        DateTime? @map("acknowledged_at") @db.Timestamptz
-  acknowledgedNote      String?  @map("acknowledged_note") @db.Text
-  resolvedBy            String?  @map("resolved_by") @db.Uuid
-  resolvedAt            DateTime? @map("resolved_at") @db.Timestamptz
-  resolutionNote        String?  @map("resolution_note") @db.Text
-  rootCause             String?  @map("root_cause") @db.Text
-  markedAsFalsePositiveBy String? @map("marked_as_false_positive_by") @db.Uuid
-  falsePositiveReason   String?  @map("false_positive_reason") @db.Text
-  falsePositiveAt       DateTime? @map("false_positive_at") @db.Timestamptz
-  businessImpact        String?  @map("business_impact") @db.Text
-  affectedUsersCount    Int?     @map("affected_users_count")
-  downtimeMinutes       Int?     @map("downtime_minutes")
-  relatedWorkItemIds    String[] @default([]) @map("related_work_item_ids") @db.Uuid
-  relatedIncidentIds    String[] @default([]) @map("related_incident_ids") @db.Uuid
-  notificationSent      Boolean  @default(false) @map("notification_sent")
-  notificationChannelsUsed String[] @default([]) @map("notification_channels_used") @db.VarChar(20)
-  notificationFailedReason String? @map("notification_failed_reason") @db.Text
-  triggeredAt           DateTime @default(now()) @map("triggered_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  alertRule    AlertRule  @relation(fields: [alertRuleId], references: [id], onDelete: Cascade)
-  product      Product?   @relation(fields: [affectedProductId], references: [id])
-  sprint       Sprint?    @relation(fields: [affectedSprintId], references: [id])
-  acknowledger User?      @relation("IncidentAcknowledger", fields: [acknowledgedBy], references: [id])
-  resolver     User?      @relation("IncidentResolver", fields: [resolvedBy], references: [id])
-  falsePositiveMarker User? @relation("IncidentFalsePositiveMarker", fields: [markedAsFalsePositiveBy], references: [id])
-  deliveries   AlertNotificationDelivery[]
-
-  @@index([tenantId])
-  @@index([alertRuleId])
-  @@index([incidentStatus])
-  @@index([triggeredAt(sort: Desc)])
-  @@map("alert_incidents")
-}
-
-model AlertNotificationDelivery {
-  id               String   @id @default(uuid()) @db.Uuid
-  incidentId       String   @map("incident_id") @db.Uuid
-  deliveryChannel  String   @map("delivery_channel") @db.VarChar(20)
-  deliveryStatus   String   @default("pending") @map("delivery_status") @db.VarChar(20)
-  recipientType    String   @map("recipient_type") @db.VarChar(20)
-  recipientId      String?  @map("recipient_id") @db.Uuid
-  recipientAddress String?  @map("recipient_address") @db.VarChar(255)
-  messageSubject   String?  @map("message_subject") @db.Text
-  messageBody      String?  @map("message_body") @db.Text
-  messageTemplateUsed String? @map("message_template_used") @db.VarChar(100)
-  sentAt           DateTime? @map("sent_at") @db.Timestamptz
-  deliveredAt      DateTime? @map("delivered_at") @db.Timestamptz
-  readAt           DateTime? @map("read_at") @db.Timestamptz
-  errorMessage     String?  @map("error_message") @db.Text
-  retryCount       Int      @default(0) @map("retry_count")
-  maxRetries       Int      @default(3) @map("max_retries")
-  nextRetryAt      DateTime? @map("next_retry_at") @db.Timestamptz
-  externalMessageId String? @map("external_message_id") @db.VarChar(255)
-  externalMetadata Json?    @default("{}") @map("external_metadata")
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  incident AlertIncident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
-
-  @@index([incidentId])
-  @@index([deliveryStatus])
-  @@index([deliveryChannel])
-  @@map("alert_notification_deliveries")
-}
-
-model AlertMaintenanceWindow {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  windowName            String   @map("window_name") @db.VarChar(100)
-  description           String?  @db.Text
-  startTime             DateTime @map("start_time") @db.Timestamptz
-  endTime               DateTime @map("end_time") @db.Timestamptz
-  recurringSchedule     String?  @map("recurring_schedule") @db.VarChar(50)
-  recurringCron         String?  @map("recurring_cron") @db.VarChar(100)
-  affectedAlertRuleIds  String[] @default([]) @map("affected_alert_rule_ids") @db.Uuid
-  affectedProducts      String[] @default([]) @map("affected_products") @db.Uuid
-  affectedEnvironments  String[] @default([]) @map("affected_environments") @db.VarChar(20)
-  suppressAll          Boolean  @default(false) @map("suppress_all")
-  allowCritical        Boolean  @default(false) @map("allow_critical")
-  isActive             Boolean  @default(true) @map("is_active")
-  createdBy            String?  @map("created_by") @db.Uuid
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([isActive, startTime])
-  @@map("alert_maintenance_windows")
-}
-
-// ============================================================================
-// EXPORT & REPORTING INFRASTRUCTURE
-// ============================================================================
-
-model ExportJob {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  userId            String   @map("user_id") @db.Uuid
-  exportType        String   @map("export_type") @db.VarChar(50)
-  exportName        String?  @map("export_name") @db.VarChar(255)
-  format            String   @db.VarChar(20)
-  filters           Json?    @default("{}")
-  includedDatasets  Json?    @default("[]") @map("included_datasets")
-  status            String   @default("pending") @db.VarChar(20)
-  progress          Int      @default(0)
-  fileSizeBytes     BigInt?  @map("file_size_bytes")
-  recordCount       Int?     @map("record_count")
-  fileUrl           String?  @map("file_url") @db.VarChar(500)
-  fileName          String?  @map("file_name") @db.VarChar(255)
-  expiresAt         DateTime? @map("expires_at") @db.Timestamptz
-  errorMessage      String?  @map("error_message") @db.Text
-  retryCount        Int      @default(0) @map("retry_count")
-  processingStartedAt DateTime? @map("processing_started_at") @db.Timestamptz
-  processingCompletedAt DateTime? @map("processing_completed_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([status])
-  @@index([createdAt(sort: Desc)])
-  @@map("export_jobs")
-}
-
-model ReportTemplate {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  templateName      String   @map("template_name") @db.VarChar(100)
-  templateDescription String? @map("template_description") @db.Text
-  templateType      String   @default("custom") @map("template_type") @db.VarChar(50)
-  category          String?  @map("category") @db.VarChar(50)
-  dataSources       Json     @map("data_sources")
-  layoutConfig      Json     @map("layout_config")
-  stylingConfig     Json?    @default("{}") @map("styling_config")
-  defaultFormat     String   @default("pdf") @map("default_format") @db.VarChar(20)
-  includeCharts     Boolean  @default(true) @map("include_charts")
-  includeRawData    Boolean  @default(false) @map("include_raw_data")
-  pageSize          String   @default("A4") @map("page_size") @db.VarChar(20)
-  orientation       String   @default("portrait") @map("orientation") @db.VarChar(20)
-  isScheduled       Boolean  @default(false) @map("is_scheduled")
-  scheduleCron      String?  @map("schedule_cron") @db.VarChar(100)
-  scheduleRecipients String[] @default([]) @map("schedule_recipients") @db.VarChar(255)
-  createdBy         String?  @map("created_by") @db.Uuid
-  isPublic          Boolean  @default(false) @map("is_public")
-  targetRoles       String[] @default([]) @map("target_roles") @db.VarChar(50)
-  usageCount         Int      @default(0) @map("usage_count")
-  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@unique([tenantId, templateName])
-  @@index([tenantId])
-  @@index([templateType])
-  @@index([category])
-  @@map("report_templates")
-}
-
-model ScheduledReport {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  templateId        String   @map("template_id") @db.Uuid
-  scheduleName      String   @map("schedule_name") @db.VarChar(100)
-  scheduleType      String   @map("schedule_type") @db.VarChar(20)
-  cronExpression     String?  @map("cron_expression") @db.VarChar(100)
-  timezone          String   @default("UTC") @db.VarChar(50)
-  filters           Json?    @default("{}")
-  format            String   @default("pdf") @db.VarChar(20)
-  deliveryMethods   Json?    @default("{\"email\":true,\"slack\":false,\"save_to_library\":true}")
-  emailRecipients   String[] @default([]) @map("email_recipients") @db.VarChar(255)
-  slackChannels     String[] @default([]) @map("slack_channels") @db.VarChar(100)
-  isActive          Boolean  @default(true) @map("is_active")
-  lastRunAt         DateTime? @map("last_run_at") @db.Timestamptz
-  nextRunAt         DateTime? @map("next_run_at") @db.Timestamptz
-  lastStatus        String?  @map("last_status") @db.VarChar(20)
-  lastError         String?  @map("last_error") @db.Text
-  consecutiveFailures Int   @default(0) @map("consecutive_failures")
-  createdBy         String?  @map("created_by") @db.Uuid
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([isActive, nextRunAt])
-  @@index([templateId])
-  @@map("scheduled_reports")
-}
-
-model ReportLibrary {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  scheduledReportId     String?  @map("scheduled_report_id") @db.Uuid
-  exportJobId           String?  @map("export_job_id") @db.Uuid
-  reportName            String   @map("report_name") @db.VarChar(255)
-  reportDescription     String?  @map("report_description") @db.Text
-  reportType            String   @map("report_type") @db.VarChar(50)
-  fileUrl               String   @map("file_url") @db.VarChar(500)
-  fileSizeBytes         BigInt?  @map("file_size_bytes")
-  fileFormat            String?  @map("file_format") @db.VarChar(20)
-  pageCount             Int?     @map("page_count")
-  dataPeriodStart       DateTime? @map("data_period_start") @db.Date
-  dataPeriodEnd         DateTime? @map("data_period_end") @db.Date
-  includedSections      Json?    @default("[]") @map("included_sections")
-  createdBy             String?  @map("created_by") @db.Uuid
-  expiresAt             DateTime? @map("expires_at") @db.Timestamptz
-  retentionDays         Int      @default(90) @map("retention_days")
-  downloadCount         Int      @default(0) @map("download_count")
-  lastDownloadedAt       DateTime? @map("last_downloaded_at") @db.Timestamptz
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([scheduledReportId])
-  @@index([createdAt(sort: Desc)])
-  @@map("report_library")
-}
-
-// ============================================================================
-// CI/CD PIPELINE INTEGRATION
-// ============================================================================
-
-model CIPipelineIntegration {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String?  @map("product_id") @db.Uuid
-  pipelineName      String   @map("pipeline_name") @db.VarChar(100)
-  pipelineType      String   @map("pipeline_type") @db.VarChar(50)
-  ciServerUrl       String?  @map("ci_server_url") @db.VarChar(500)
-  projectUrl        String?  @map("project_url") @db.VarChar(500)
-  apiTokenEncrypted String?  @map("api_token_encrypted") @db.Text
-  webhookSecretEncrypted String? @map("webhook_secret_encrypted") @db.Text
-  testResultFormat  String   @default("junit_xml") @map("test_result_format") @db.VarChar(20)
-  testResultPath    String?  @map("test_result_path") @db.VarChar(500)
-  autoImportEnabled Boolean  @default(true) @map("auto_import_enabled")
-  branchFilter      String[] @default([]) @map("branch_filter")
-  buildStatusFilter String[] @default([]) @map("build_status_filter")
-  notificationOnFailure Boolean @default(true) @map("notification_on_failure")
-  lastBuildId       String?  @map("last_build_id") @db.VarChar(100)
-  lastBuildStatus    String?  @map("last_build_status") @db.VarChar(20)
-  lastBuildTimestamp DateTime? @map("last_build_timestamp") @db.Timestamptz
-  syncEnabled       Boolean  @default(true) @map("sync_enabled")
-  configuration     Json?    @default("{}")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([productId])
-  @@index([pipelineType])
-  @@map("ci_pipeline_integrations")
-}
-
-model CIBuildRun {
-  id                  String   @id @default(uuid()) @db.Uuid
-  tenantId            String   @map("tenant_id") @db.Uuid
-  pipelineId          String   @map("pipeline_id") @db.Uuid
-  productId           String?  @map("product_id") @db.Uuid
-  externalBuildId     String   @map("external_build_id") @db.VarChar(100)
-  buildUrl            String?  @map("build_url") @db.VarChar(500)
-  branchName          String?  @map("branch_name") @db.VarChar(100)
-  commitHash          String?  @map("commit_hash") @db.VarChar(50)
-  commitMessage       String?  @map("commit_message") @db.Text
-  commitAuthor        String?  @map("commit_author") @db.VarChar(255)
-  buildStatus         String   @map("build_status") @db.VarChar(20)
-  buildDurationSeconds Int?     @map("build_duration_seconds")
-  buildTimestamp      DateTime @map("build_timestamp") @db.Timestamptz
-  totalTests          Int      @default(0) @map("total_tests")
-  passedTests         Int      @default(0) @map("passed_tests")
-  failedTests         Int      @default(0) @map("failed_tests")
-  skippedTests        Int      @default(0) @map("skipped_tests")
-  codeCoveragePercent Decimal? @map("code_coverage_percent") @db.Decimal(5,2)
-  linesCovered        Int?     @map("lines_covered")
-  linesTotal          Int?     @map("lines_total")
-  testResultsImported Boolean  @default(false) @map("test_results_imported")
-  testResultsFileUrl  String?  @map("test_results_file_url") @db.VarChar(500)
-  sprintId            String?  @map("sprint_id") @db.Uuid
-  releaseId           String?  @map("release_id") @db.Uuid
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@unique([pipelineId, externalBuildId])
-  @@index([pipelineId])
-  @@index([productId])
-  @@index([buildStatus])
-  @@index([buildTimestamp(sort: Desc)])
-  @@map("ci_build_runs")
-}
-
-model CITestResult {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  buildId           String   @map("build_id") @db.Uuid
-  externalTestId     String?  @map("external_test_id") @db.VarChar(100)
-  testName          String   @map("test_name") @db.VarChar(255)
-  testSuite         String?  @map("test_suite") @db.VarChar(255)
-  testClass         String?  @map("test_class") @db.VarChar(255)
-  packageName       String?  @map("package_name") @db.VarChar(255)
-  testStatus        String   @map("test_status") @db.VarChar(20)
-  durationMs        Int?     @map("duration_ms")
-  errorMessage      String?  @map("error_message") @db.Text
-  stackTrace        String?  @map("stack_trace") @db.Text
-  failureType       String?  @map("failure_type") @db.VarChar(100)
-  testCategories    String[] @default([]) @map("test_categories") @db.VarChar(100)
-  testPriority      String?  @map("test_priority") @db.VarChar(10)
-  linkedTestCaseId  String?  @map("linked_test_case_id") @db.Uuid
-  component         String?  @map("component") @db.VarChar(100)
-  executionNode     String?  @map("execution_node") @db.VarChar(100)
-  retryCount        Int      @default(0) @map("retry_count")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-
-  @@index([buildId])
-  @@index([testStatus])
-  @@index([linkedTestCaseId])
-  @@map("ci_test_results")
-}
-
-// ============================================================================
-// PEOPLE ANALYTICS & TEAM INTELLIGENCE
-// ============================================================================
-
-model KnowledgeSiloAnalysis {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  component             String   @map("component") @db.VarChar(100)
-  componentCategory     String?  @map("component_category") @db.VarChar(50)
-  riskLevel             String   @map("risk_level") @db.VarChar(20)
-  primaryOwnerId        String?  @map("primary_owner_id") @db.Uuid
-  primaryOwnerContribution Decimal? @map("primary_owner_contribution") @db.Decimal(5,2)
-  secondaryOwnerIds     String[] @default([]) @map("secondary_owner_ids") @db.Uuid
-  tertiaryContributorIds String[] @default([]) @map("tertiary_contributor_ids") @db.Uuid
-  busFactor             Int      @default(1) @map("bus_factor")
-  busFactorRisk         String   @map("bus_factor_risk") @db.VarChar(50)
-  totalContributors     Int      @map("total_contributors")
-  knowledgeConcentrationScore Decimal? @map("knowledge_concentration_score") @db.Decimal(5,2)
-  crossFunctionalCoverage Boolean @default(false) @map("cross_functional_coverage")
-  linesOfCode           Int?     @map("lines_of_code")
-  complexityScore       Decimal? @map("complexity_score") @db.Decimal(5,2)
-  businessCriticality   String?  @map("business_criticality") @db.VarChar(20)
-  userFacing            Boolean  @default(false) @map("user_facing")
-  mitigationStrategy    Json?    @default("{}") @map("mitigation_strategy")
-  recommendedTraining   String?  @map("recommended_training") @db.Text
-  recommendedPairingPairs String[] @default([]) @map("recommended_pairing_pairs") @db.Uuid
-  analysisMethod        String   @default("git_analysis") @map("analysis_method") @db.VarChar(50)
-  analysisDate          DateTime? @map("analysis_date") @db.Date
-  lastGitCommitAnalyzed DateTime? @map("last_git_commit_analyzed") @db.Timestamptz
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([productId])
-  @@index([riskLevel])
-  @@index([component])
-  @@map("knowledge_silo_analysis")
-}
-
-model SkillGap {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  userId                String?  @map("user_id") @db.Uuid
-  skillArea             String   @map("skill_area") @db.VarChar(100)
-  skillCategory         String?  @map("skill_category") @db.VarChar(50)
-  currentLevel          String?  @map("current_level") @db.VarChar(20)
-  targetLevel           String?  @map("target_level") @db.VarChar(20)
-  gapLevel              String   @map("gap_level") @db.VarChar(20)
-  gapConfidence         Decimal? @map("gap_confidence") @db.Decimal(3,2)
-  identifiedFrom        String   @map("identified_from") @db.VarChar(50)
-  evidenceData          Json?    @default("{}") @map("evidence_data")
-  businessImpact        String?  @map("business_impact") @db.Text
-  affectedWorkItemIds   String[] @default([]) @map("affected_work_item_ids") @db.Uuid
-  trainingRecommendation String? @map("training_recommendation") @db.Text
-  suggestedResources    Json?    @default("[]") @map("suggested_resources")
-  estimatedTrainingHours Int?    @map("estimated_training_hours")
-  trainingPriority      Int      @default(5) @map("training_priority")
-  recommendedMentorIds  String[] @default([]) @map("recommended_mentor_ids") @db.Uuid
-  peerLearningGroupIds  String[] @default([]) @map("peer_learning_group_ids") @db.Uuid
-  developmentPlanCreated Boolean @default(false) @map("development_plan_created")
-  trainingCompleted     Boolean  @default(false) @map("training_completed")
-  targetDate            DateTime? @map("target_date") @db.Date
-  completionDate        DateTime? @map("completion_date") @db.Date
-  status                String   @default("open") @db.VarChar(20)
-  createdBy             String?  @map("created_by") @db.Uuid
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@index([tenantId])
-  @@index([userId])
-  @@index([skillArea])
-  @@index([gapLevel])
-  @@map("skill_gaps")
-}
-
-model TeamHealthMetrics {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  productId             String?  @map("product_id") @db.Uuid
-  periodType            String   @map("period_type") @db.VarChar(20)
-  periodStart           DateTime @map("period_start") @db.Date
-  periodEnd             DateTime @map("period_end") @db.Date
-  teamSize              Int?     @map("team_size")
-  rolesDistribution     Json?    @default("{}") @map("roles_distribution")
-  tenureDistribution     Json?    @default("{}") @map("tenure_distribution")
-  crossTeamCollaborationScore Decimal? @map("cross_team_collaboration_score") @db.Decimal(5,2)
-  knowledgeSharingIndex  Decimal? @map("knowledge_sharing_index") @db.Decimal(5,2)
-  communicationFrequency Int?     @map("communication_frequency")
-  meetingLoadHours      Decimal? @map("meeting_load_hours") @db.Decimal(10,2)
-  avgWorkloadHours      Decimal? @map("avg_workload_hours") @db.Decimal(10,2)
-  overtimePercentage    Decimal? @map("overtime_percentage") @db.Decimal(5,2)
-  afterHoursActivityPercentage Decimal? @map("after_hours_activity_percentage") @db.Decimal(5,2)
-  burnoutRiskScore      Decimal? @map("burnout_risk_score") @db.Decimal(5,2)
-  teamMoraleScore       Decimal? @map("team_morale_score") @db.Decimal(5,2)
-  velocityStability     Decimal? @map("velocity_stability") @db.Decimal(5,2)
-  qualityScore          Decimal? @map("quality_score") @db.Decimal(5,2)
-  innovationIndex       Decimal? @map("innovation_index") @db.Decimal(5,2)
-  processCompliance     Decimal? @map("process_compliance") @db.Decimal(5,2)
-  siloRiskCount         Int?     @map("silo_risk_count")
-  busFactorRiskCount    Int?     @map("bus_factor_risk_count")
-  onCallBurdenScore     Decimal? @map("on_call_burden_score") @db.Decimal(5,2)
-  identifiedIssues      String[] @default([]) @map("identified_issues")
-  recommendedActions    Json?    @default("[]") @map("recommended_actions")
-  actionItemsCreated    Int      @default(0) @map("action_items_created")
-  actionItemsCompleted  Int      @default(0) @map("action_items_completed")
-  calculatedAt          DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-
-  @@unique([tenantId, productId, periodType, periodStart])
-  @@index([tenantId])
-  @@index([productId])
-  @@index([periodStart, periodEnd])
-  @@map("team_health_metrics")
-}
-
-model WorkloadAnalysis {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  userId                String   @map("user_id") @db.Uuid
-  periodType            String   @map("period_type") @db.VarChar(20)
-  periodStart           DateTime @map("period_start") @db.Date
-  periodEnd             DateTime @map("period_end") @db.Date
-  activeWorkItems       Int      @default(0) @map("active_work_items")
-  totalStoryPoints      Decimal? @map("total_story_points") @db.Decimal(10,2)
-  highPriorityItems     Int      @default(0) @map("high_priority_items")
-  bugAssignments        Int      @default(0) @map("bug_assignments")
-  meetingHours          Decimal? @map("meeting_hours") @db.Decimal(10,2)
-  codeReviewHours       Decimal? @map("code_review_hours") @db.Decimal(10,2)
-  mentoringHours        Decimal? @map("mentoring_hours") @db.Decimal(10,2)
-  collaborationOverheadPercentage Decimal? @map("collaboration_overhead_percentage") @db.Decimal(5,2)
-  contextSwitchCount    Int      @default(0) @map("context_switch_count")
-  contextSwitchCostHours Decimal? @map("context_switch_cost_hours") @db.Decimal(10,2)
-  focusTimePercentage   Decimal? @map("focus_time_percentage") @db.Decimal(5,2)
-  availableCapacityHours Decimal? @map("available_capacity_hours") @db.Decimal(10,2)
-  utilizedCapacityHours Decimal? @map("utilized_capacity_hours") @db.Decimal(10,2)
-  utilizationRate       Decimal? @map("utilization_rate") @db.Decimal(5,2)
-  overallocationPercentage Decimal? @map("overallocation_percentage") @db.Decimal(5,2)
-  avgBugFixTimeHours    Decimal? @map("avg_bug_fix_time_hours") @db.Decimal(10,2)
-  codeReviewTurnaroundHours Decimal? @map("code_review_turnaround_hours") @db.Decimal(10,2)
-  reworkRate            Decimal? @map("rework_rate") @db.Decimal(5,2)
-  afterHoursWorkHours  Decimal? @map("after_hours_work_hours") @db.Decimal(10,2)
-  weekendWorkHours      Decimal? @map("weekend_work_hours") @db.Decimal(10,2)
-  workloadStrainScore   Decimal? @map("workload_strain_score") @db.Decimal(5,2)
-  workloadStatus        String?  @map("workload_status") @db.VarChar(20)
-  recommendedActions    Json?    @default("{}") @map("recommended_actions")
-  calculatedAt          DateTime @default(now()) @map("calculated_at") @db.Timestamptz
-
-  @@unique([tenantId, userId, periodType, periodStart])
-  @@index([tenantId])
-  @@index([userId])
-  @@index([periodStart, periodEnd])
-  @@map("workload_analysis")
 }
