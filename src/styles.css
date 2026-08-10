@@ -208,6 +208,94 @@
 }
 
 /* ---------------------------------------------------------------
+ * Glossy "iOS" surface language — specular top sheen, soft inner
+ * highlight, deep diffuse shadow. Same cream / ink / amber tokens.
+ * --------------------------------------------------------------- */
+@utility gloss {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(
+      180deg,
+      oklch(1 0 0 / 78%) 0%,
+      oklch(1 0 0 / 52%) 42%,
+      oklch(1 0 0 / 40%) 100%
+    );
+  border: 1px solid oklch(1 0 0 / 70%);
+  backdrop-filter: blur(32px) saturate(170%);
+  box-shadow:
+    0 1px 0 0 oklch(1 0 0 / 90%) inset,
+    0 -1px 0 0 oklch(0.21 0.012 265 / 5%) inset,
+    0 24px 60px -28px oklch(0.35 0.04 80 / 55%),
+    0 2px 8px -4px oklch(0.35 0.04 80 / 30%);
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: linear-gradient(
+      180deg,
+      oklch(1 0 0 / 65%) 0%,
+      transparent 46%
+    );
+    pointer-events: none;
+  }
+}
+
+@utility gloss-hover {
+  transition:
+    transform 320ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 320ms ease,
+    border-color 320ms ease;
+  &:hover {
+    transform: translateY(-3px);
+    border-color: oklch(1 0 0 / 90%);
+    box-shadow:
+      0 1px 0 0 oklch(1 0 0 / 95%) inset,
+      0 32px 70px -28px oklch(0.35 0.04 80 / 60%),
+      0 0 0 1px oklch(0.63 0.13 65 / 12%);
+  }
+}
+
+/* Pill CTA with the amber accent and an iOS-style specular top edge. */
+@utility gloss-cta {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--primary) 82%, oklch(1 0 0)) 0%,
+    var(--primary) 55%,
+    color-mix(in oklab, var(--primary) 88%, oklch(0.2 0.02 65)) 100%
+  );
+  color: var(--primary-foreground);
+  border: 1px solid color-mix(in oklab, var(--primary) 70%, oklch(0.2 0.02 65));
+  box-shadow:
+    0 1px 0 0 oklch(1 0 0 / 45%) inset,
+    0 14px 30px -12px oklch(0.63 0.13 65 / 60%);
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 220ms ease;
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 1px 0 0 oklch(1 0 0 / 55%) inset,
+      0 20px 40px -12px oklch(0.63 0.13 65 / 70%);
+  }
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+/* Soft screen-level light blooms behind glossy surfaces. */
+@utility gloss-bloom {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  pointer-events: none;
+  animation: qm-drift 24s ease-in-out infinite alternate;
+}
+
+
+/* ---------------------------------------------------------------
  * Dark landing scope — premium glassmorphism canvas.
  * Applied only to the marketing landing page via `.qm-night`.
  * --------------------------------------------------------------- */
