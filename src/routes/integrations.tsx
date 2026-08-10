@@ -79,7 +79,10 @@ function Integrations() {
         })}
       </div>
 
+      <DocumentHub />
+
       <GlassPanel
+
         title="Sync pipeline"
         subtitle="Webhook ingestion → normalisation → aggregation"
         className="mt-4"
