@@ -3,7 +3,6 @@ import { ArrowLeft, ArrowRight, Loader2, Lock, Mail, ShieldCheck } from "lucide-
 import { useState } from "react";
 import { toast } from "sonner";
 import yavarLogo from "@/assets/yavar-logo.png.asset.json";
-import { GlassPanel } from "@/components/qm/GlassPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -153,7 +152,7 @@ function LoginPage() {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full rounded-full" disabled={busy}>
+              <Button type="submit" className="gloss-cta w-full rounded-full border-0" disabled={busy}>
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -185,7 +184,7 @@ function LoginPage() {
                 </InputOTP>
               </div>
 
-              <Button type="submit" className="w-full rounded-full" disabled={busy}>
+              <Button type="submit" className="gloss-cta w-full rounded-full border-0" disabled={busy}>
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -208,7 +207,7 @@ function LoginPage() {
               </button>
             </form>
           )}
-        </GlassPanel>
+        </div>
       </main>
     </div>
   );
