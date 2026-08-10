@@ -70,8 +70,17 @@ function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <header className="mx-auto flex w-full max-w-6xl items-center gap-4 px-5 py-6">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
+      <div
+        className="gloss-bloom -top-40 -left-32 h-[32rem] w-[32rem]"
+        style={{ background: "radial-gradient(circle, oklch(0.82 0.11 70 / 45%), transparent 70%)" }}
+      />
+      <div
+        className="gloss-bloom -right-32 bottom-0 h-[28rem] w-[28rem]"
+        style={{ background: "radial-gradient(circle, oklch(0.86 0.06 190 / 40%), transparent 70%)" }}
+      />
+
+      <header className="relative mx-auto flex w-full max-w-6xl items-center gap-4 px-5 py-6">
         <Link to="/" className="flex items-center gap-3">
           <img
             src={yavarLogo.url}
@@ -82,19 +91,20 @@ function LoginPage() {
         </Link>
         <Link
           to="/"
-          className="ml-auto inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          className="gloss gloss-hover ml-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
           Back
         </Link>
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-5 pb-16">
-        <GlassPanel className="w-full max-w-md p-8">
-          <span className="glass inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs text-muted-foreground">
+      <main className="relative flex flex-1 items-center justify-center px-5 pb-16">
+        <div className="gloss w-full max-w-md rounded-[2.25rem] p-8">
+          <span className="gloss inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" strokeWidth={1.75} />
             Mock sign-in · no live authentication
           </span>
+
 
           {step === "credentials" ? (
             <form onSubmit={submitCredentials} className="mt-6 space-y-5">
