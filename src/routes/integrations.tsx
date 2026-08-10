@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, CircleDashed, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
+import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { INTEGRATIONS } from "@/lib/qm-data";
+
 
 export const Route = createFileRoute("/integrations")({
   head: () => ({
@@ -77,7 +79,10 @@ function Integrations() {
         })}
       </div>
 
+      <DocumentHub />
+
       <GlassPanel
+
         title="Sync pipeline"
         subtitle="Webhook ingestion → normalisation → aggregation"
         className="mt-4"

@@ -42,6 +42,12 @@ export function exportJson(name: string, data: unknown) {
   download(`${name}-${stamp()}.json`, JSON.stringify(data, null, 2), "application/json");
 }
 
+/** Downloads an arbitrary text document (used by the document hub). */
+export function exportText(filename: string, content: string) {
+  download(filename, content, "text/markdown");
+}
+
+
 /** Uses the browser print dialog — "Save as PDF" produces a shareable report. */
 export function exportPdf() {
   window.print();
