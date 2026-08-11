@@ -80,7 +80,10 @@ function Integrations() {
         })}
       </div>
 
+      <GitInsights />
+
       <DocumentHub />
+
 
       <GlassPanel
 
