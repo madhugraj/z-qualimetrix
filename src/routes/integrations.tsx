@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, CircleDashed, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { DocumentHub } from "@/components/qm/DocumentHub";
+import { GitInsights } from "@/components/qm/GitInsights";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { INTEGRATIONS } from "@/lib/qm-data";
 
@@ -79,7 +80,10 @@ function Integrations() {
         })}
       </div>
 
+      <GitInsights />
+
       <DocumentHub />
+
 
       <GlassPanel
 

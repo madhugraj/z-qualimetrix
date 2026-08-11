@@ -199,12 +199,12 @@ function Landing() {
               Get started
               <ArrowRight className="h-4 w-4" strokeWidth={2} />
             </Link>
-            <Link
-              to="#capabilities"
+            <a
+              href="#capabilities"
               className="gloss gloss-hover inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium"
             >
               Explore features
-            </Link>
+            </a>
           </div>
         </section>
 
