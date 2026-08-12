@@ -5,7 +5,7 @@ import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { INTEGRATIONS } from "@/lib/qm-data";
-
+import { useEffect, useState } from "react";
 
 export const Route = createFileRoute("/integrations")({
   head: () => ({
@@ -27,6 +27,53 @@ export const Route = createFileRoute("/integrations")({
 });
 
 function Integrations() {
+  const [isGitHubConnected, setIsGitHubConnected] = useState(false);
+  const [githubUsername, setGithubUsername] = useState<string | null>(null);
+
+  // Check GitHub connection status from both localStorage and database
+  useEffect(() => {
+    const checkGitHubConnection = async () => {
+      // First check localStorage
+      const localToken = localStorage.getItem('github_token');
+      if (localToken) {
+        setIsGitHubConnected(true);
+        const localUsername = localStorage.getItem('github_username');
+        if (localUsername) {
+          setGithubUsername(localUsername);
+        }
+        return;
+      }
+
+      // Then check database status
+      try {
+        const response = await fetch("http://localhost:3001/api/v1/github-token/status/11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167");
+        const data = await response.json();
+        if (data.success && data.data.isConnected) {
+          setIsGitHubConnected(true);
+          setGithubUsername(data.data.username || null);
+          // Sync to localStorage for consistency
+          localStorage.setItem('github_username', data.data.username || '');
+        }
+      } catch (error) {
+        console.error('Failed to check GitHub status:', error);
+      }
+    };
+
+    checkGitHubConnection();
+  }, []);
+
+  // Update GitHub integration status dynamically
+  const updatedIntegrations = INTEGRATIONS.map(integration => {
+    if (integration.name === "GitHub") {
+      return {
+        ...integration,
+        status: isGitHubConnected ? "Connected" : "Not configured",
+        synced: isGitHubConnected ? "Just now" : "—"
+      };
+    }
+    return integration;
+  });
+
   return (
     <AppShell>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -41,12 +88,12 @@ function Integrations() {
           to="/settings"
           className="glass rounded-full px-4 py-2 text-xs font-medium transition-colors hover:text-primary"
         >
-          + Add integration
+          {isGitHubConnected ? "Manage GitHub" : "Configure GitHub"}
         </Link>
       </header>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        {INTEGRATIONS.map((i) => {
+        {updatedIntegrations.map((i) => {
           const connected = i.status === "Connected";
           return (
             <GlassPanel key={i.name} className="flex flex-col gap-3">
@@ -54,6 +101,9 @@ function Integrations() {
                 <div>
                   <h2 className="text-sm font-semibold">{i.name}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">{i.detail}</p>
+                  {i.name === "GitHub" && githubUsername && (
+                    <p className="mt-1 text-xs text-primary">Connected as {githubUsername}</p>
+                  )}
                 </div>
                 <span
                   className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
@@ -84,9 +134,7 @@ function Integrations() {
 
       <DocumentHub />
 
-
       <GlassPanel
-
         title="Sync pipeline"
         subtitle="Webhook ingestion → normalisation → aggregation"
         className="mt-4"

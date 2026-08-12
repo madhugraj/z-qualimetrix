@@ -26,8 +26,33 @@ const num = (v: number | null | undefined, suffix = "") =>
  */
 export function GitInsights() {
   const [provider, setProvider] = useState<Provider>("github");
-  const [input, setInput] = useState("facebook/react");
-  const [repo, setRepo] = useState("facebook/react");
+  // Get the stored GitHub repos or use a default
+  const getInitialRepos = (): string[] => {
+    if (typeof window !== 'undefined') {
+      const isMultiSelect = localStorage.getItem('github_multi_select');
+      if (isMultiSelect === "true") {
+        const storedRepos = localStorage.getItem('github_repos');
+        if (storedRepos) {
+          try {
+            return JSON.parse(storedRepos);
+          } catch (e) {
+            console.error('Failed to parse stored repos');
+          }
+        }
+      } else {
+        // Legacy single repo format
+        const storedRepo = localStorage.getItem('github_repo');
+        if (storedRepo) return [storedRepo];
+        const storedUsername = localStorage.getItem('github_username');
+        if (storedUsername) return [`${storedUsername}/Abstractive-summarizor`];
+      }
+    }
+    return ["facebook/react"]; // ultimate fallback
+  };
+  const initialRepos = getInitialRepos();
+  const [input, setInput] = useState(initialRepos[0] || "facebook/react");
+  const [repos, setRepos] = useState(initialRepos);
+  const [isMultiRepo, setIsMultiRepo] = useState(initialRepos.length > 1);
 
   const status = useQuery({ queryKey: ["git-status"], queryFn: () => getGitStatus() });
 

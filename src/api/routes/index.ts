@@ -7,6 +7,14 @@ import testCaseController from '../controllers/testcase.controller';
 import userController from '../controllers/user.controller';
 import analyticsController from '../controllers/analytics.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
+import githubRoutes from './github.routes';
+import {
+  saveGitHubToken,
+  validateGitHubToken,
+  getGitHubStatus,
+  deleteGitHubToken,
+  testGitHubToken
+} from '../controllers/github-token.controller';
 
 const router = Router();
 
@@ -72,5 +80,15 @@ router.get('/analytics/trends', analyticsController.getQualityTrends);
 router.get('/products/:productId/analytics', analyticsController.getProductAnalytics);
 router.get('/products/:productId/release-readiness', analyticsController.getReleaseReadiness);
 router.get('/tenants/:tenantId/analytics', analyticsController.getTenantAnalytics);
+
+// GitHub integration routes
+router.use('/github', githubRoutes);
+
+// GitHub token management routes (directly defined)
+router.post('/github-token/validate', validateGitHubToken);
+router.post('/github-token/tokens', saveGitHubToken);
+router.get('/github-token/status/:tenantId', getGitHubStatus);
+router.get('/github-token/test/:tenantId', testGitHubToken);
+router.delete('/github-token/tokens/:tenantId', deleteGitHubToken);
 
 export default router;
