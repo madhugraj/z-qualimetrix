@@ -586,14 +586,15 @@ function buildKpis(
     ];
 
   // finance
+  const financeKpis: Kpi[] = [] as Kpi[];
   const budgetPct = pct(ctx.currentCost, ctx.totals.budgetUsd);
   const savedHours = Math.round(
     ctx.current.filter((e) => e.accepted && !e.reworked).length * 0.12,
   );
-  return [
+  financeKpis.push(
     spendKpi,
     {
-      label: "Budget consumed",
+      label: "Budget consumed" as const,
       value: `${budgetPct}%`,
       delta: delta(ctx.currentCost, ctx.priorCost),
       trend: dir(ctx.currentCost, ctx.priorCost),

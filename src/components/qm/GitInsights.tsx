@@ -53,6 +53,8 @@ export function GitInsights() {
   const [input, setInput] = useState(initialRepos[0] || "facebook/react");
   const [repos, setRepos] = useState(initialRepos);
   const [isMultiRepo, setIsMultiRepo] = useState(initialRepos.length > 1);
+  const repo = repos[0] ?? "";
+  const setRepo = (value: string) => setRepos([value]);
 
   const status = useQuery({ queryKey: ["git-status"], queryFn: () => getGitStatus() });
 

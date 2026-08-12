@@ -111,13 +111,11 @@ function processGitHubData(pulls: any[], commits: any[], runs: any, issues: any[
       failed: done.length - success,
       successRate: done.length ? Math.round((success / done.length) * 100) : 0,
       avgDurationMin: avg(
-        done.map((r) => {
-          // Estimate duration from created/updated timestamps
-          if (r.created_at && r.updated_at) {
-            return hoursBetween(r.created_at, r.updated_at) * 60;
-          }
-          return null;
-        }),
+        done
+          .map((r) =>
+            r.created_at && r.updated_at ? hoursBetween(r.created_at, r.updated_at) * 60 : null,
+          )
+          .filter((v): v is number => v !== null),
       ),
       list: done.slice(0, 8).map((r) => ({
         id: `#${r.id}`,
