@@ -278,9 +278,9 @@ function GitHubConfig() {
         // Auto-select the first repo or previously selected one
         const storedRepo = localStorage.getItem('github_repo');
         if (storedRepo && repoList.find((r: any) => r.full_name === storedRepo)) {
-          setSelectedRepo(storedRepo);
+          setSelectedRepos([storedRepo]);
         } else if (repoList.length > 0) {
-          setSelectedRepo(repoList[0].full_name);
+          setSelectedRepos([repoList[0].full_name]);
         }
 
         toast.success(`Loaded ${repoList.length} repositories`);
@@ -300,7 +300,7 @@ function GitHubConfig() {
         { name: "react", full_name: "facebook/react", description: "A declarative JavaScript library" },
       ];
       setRepos(exampleRepos);
-      setSelectedRepo("madhugraj/Abstractive-summarizor");
+      setSelectedRepos(["madhugraj/Abstractive-summarizor"]);
     } finally {
       setIsLoadingRepos(false);
     }
@@ -575,7 +575,8 @@ function GitHubConfig() {
                 Save {selectedRepos.length} Repos
               </Button>
             </div>
-            </div>
+
+
 
             <div className="rounded-xl border border-dashed border-glass-border p-4">
               <p className="text-xs text-muted-foreground">
