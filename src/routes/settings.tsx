@@ -575,7 +575,8 @@ function GitHubConfig() {
                 Save {selectedRepos.length} Repos
               </Button>
             </div>
-            </div>
+
+
 
             <div className="rounded-xl border border-dashed border-glass-border p-4">
               <p className="text-xs text-muted-foreground">
