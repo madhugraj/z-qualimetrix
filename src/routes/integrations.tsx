@@ -3,6 +3,7 @@ import { CheckCircle2, CircleDashed, RefreshCw } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
+import { ProductRepositories } from "@/components/qm/ProductRepositories";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { INTEGRATIONS } from "@/lib/qm-data";
 import { useEffect, useState } from "react";
@@ -131,6 +132,8 @@ function Integrations() {
       </div>
 
       <GitInsights />
+
+      <ProductRepositories />
 
       <DocumentHub />
 

@@ -320,6 +320,7 @@ model ProductRepository {
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  @@unique([productId, githubRepo])
   @@index([productId])
   @@index([githubRepo])
   @@index([isActive])

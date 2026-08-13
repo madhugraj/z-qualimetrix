@@ -576,8 +576,6 @@ function GitHubConfig() {
               </Button>
             </div>
 
-
-
             <div className="rounded-xl border border-dashed border-glass-border p-4">
               <p className="text-xs text-muted-foreground">
                 💡 <strong>Tip:</strong> Your token is securely stored and will persist across sessions.

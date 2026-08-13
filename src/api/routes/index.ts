@@ -8,6 +8,7 @@ import userController from '../controllers/user.controller';
 import analyticsController from '../controllers/analytics.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
+import productRepositoryRoutes from './product-repository.routes';
 import {
   saveGitHubToken,
   validateGitHubToken,
@@ -90,5 +91,8 @@ router.post('/github-token/tokens', saveGitHubToken);
 router.get('/github-token/status/:tenantId', getGitHubStatus);
 router.get('/github-token/test/:tenantId', testGitHubToken);
 router.delete('/github-token/tokens/:tenantId', deleteGitHubToken);
+
+// Product repository routes
+router.use('/product-repository', productRepositoryRoutes);
 
 export default router;

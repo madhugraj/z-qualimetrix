@@ -59,9 +59,9 @@ export function GitInsights() {
   const status = useQuery({ queryKey: ["git-status"], queryFn: () => getGitStatus() });
 
   const insights = useQuery({
-    queryKey: ["git-insights", provider, repo],
-    queryFn: () => getRepoInsights({ data: { provider, repo } }),
-    enabled: repo.includes("/"),
+    queryKey: ["git-insights", provider, repos],
+    queryFn: () => getRepoInsights({ data: { provider, repo: repos[0] || "facebook/react" } }),
+    enabled: repos.length > 0 && repos[0].includes("/"),
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
