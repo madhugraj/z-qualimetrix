@@ -16,6 +16,10 @@ import {
   deleteGitHubToken,
   testGitHubToken
 } from '../controllers/github-token.controller';
+import {
+  getAiUsageAnalyticsHandler,
+  ingestAiUsageEvents
+} from '../controllers/ai-usage.controller';
 
 const router = Router();
 
@@ -94,5 +98,9 @@ router.delete('/github-token/tokens/:tenantId', deleteGitHubToken);
 
 // Product repository routes
 router.use('/product-repository', productRepositoryRoutes);
+
+// AI Usage Analytics routes
+router.get('/ai-usage/analytics', getAiUsageAnalyticsHandler);
+router.post('/public/ai-usage/events', ingestAiUsageEvents);
 
 export default router;

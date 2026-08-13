@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Lock } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Lock, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
@@ -13,11 +14,6 @@ import {
 } from "@/components/qm/ai-usage-charts";
 import {
   AI_CURRENT_USER_ID,
-  AI_INSIGHTS,
-  AI_KPIS,
-  AI_MODELS,
-  AI_PEOPLE,
-  AI_TOTAL,
   AI_VISIBILITY_NOTE,
   formatTokens,
   type AiVisibility,
@@ -61,18 +57,49 @@ const toneBorder: Record<string, string> = {
 
 function AiUsagePage() {
   const [level, setLevel] = useState<AiVisibility>("org");
-  const seesPeople = level === "org" || level === "team";
-  const seesCost = level !== "self";
-  const budgetPct = Math.round((AI_TOTAL.costUsd / AI_TOTAL.budgetUsd) * 100);
 
-  const people =
-    level === "self"
-      ? AI_PEOPLE.filter((p) => p.id === AI_CURRENT_USER_ID)
-      : level === "team"
-        ? AI_PEOPLE.filter(
-            (p) => p.squad === AI_PEOPLE.find((x) => x.id === AI_CURRENT_USER_ID)!.squad,
-          )
-        : AI_PEOPLE;
+  // Fetch live AI usage data from API
+  const { data: analytics, isLoading, error } = useQuery({
+    queryKey: ['ai-usage-analytics', level],
+    queryFn: async () => {
+      const response = await fetch(`http://localhost:3001/api/v1/ai-usage/analytics?visibility=${level}&userId=${AI_CURRENT_USER_ID}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch AI usage analytics');
+      }
+      const result = await response.json();
+      return result.data;
+    },
+    refetchInterval: 60000, // Refetch every minute
+  });
+
+  if (isLoading) {
+    return (
+      <AppShell>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (error || !analytics) {
+    return (
+      <AppShell>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <p className="text-muted-foreground">Failed to load AI usage analytics</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              {error instanceof Error ? error.message : 'Unknown error'}
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const seesPeople = analytics.canSeePeople;
+  const seesCost = analytics.canSeeCost;
+  const budgetPct = Math.round((analytics.totals.currentSprintCostUsd / analytics.totals.budgetUsd) * 100);
 
   return (
     <AppShell>
@@ -113,7 +140,7 @@ function AiUsagePage() {
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {AI_KPIS[level].map((kpi) => (
+        {analytics.kpis.map((kpi: any) => (
           <KpiMetricCard key={kpi.label} kpi={kpi} />
         ))}
       </div>
@@ -136,32 +163,32 @@ function AiUsagePage() {
           <div className="py-2">
             <div className="flex items-end justify-between">
               <span className="text-2xl font-semibold tracking-tight">
-                {seesCost ? `$${AI_TOTAL.costUsd.toFixed(0)}` : "$402"}
+                {seesCost ? `$${analytics.totals.currentSprintCostUsd.toFixed(0)}` : `$${analytics.totals.budgetUsd / analytics.totals.seats}`}
               </span>
               <span className="text-xs text-muted-foreground">
-                of {seesCost ? `$${AI_TOTAL.budgetUsd}` : "$650"} cap
+                of {seesCost ? `$${analytics.totals.budgetUsd}` : `$${analytics.totals.budgetUsd / analytics.totals.seats}`} cap
               </span>
             </div>
             <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(seesCost ? budgetPct : 62, 100)}%` }}
+                style={{ width: `${Math.min(budgetPct, 100)}%` }}
               />
             </div>
             <ul className="mt-4 space-y-1.5 text-xs text-muted-foreground">
               <li className="flex justify-between">
                 <span>Total tokens</span>
-                <span className="font-medium text-foreground">{formatTokens(AI_TOTAL.tokens)}</span>
+                <span className="font-medium text-foreground">{formatTokens(analytics.totals.tokens)}</span>
               </li>
               <li className="flex justify-between">
                 <span>Requests</span>
                 <span className="font-medium text-foreground">
-                  {AI_TOTAL.requests.toLocaleString()}
+                  {analytics.totals.requests.toLocaleString()}
                 </span>
               </li>
               <li className="flex justify-between">
                 <span>Cached input</span>
-                <span className="font-medium text-good">46%</span>
+                <span className="font-medium text-good">{analytics.totals.cachedPct}%</span>
               </li>
             </ul>
           </div>
@@ -189,7 +216,7 @@ function AiUsagePage() {
 
         <GlassPanel title="Efficiency insights" subtitle="Rule-driven cost & quality signals">
           <ul className="space-y-2.5">
-            {AI_INSIGHTS.filter((i) => seesCost || i.tone !== "ops").map((i) => (
+            {analytics.insights.filter((i: any) => seesCost || i.tone !== "ops").map((i: any) => (
               <li
                 key={i.title}
                 className={cn(
@@ -227,7 +254,7 @@ function AiUsagePage() {
                 </tr>
               </thead>
               <tbody>
-                {AI_MODELS.map((m) => (
+                {analytics.models.map((m: any) => (
                   <tr key={m.id} className="border-b border-[var(--glass-border)]/60 last:border-0">
                     <td className="py-2.5 font-medium">{m.name}</td>
                     <td className="py-2.5 text-muted-foreground">{m.vendor}</td>
@@ -278,14 +305,14 @@ function AiUsagePage() {
               </tr>
             </thead>
             <tbody>
-              {people.map((p) => (
+              {analytics.people.map((p: any) => (
                 <tr key={p.id} className="border-b border-[var(--glass-border)]/60 last:border-0">
                   <td className="py-2.5 font-medium">{p.name}</td>
                   <td className="py-2.5 text-muted-foreground">{p.role}</td>
                   <td className="py-2.5 text-muted-foreground">{p.squad}</td>
                   <td className="py-2.5 text-muted-foreground">{p.topModel}</td>
                   <td className="py-2.5 text-right">{p.tokens}M</td>
-                  {seesCost && (
+                  {seesCost && p.costUsd !== null && (
                     <td className="py-2.5 text-right font-medium">${p.costUsd}</td>
                   )}
                   <td
@@ -315,7 +342,7 @@ function AiUsagePage() {
           </table>
           {!seesPeople && (
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Team medians: 66% accept rate · 55% AI-assisted output · 9% rework.
+              Team medians: {analytics.benchmarks.acceptRate}% accept rate · {analytics.benchmarks.aiAssistedOutput}% AI-assisted output · {analytics.benchmarks.reworkRate}% rework.
             </p>
           )}
         </GlassPanel>
