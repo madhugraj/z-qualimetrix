@@ -165,12 +165,26 @@ function Landing() {
             />
             <span className="truncate text-sm font-semibold tracking-tight">QualiMetrix</span>
           </Link>
-          <Link
-            to="/login"
-            className="gloss gloss-hover rounded-full px-4 py-2 text-sm font-medium hover:text-primary"
-          >
-            Sign in
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/setup"
+              className="gloss gloss-hover rounded-full px-4 py-2 text-sm font-medium hover:text-primary"
+            >
+              Setup
+            </Link>
+            <Link
+              to="/admin"
+              className="gloss gloss-hover rounded-full px-4 py-2 text-sm font-medium hover:text-primary"
+            >
+              Admin
+            </Link>
+            <Link
+              to="/login"
+              className="gloss gloss-hover rounded-full px-4 py-2 text-sm font-medium hover:text-primary"
+            >
+              Sign in
+            </Link>
+          </div>
         </nav>
       </header>
 

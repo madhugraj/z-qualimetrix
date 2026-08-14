@@ -20,6 +20,7 @@ import {
   getAiUsageAnalyticsHandler,
   ingestAiUsageEvents
 } from '../controllers/ai-usage.controller';
+import adminRoutes from './admin.routes';
 
 const router = Router();
 
@@ -102,5 +103,8 @@ router.use('/product-repository', productRepositoryRoutes);
 // AI Usage Analytics routes
 router.get('/ai-usage/analytics', getAiUsageAnalyticsHandler);
 router.post('/public/ai-usage/events', ingestAiUsageEvents);
+
+// Admin configuration routes
+router.use('/admin', adminRoutes);
 
 export default router;

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CheckCircle2, CircleDashed, RefreshCw } from "lucide-react";
+import { CheckCircle2, CircleDashed, RefreshCw, Loader2, Star } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
@@ -27,9 +27,18 @@ export const Route = createFileRoute("/integrations")({
   component: Integrations,
 });
 
+interface GitHubRepo {
+  name: string;
+  full_name: string;
+  description: string;
+}
+
 function Integrations() {
   const [isGitHubConnected, setIsGitHubConnected] = useState(false);
   const [githubUsername, setGithubUsername] = useState<string | null>(null);
+  const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [tenantId] = useState('11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167');
 
   // Check GitHub connection status from both localStorage and database
   useEffect(() => {
@@ -42,18 +51,34 @@ function Integrations() {
         if (localUsername) {
           setGithubUsername(localUsername);
         }
+        // Fetch repositories when connected
+        fetchGitHubRepositories();
         return;
       }
 
-      // Then check database status
+      // Then check database status and sync token to localStorage
       try {
         const response = await fetch("http://localhost:3001/api/v1/github-token/status/11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167");
         const data = await response.json();
         if (data.success && data.data.isConnected) {
           setIsGitHubConnected(true);
           setGithubUsername(data.data.username || null);
-          // Sync to localStorage for consistency
+          // Sync to localStorage for consistency and GitInsights access
           localStorage.setItem('github_username', data.data.username || '');
+
+          // Fetch the actual token and sync to localStorage for GitInsights
+          try {
+            const tokenResponse = await fetch("http://localhost:3001/api/v1/github-token/get/11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167");
+            const tokenData = await tokenResponse.json();
+            if (tokenData.success && tokenData.data.token) {
+              localStorage.setItem('github_token', tokenData.data.token);
+            }
+          } catch (tokenError) {
+            console.error('Failed to sync GitHub token to localStorage:', tokenError);
+          }
+
+          // Fetch repositories when connected
+          fetchGitHubRepositories();
         }
       } catch (error) {
         console.error('Failed to check GitHub status:', error);
@@ -62,6 +87,26 @@ function Integrations() {
 
     checkGitHubConnection();
   }, []);
+
+  // Fetch GitHub repositories for the connected user
+  const fetchGitHubRepositories = async () => {
+    setIsLoadingRepos(true);
+    try {
+      const response = await fetch("http://localhost:3001/api/v1/github/user-repositories");
+      const data = await response.json();
+      if (data.success && data.data) {
+        setGithubRepos(data.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch GitHub repositories:', error);
+    } finally {
+      setIsLoadingRepos(false);
+    }
+  };
+
+  const refreshGitHubData = () => {
+    fetchGitHubRepositories();
+  };
 
   // Update GitHub integration status dynamically
   const updatedIntegrations = INTEGRATIONS.map(integration => {
@@ -121,8 +166,15 @@ function Integrations() {
               </div>
               <div className="flex items-center justify-between border-t border-glass-border/60 pt-3 text-xs text-muted-foreground">
                 <span>Last sync: {i.synced}</span>
-                <button className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25">
-                  <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
+                <button
+                  onClick={i.name === "GitHub" ? refreshGitHubData : undefined}
+                  className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25"
+                >
+                  {isLoadingRepos && i.name === "GitHub" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  )}
                   {connected ? "Sync now" : "Connect"}
                 </button>
               </div>
@@ -130,6 +182,62 @@ function Integrations() {
           );
         })}
       </div>
+
+      {/* Connected GitHub Repositories */}
+      {isGitHubConnected && githubRepos.length > 0 && (
+        <GlassPanel
+          title="Your GitHub Repositories"
+          subtitle="Connected repositories from your GitHub account"
+        >
+          <div className="space-y-2">
+            {isLoadingRepos ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              githubRepos.slice(0, 8).map((repo) => (
+                <div
+                  key={repo.full_name}
+                  className="flex items-center justify-between rounded-xl border border-glass-border/60 px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                      <span className="text-xs font-bold text-primary">
+                        {repo.name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{repo.full_name}</p>
+                      <p className="text-xs text-muted-foreground truncate max-w-md">
+                        {repo.description || "No description"}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-green-500 bg-green-500/10 px-2 py-1 rounded-full">
+                    Connected
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+          {githubRepos.length > 8 && (
+            <p className="text-xs text-center text-muted-foreground mt-2">
+              +{githubRepos.length - 8} more repositories
+            </p>
+          )}
+        </GlassPanel>
+      )}
+
+      {isGitHubConnected && githubRepos.length === 0 && !isLoadingRepos && (
+        <GlassPanel
+          title="No Repositories Found"
+          subtitle="Could not fetch your GitHub repositories"
+        >
+          <p className="text-sm text-muted-foreground">
+            Please ensure your GitHub token has the proper permissions and try refreshing.
+          </p>
+        </GlassPanel>
+      )}
 
       <GitInsights />
 

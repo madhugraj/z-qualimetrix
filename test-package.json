@@ -1,0 +1,11 @@
+{
+  "name": "test-real-ai-usage",
+  "type": "module",
+  "scripts": {
+    "test:ai:single": "tsx test-real-ai-usage.ts single",
+    "test:ai:multiple": "tsx test-real-ai-usage.ts multiple"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1"
+  }
+}

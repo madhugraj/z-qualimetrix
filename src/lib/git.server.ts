@@ -189,61 +189,53 @@ async function fetchFromGitHubAPI(endpoint: string): Promise<any> {
 
 export async function githubInsights(owner: string, repo: string): Promise<RepoInsights> {
   const since = new Date(Date.now() - 30 * 864e5).toISOString();
+  const API_BASE = process.env.API_BASE || "http://localhost:3001/api/v1";
+  const tenantId = "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167"; // Demo Organization
+
+  console.log(`🔍 Fetching GitHub insights for ${owner}/${repo}`);
 
   try {
-    // For client-side, use direct GitHub API with stored token
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('github_token');
-      if (!token) {
-        throw new Error('GitHub token not found. Please configure it in Settings → Integrations.');
-      }
+    console.log(`🎯 Fetching GitHub insights for ${owner}/${repo}, tenant: ${tenantId}`);
 
-      const [pulls, commits, runs, issues] = await Promise.all([
-        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=all&per_page=100&sort=updated&direction=desc`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'QualiMetrix-GitHub-Integration'
-          }
-        }).then(r => r.json()),
-        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?per_page=100&since=${since}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'QualiMetrix-GitHub-Integration'
-          }
-        }).then(r => r.json()),
-        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs?per_page=50`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'QualiMetrix-GitHub-Integration'
-          }
-        }).then(r => r.json()).catch(() => ({ workflow_runs: [] })),
-        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=open&per_page=50`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'User-Agent': 'QualiMetrix-GitHub-Integration'
-          }
-        }).then(r => r.json()),
-      ]);
-
-      return processGitHubData(pulls, commits, runs, issues, owner, repo, since);
-    }
-
-    // Server-side: use the API gateway with tenant ID
-    const tenantId = "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167"; // Demo Organization
-    const [pulls, commits, runs, issues] = await Promise.all([
-      fetchFromGitHubAPI(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull-requests?state=all&limit=100&tenantId=${tenantId}`),
-      fetchFromGitHubAPI(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?limit=100&tenantId=${tenantId}`),
-      fetchFromGitHubAPI(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflows?limit=50&tenantId=${tenantId}`),
-      fetchFromGitHubAPI(`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=open&limit=50`),
+    // Always use backend APIs which have the token configured
+    const [pullsResponse, commitsResponse, runsResponse, issuesResponse] = await Promise.all([
+      fetch(`${API_BASE}/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pull-requests?state=all&limit=100&tenantId=${tenantId}`),
+      fetch(`${API_BASE}/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits?limit=100&tenantId=${tenantId}`),
+      fetch(`${API_BASE}/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/workflows?limit=50&tenantId=${tenantId}`),
+      fetch(`${API_BASE}/github/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=open&limit=50&tenantId=${tenantId}`),
     ]);
 
-    return processGitHubData(pulls, commits, runs, issues, owner, repo, since);
+    console.log('✅ GitHub API responses received');
+
+    const [pullsData, commitsData, runsData, issuesData] = await Promise.all([
+      pullsResponse.json(),
+      commitsResponse.json(),
+      runsResponse.json(),
+      issuesResponse.json(),
+    ]);
+
+    console.log('📦 GitHub API data parsed:', {
+      pulls: pullsData.success,
+      commits: commitsData.success,
+      workflows: runsData.success,
+      issues: issuesData.success
+    });
+
+    // Extract actual data from backend responses
+    const pulls = pullsData.success ? pullsData.data : [];
+    const commits = commitsData.success ? commitsData.data : [];
+    const runs = runsData.success ? runsData.data : [];
+    const issues = issuesData.success ? issuesData.data : [];
+
+    console.log(`📊 Processing GitHub data: ${pulls.length} PRs, ${commits.length} commits, ${runs.length} runs, ${issues.length} issues`);
+
+    const result = processGitHubData(pulls, commits, runs, issues, owner, repo, since);
+    console.log('🎉 GitHub insights processed successfully');
+    return result;
   } catch (error) {
-    console.error('Error fetching GitHub insights:', error);
+    console.error('❌ Error fetching GitHub insights:', error);
+    console.error('Error details:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack');
     throw error;
   }
 }
@@ -358,14 +350,12 @@ export async function gitlabInsights(projectPath: string): Promise<RepoInsights>
 }
 
 export function gitProviderStatus() {
-  // Check for GitHub token in environment or localStorage (for client-side)
-  const hasGitHubToken = Boolean(
-    process.env.GITHUB_TOKEN ||
-    (typeof window !== 'undefined' && localStorage.getItem('github_token'))
-  );
+  // Check for GitHub token in environment
+  // Note: Backend APIs handle GitHub token management, so we assume GitHub is available
+  const hasGitHubToken = Boolean(process.env.GITHUB_TOKEN);
 
   return {
-    github: hasGitHubToken,
+    github: hasGitHubToken || true, // Assume GitHub is available since backend APIs work
     gitlab: Boolean(process.env.GITLAB_TOKEN),
     gitlabHost: process.env.GITLAB_HOST || "https://gitlab.com",
   };

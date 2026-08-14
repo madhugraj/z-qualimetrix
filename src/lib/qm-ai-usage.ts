@@ -215,7 +215,7 @@ export const AI_PEOPLE: AiPersonUsage[] = [
 ];
 
 /** The signed-in user for the "self" visibility level (placeholder until auth). */
-export const AI_CURRENT_USER_ID = "p2";
+export const AI_CURRENT_USER_ID = "1f9c1029-80ed-48ef-8892-c9aa06092640";
 
 export interface AiInsight {
   title: string;

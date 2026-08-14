@@ -13,18 +13,20 @@ import { recordEvents, parseIngestPayload } from '../../lib/ai-usage.server';
  */
 export async function getAiUsageAnalyticsHandler(req: Request, res: Response) {
   try {
-    const { visibility, userId, sprints } = req.query;
+    const { visibility, userId, sprints, enhanced } = req.query;
 
     // Parse parameters
     const visibilityLevel = (visibility as string) || 'self';
-    const userIdStr = (userId as string) || 'p1'; // Default to demo user
+    const userIdStr = (userId as string) || '1f9c1029-80ed-48ef-8892-c9aa06092640'; // Default to admin user
     const sprintsCount = sprints ? parseInt(sprints as string, 10) : undefined;
+    const enhancedAnalytics = enhanced === 'true'; // Enable MCP-enhanced analytics if requested
 
     // Get analytics data
     const analytics = await getAiUsageAnalytics({
       visibility: visibilityLevel as any,
       userId: userIdStr,
       sprints: sprintsCount,
+      enhanced: enhancedAnalytics,
     });
 
     res.json({
@@ -47,8 +49,8 @@ export async function getAiUsageAnalyticsHandler(req: Request, res: Response) {
  */
 export async function ingestAiUsageEvents(req: Request, res: Response) {
   try {
-    const events = parseIngestPayload(req.body);
-    const result = recordEvents(events);
+    const events = await parseIngestPayload(req.body);
+    const result = await recordEvents(events);
 
     res.json({
       success: true,

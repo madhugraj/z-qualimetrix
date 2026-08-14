@@ -1,9 +1,12 @@
 /**
  * Server functions for AI usage analytics
  * Bridges between the HTTP layer and the core analytics logic
+ * Now supports both standard and MCP-enhanced analytics
  */
 
-import { aggregate, type AiUsageQuery, type AiUsageAnalytics } from "./ai-usage.server";
+import { aggregate } from "./ai-usage.server";
+import { getEnhancedAnalytics } from "./mcp-analytics-enhanced";
+import type { AiUsageQuery, AiUsageAnalytics } from "./ai-usage.server";
 
 /**
  * Main server function to get AI usage analytics
@@ -13,8 +16,9 @@ export async function getAiUsageAnalytics(params: {
   visibility: "self" | "team" | "org" | "finance";
   userId: string;
   sprints?: number;
+  enhanced?: boolean; // Enable MCP-enhanced analytics
 }): Promise<AiUsageAnalytics> {
-  const { visibility, userId, sprints } = params;
+  const { visibility, userId, sprints, enhanced = false } = params;
 
   // Validate inputs
   if (!userId) {
@@ -29,9 +33,14 @@ export async function getAiUsageAnalytics(params: {
     throw new Error("sprints must be between 1 and 12");
   }
 
-  // Call the aggregate function from ai-usage.server.ts
+  // Choose between standard and MCP-enhanced analytics
   try {
-    return aggregate({ visibility, userId, sprints });
+    if (enhanced) {
+      console.log('Using MCP-enhanced analytics for better performance and insights');
+      return await getEnhancedAnalytics({ visibility, userId, sprints }, true) as AiUsageAnalytics;
+    } else {
+      return await aggregate({ visibility, userId, sprints });
+    }
   } catch (error) {
     console.error("Error generating AI usage analytics:", error);
     throw new Error("Failed to generate analytics data");

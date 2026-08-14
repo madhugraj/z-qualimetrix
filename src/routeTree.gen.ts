@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
@@ -18,12 +19,18 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as BugsIndexRouteImport } from './routes/bugs.index'
 import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AiUsageRoute = AiUsageRouteImport.update({
@@ -66,6 +73,11 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BugsIndexRoute = BugsIndexRouteImport.update({
   id: '/bugs/',
   path: '/bugs/',
@@ -79,6 +91,7 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -87,11 +100,13 @@ export interface FileRoutesByFullPath {
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
   '/bugs/': typeof BugsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -100,12 +115,14 @@ export interface FileRoutesByTo {
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
   '/bugs': typeof BugsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
@@ -114,6 +131,7 @@ export interface FileRoutesById {
   '/manual-log': typeof ManualLogRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
   '/bugs/': typeof BugsIndexRoute
 }
@@ -121,6 +139,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -129,11 +148,13 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/setup'
     | '/bugs/$bugId'
     | '/bugs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -142,11 +163,13 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/setup'
     | '/bugs/$bugId'
     | '/bugs'
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/ai-usage'
     | '/dashboard'
     | '/engineering-health'
@@ -155,12 +178,14 @@ export interface FileRouteTypes {
     | '/manual-log'
     | '/reports'
     | '/settings'
+    | '/setup'
     | '/bugs/$bugId'
     | '/bugs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   AiUsageRoute: typeof AiUsageRoute
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
@@ -169,6 +194,7 @@ export interface RootRouteChildren {
   ManualLogRoute: typeof ManualLogRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  SetupRoute: typeof SetupRoute
   BugsBugIdRoute: typeof BugsBugIdRoute
   BugsIndexRoute: typeof BugsIndexRoute
 }
@@ -180,6 +206,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ai-usage': {
@@ -238,6 +271,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bugs/': {
       id: '/bugs/'
       path: '/bugs'
@@ -257,6 +297,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   AiUsageRoute: AiUsageRoute,
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
@@ -265,6 +306,7 @@ const rootRouteChildren: RootRouteChildren = {
   ManualLogRoute: ManualLogRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  SetupRoute: SetupRoute,
   BugsBugIdRoute: BugsBugIdRoute,
   BugsIndexRoute: BugsIndexRoute,
 }

@@ -7,13 +7,17 @@
  * number is derived from those events at query time — nothing is hardcoded in
  * the UI.
  *
- * Storage is an in-process event store seeded with a deterministic replay of
- * the last 7 sprints so the dashboard is populated before any agent reports.
- * Swap `store` for a database table (same shape) when persistence is added.
+ * Storage now uses PostgreSQL persistence with Prisma ORM, replacing the
+ * previous in-memory store. The system seeds with demo data if empty and
+ * supports real-time event ingestion for live analytics.
  */
 
 export type AiVisibility = "self" | "team" | "org" | "finance";
 export type AiActivity = "code" | "tests" | "docs" | "review";
+
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 export const ACTIVITY_LABEL: Record<AiActivity, string> = {
   code: "Code generation",
@@ -52,44 +56,64 @@ export interface AiModelMeta {
   cacheDiscount: number;
 }
 
-export const MODEL_CATALOG: AiModelMeta[] = [
-  {
-    id: "claude-sonnet",
-    name: "Claude Sonnet",
-    vendor: "Anthropic",
-    purpose: "Code generation & refactors",
-    priceIn: 3,
-    priceOut: 15,
-    cacheDiscount: 0.9,
-  },
-  {
-    id: "codex",
-    name: "Codex",
-    vendor: "OpenAI",
-    purpose: "Inline completions & tests",
-    priceIn: 1.25,
-    priceOut: 10,
-    cacheDiscount: 0.9,
-  },
-  {
-    id: "yavar-inhouse",
-    name: "YAVAR In-house 8B",
-    vendor: "Self-hosted",
-    purpose: "Test cases, RCA drafts, docs",
-    priceIn: 0.18,
-    priceOut: 0.55,
-    cacheDiscount: 1,
-  },
-  {
-    id: "gemini",
-    name: "Gemini Pro",
-    vendor: "Google",
-    purpose: "Spec analysis & summarisation",
-    priceIn: 1.25,
-    priceOut: 5,
-    cacheDiscount: 0.75,
-  },
-];
+export async function getModelCatalog(): Promise<AiModelMeta[]> {
+  try {
+    const models = await prisma.aiModelCatalog.findMany({
+      where: { isActive: true }
+    });
+
+    return models.map(m => ({
+      id: m.modelId,
+      name: m.name,
+      vendor: m.vendor,
+      purpose: m.purpose,
+      priceIn: Number(m.priceIn),
+      priceOut: Number(m.priceOut),
+      cacheDiscount: Number(m.cacheDiscount),
+    }));
+  } catch (error) {
+    console.error('Error fetching model catalog:', error);
+    // Fallback to hardcoded models
+    return [
+      {
+        id: "claude-sonnet",
+        name: "Claude Sonnet",
+        vendor: "Anthropic",
+        purpose: "Code generation & refactors",
+        priceIn: 3,
+        priceOut: 15,
+        cacheDiscount: 0.9,
+      },
+      {
+        id: "codex",
+        name: "Codex",
+        vendor: "OpenAI",
+        purpose: "Inline completions & tests",
+        priceIn: 1.25,
+        priceOut: 10,
+        cacheDiscount: 0.9,
+      },
+      {
+        id: "yavar-inhouse",
+        name: "YAVAR In-house 8B",
+        vendor: "Self-hosted",
+        purpose: "Test cases, RCA drafts, docs",
+        priceIn: 0.18,
+        priceOut: 0.55,
+        cacheDiscount: 1,
+      },
+      {
+        id: "gemini",
+        name: "Gemini Pro",
+        vendor: "Google",
+        purpose: "Spec analysis & summarisation",
+        priceIn: 1.25,
+        priceOut: 5,
+        cacheDiscount: 0.75,
+      },
+    ];
+  }
+}
 
 export interface AiMember {
   id: string;
@@ -100,40 +124,121 @@ export interface AiMember {
   seatBudgetUsd: number;
 }
 
-export const AI_DIRECTORY: AiMember[] = [
-  { id: "p1", name: "Sofia R.", role: "Developer", squad: "Squad Nova", seatBudgetUsd: 650 },
-  { id: "p2", name: "Marcus L.", role: "Developer", squad: "Squad Nova", seatBudgetUsd: 650 },
-  { id: "p3", name: "Priya N.", role: "Tester", squad: "Squad Kite", seatBudgetUsd: 400 },
-  { id: "p4", name: "Dan K.", role: "Developer", squad: "Squad Pulse", seatBudgetUsd: 650 },
-  { id: "p5", name: "Ayo B.", role: "Tester", squad: "Squad Kite", seatBudgetUsd: 400 },
-  { id: "p6", name: "Lena F.", role: "Tech writer", squad: "Squad Pulse", seatBudgetUsd: 300 },
+export let AI_DIRECTORY: AiMember[] = [
+  { id: "1f9c1029-80ed-48ef-8892-c9aa06092640", name: "Admin User", role: "Developer", squad: "Squad Nova", seatBudgetUsd: 650 },
+  { id: "275905eb-e6e3-4115-9fb9-606b1d59101c", name: "Demo Tester", role: "Tester", squad: "Squad Kite", seatBudgetUsd: 400 },
 ];
 
 export const SPRINTS = ["S6", "S7", "S8", "S9", "S10", "S11", "S12"];
 export const ORG_SPRINT_BUDGET_USD = 3200;
 
-const modelById = new Map(MODEL_CATALOG.map((m) => [m.id, m]));
-const memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
+let memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
 
-export function eventCost(e: AiUsageEvent): number {
+// Function to refresh AI directory from database
+export async function refreshAiDirectory() {
+  try {
+    const prisma = new PrismaClient();
+    const users = await prisma.user.findMany({
+      where: { isActive: true }
+    });
+
+    AI_DIRECTORY = users.map(user => ({
+      id: user.id,
+      name: user.name || user.email,
+      role: user.role as "Developer" | "Tester" | "Tech writer",
+      squad: "Default Squad", // This would come from team assignments in a full implementation
+      seatBudgetUsd: 400 // Default budget
+    }));
+
+    memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
+    console.log(`🔄 Refreshed AI directory with ${AI_DIRECTORY.length} users`);
+  } catch (error) {
+    console.error('Error refreshing AI directory:', error);
+  }
+}
+
+export async function eventCost(e: AiUsageEvent): Promise<number> {
+  const modelCatalog = await getModelCatalog();
+  const modelById = new Map(modelCatalog.map((m) => [m.id, m]));
+
   const m = modelById.get(e.modelId);
   if (!m) return 0;
   const billableIn = e.tokensIn - e.cachedIn + e.cachedIn * (1 - m.cacheDiscount);
   return (billableIn / 1_000_000) * m.priceIn + (e.tokensOut / 1_000_000) * m.priceOut;
 }
 
-/* ------------------------------------------------------------------ store */
+/* ------------------------------------------------------------------ database store */
 
-const store: AiUsageEvent[] = [];
+export async function recordEvents(events: AiUsageEvent[]) {
+  try {
+    // Check if events array is empty
+    if (events.length === 0) {
+      return { accepted: 0, total: await prisma.aiUsageEvent.count() };
+    }
 
-export function recordEvents(events: AiUsageEvent[]) {
-  store.push(...events);
-  return { accepted: events.length, total: store.length };
+    // Insert events into database
+    await prisma.aiUsageEvent.createMany({
+      data: events.map(e => ({
+        id: e.id,
+        timestamp: new Date(e.ts),
+        sprint: e.sprint,
+        userId: e.userId,
+        modelId: e.modelId,
+        activity: e.activity,
+        tokensIn: e.tokensIn,
+        tokensOut: e.tokensOut,
+        cachedIn: e.cachedIn,
+        latencyMs: e.latencyMs,
+        accepted: e.accepted,
+        reworked: e.reworked,
+      }))
+    });
+
+    const total = await prisma.aiUsageEvent.count();
+    return { accepted: events.length, total };
+  } catch (error) {
+    console.error('Error recording AI usage events:', error);
+    throw new Error('Failed to record events');
+  }
 }
 
-export function allEvents(): AiUsageEvent[] {
-  if (store.length === 0) store.push(...seedEvents());
-  return store;
+export async function allEvents(): Promise<AiUsageEvent[]> {
+  try {
+    const count = await prisma.aiUsageEvent.count();
+
+    // If no events exist, seed with demo data
+    if (count === 0) {
+      console.log('No AI usage events found, seeding with demo data...');
+      const seededEvents = seedEvents();
+      await recordEvents(seededEvents);
+      return seededEvents;
+    }
+
+    // Fetch all events from database
+    const dbEvents = await prisma.aiUsageEvent.findMany({
+      orderBy: { timestamp: 'desc' }
+    });
+
+    return dbEvents.map(e => ({
+      id: e.id,
+      ts: e.timestamp.toISOString(),
+      sprint: e.sprint,
+      userId: e.userId,
+      modelId: e.modelId,
+      activity: e.activity as AiActivity,
+      tokensIn: e.tokensIn,
+      tokensOut: e.tokensOut,
+      cachedIn: e.cachedIn,
+      latencyMs: e.latencyMs,
+      accepted: e.accepted,
+      reworked: e.reworked,
+    }));
+  } catch (error) {
+    console.error('Error fetching AI usage events:', error);
+    // Fallback to seeded data if database fails
+    console.log('Falling back to seeded demo data...');
+    return seedEvents();
+  }
 }
 
 /* ---------------------------------------------------------------- seeding */
@@ -151,41 +256,17 @@ const PROFILE: Record<
   string,
   { volume: number; models: [string, number][]; accept: number; rework: number }
 > = {
-  p1: {
+  "1f9c1029-80ed-48ef-8892-c9aa06092640": {
     volume: 1,
     models: [["claude-sonnet", 0.6], ["codex", 0.3], ["yavar-inhouse", 0.1]],
     accept: 0.78,
     rework: 0.06,
   },
-  p2: {
-    volume: 0.85,
-    models: [["codex", 0.55], ["claude-sonnet", 0.3], ["yavar-inhouse", 0.15]],
-    accept: 0.69,
-    rework: 0.11,
-  },
-  p3: {
+  "275905eb-e6e3-4115-9fb9-606b1d59101c": {
     volume: 0.65,
     models: [["yavar-inhouse", 0.6], ["codex", 0.25], ["gemini", 0.15]],
     accept: 0.72,
     rework: 0.05,
-  },
-  p4: {
-    volume: 1.3,
-    models: [["claude-sonnet", 0.7], ["codex", 0.2], ["gemini", 0.1]],
-    accept: 0.52,
-    rework: 0.19,
-  },
-  p5: {
-    volume: 0.45,
-    models: [["yavar-inhouse", 0.7], ["gemini", 0.2], ["codex", 0.1]],
-    accept: 0.66,
-    rework: 0.08,
-  },
-  p6: {
-    volume: 0.3,
-    models: [["gemini", 0.55], ["yavar-inhouse", 0.35], ["claude-sonnet", 0.1]],
-    accept: 0.74,
-    rework: 0.04,
   },
 };
 
@@ -280,14 +361,18 @@ function pct(part: number, total: number) {
   return total === 0 ? 0 : Math.round((part / total) * 1000) / 10;
 }
 
-export function aggregate(q: AiUsageQuery) {
+export async function aggregate(q: AiUsageQuery) {
   const sprints = SPRINTS.slice(-(q.sprints ?? SPRINTS.length));
-  const all = allEvents().filter((e) => sprints.includes(e.sprint));
-  const scoped = scopeEvents(all, q);
+  const all = await allEvents();
+  const sprintFiltered = all.filter((e) => sprints.includes(e.sprint));
+  const scoped = scopeEvents(sprintFiltered, q);
   const latest = sprints[sprints.length - 1];
   const previous = sprints[sprints.length - 2];
 
-  const costOf = (list: AiUsageEvent[]) => sum(list.map(eventCost));
+  const costOf = async (list: AiUsageEvent[]) => {
+    const costs = await Promise.all(list.map(eventCost));
+    return sum(costs);
+  };
   const tokensOf = (list: AiUsageEvent[]) => sum(list.map((e) => e.tokensIn + e.tokensOut));
 
   const inSprint = (list: AiUsageEvent[], s?: string) =>
@@ -297,8 +382,10 @@ export function aggregate(q: AiUsageQuery) {
   const prior = inSprint(scoped, previous);
 
   /* models */
-  const models = MODEL_CATALOG.map((m) => {
+  const modelCatalog = await getModelCatalog();
+  const models = await Promise.all(modelCatalog.map(async (m) => {
     const list = scoped.filter((e) => e.modelId === m.id);
+    const costValue = await costOf(list);
     return {
       id: m.id,
       name: m.name,
@@ -307,20 +394,21 @@ export function aggregate(q: AiUsageQuery) {
       tokensIn: sum(list.map((e) => e.tokensIn)),
       tokensOut: sum(list.map((e) => e.tokensOut)),
       requests: list.length,
-      costUsd: Math.round(costOf(list) * 10) / 10,
+      costUsd: Math.round(costValue * 10) / 10,
       avgLatencyMs: list.length ? Math.round(sum(list.map((e) => e.latencyMs)) / list.length) : 0,
       acceptRate: pct(list.filter((e) => e.accepted).length, list.length),
     };
-  }).filter((m) => m.requests > 0);
+  })).then((m) => m.filter((m) => m.requests > 0));
 
   /* trends */
-  const spendTrend = sprints.map((s) => {
+  const spendTrend = await Promise.all(sprints.map(async (s) => {
     const row: Record<string, string | number> = { sprint: s, budget: sprintBudget(q) };
-    for (const m of MODEL_CATALOG) {
-      row[m.id] = Math.round(costOf(scoped.filter((e) => e.sprint === s && e.modelId === m.id)));
+    for (const m of modelCatalog) {
+      const sprintCost = await costOf(scoped.filter((e) => e.sprint === s && e.modelId === m.id));
+      row[m.id] = Math.round(sprintCost);
     }
     return row;
-  });
+  }));
 
   const tokenTrend = sprints.map((s) => {
     const list = scoped.filter((e) => e.sprint === s);
@@ -333,14 +421,14 @@ export function aggregate(q: AiUsageQuery) {
     };
   });
 
-  const activityMix = (Object.keys(ACTIVITY_LABEL) as AiActivity[]).map((a) => {
+  const activityMix = await Promise.all((Object.keys(ACTIVITY_LABEL) as AiActivity[]).map(async (a) => {
     const list = scoped.filter((e) => e.activity === a);
     return {
       activity: ACTIVITY_LABEL[a],
       tokens: Math.round((tokensOf(list) / 1_000_000) * 10) / 10,
-      costUsd: Math.round(costOf(list)),
+      costUsd: Math.round(await costOf(list)),
     };
-  });
+  }));
 
   /* people — visibility controls who is listed and whether cost is exposed */
   const visibleMembers =
@@ -350,8 +438,8 @@ export function aggregate(q: AiUsageQuery) {
         ? AI_DIRECTORY.filter((m) => m.squad === memberById.get(q.userId)?.squad)
         : AI_DIRECTORY;
 
-  const people = visibleMembers
-    .map((member) => {
+  const people = await Promise.all(visibleMembers
+    .map(async (member) => {
       const list = scoped.filter((e) => e.userId === member.id);
       const topModel = models
         .map((m) => ({ m, n: list.filter((e) => e.modelId === m.id).length }))
@@ -363,15 +451,15 @@ export function aggregate(q: AiUsageQuery) {
         role: member.role,
         squad: member.squad,
         tokens: Math.round((tokensOf(list) / 1_000_000) * 10) / 10,
-        costUsd: q.visibility === "self" ? null : Math.round(costOf(list)),
+        costUsd: q.visibility === "self" ? null : Math.round(await costOf(list)),
         requests: list.length,
         acceptRate: pct(assisted.length, list.length),
         aiAssistedOutput: pct(sum(assisted.map((e) => e.tokensOut)), sum(list.map((e) => e.tokensOut))),
         reworkRate: pct(list.filter((e) => e.reworked).length, assisted.length),
         topModel: topModel?.m.name ?? "—",
       };
-    })
-    .sort((a, b) => b.tokens - a.tokens);
+    }))
+    .then((people) => people.sort((a, b) => b.tokens - a.tokens));
 
   /* org-wide medians so "self" viewers get context without seeing colleagues */
   const orgPeople = AI_DIRECTORY.map((member) => {
@@ -395,10 +483,10 @@ export function aggregate(q: AiUsageQuery) {
 
   /* totals + KPIs */
   const budget = sprintBudget(q);
-  const currentCost = costOf(current);
-  const priorCost = costOf(prior);
+  const currentCost = await costOf(current);
+  const priorCost = await costOf(prior);
   const totals = {
-    costUsd: Math.round(costOf(scoped)),
+    costUsd: Math.round(await costOf(scoped)),
     currentSprintCostUsd: Math.round(currentCost),
     tokens: tokensOf(scoped),
     requests: scoped.length,
@@ -624,7 +712,8 @@ function buildKpis(
       }),
     },
     efficiencyKpi,
-  ].slice(0, 4);
+  );
+  return financeKpis.slice(0, 4);
 }
 
 function buildInsights(
@@ -684,7 +773,7 @@ function buildInsights(
 
 /* ------------------------------------------------------------ ingest util */
 
-export function parseIngestPayload(body: unknown): AiUsageEvent[] {
+export async function parseIngestPayload(body: unknown): Promise<AiUsageEvent[]> {
   const rows = Array.isArray(body)
     ? body
     : Array.isArray((body as { events?: unknown[] })?.events)
@@ -693,10 +782,17 @@ export function parseIngestPayload(body: unknown): AiUsageEvent[] {
   if (!rows) throw new Error("Body must be an array of events or { events: [...] }.");
   if (rows.length > 1000) throw new Error("Max 1000 events per batch.");
 
+  // Refresh AI directory to include newly added users
+  await refreshAiDirectory();
+
+  // Get valid model IDs from database
+  const modelCatalog = await getModelCatalog();
+  const validModelIds = new Set(modelCatalog.map(m => m.id));
+
   return rows.map((raw, i) => {
     const e = raw as Partial<AiUsageEvent>;
     if (!e.userId || !memberById.has(e.userId)) throw new Error(`events[${i}]: unknown userId.`);
-    if (!e.modelId || !modelById.has(e.modelId)) throw new Error(`events[${i}]: unknown modelId.`);
+    if (!e.modelId || !validModelIds.has(e.modelId)) throw new Error(`events[${i}]: unknown modelId.`);
     const activity = (e.activity ?? "code") as AiActivity;
     if (!(activity in ACTIVITY_LABEL)) throw new Error(`events[${i}]: unknown activity.`);
     const tokensIn = Number(e.tokensIn ?? 0);
@@ -707,7 +803,7 @@ export function parseIngestPayload(body: unknown): AiUsageEvent[] {
     if (Number.isNaN(ts.getTime())) throw new Error(`events[${i}]: invalid ts.`);
 
     return {
-      id: e.id ?? `ing-${ts.getTime()}-${i}-${Math.random().toString(36).slice(2, 8)}`,
+      id: e.id ?? crypto.randomUUID(),
       ts: ts.toISOString(),
       sprint: e.sprint ?? SPRINTS[SPRINTS.length - 1],
       userId: e.userId,

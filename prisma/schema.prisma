@@ -38,6 +38,7 @@ model Tenant {
   deliverables          ManualDeliverable[]
   sprints               Sprint[]
   githubIntegrations    GitHubIntegration[]
+  aiUsageEvents         AiUsageEvent[]
 
   @@index([slug])
   @@index([domain])
@@ -65,6 +66,7 @@ model User {
   createdDeliverables ManualDeliverable[] @relation("DeliverableCreator")
   refreshTokens     RefreshToken[]
   githubIntegrations GitHubIntegration[]
+  aiUsageEvents     AiUsageEvent[]
 
   @@index([email])
   @@map("users")
@@ -325,4 +327,78 @@ model ProductRepository {
   @@index([githubRepo])
   @@index([isActive])
   @@map("product_repositories")
+}
+
+// ============================================================================
+// AI USAGE ANALYTICS
+// ============================================================================
+
+model AiUsageEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  timestamp    DateTime @default(now()) @map("timestamp") @db.Timestamptz
+  sprint       String   @db.VarChar(50)
+  userId       String   @map("user_id") @db.Uuid
+  modelId      String   @map("model_id") @db.VarChar(100)
+  activity     String   @db.VarChar(50)
+  tokensIn     Int      @map("tokens_in")
+  tokensOut    Int      @map("tokens_out")
+  cachedIn     Int      @map("cached_in") @default(0)
+  latencyMs    Int      @map("latency_ms")
+  accepted     Boolean  @default(false)
+  reworked     Boolean  @default(false)
+  tenantId     String?  @map("tenant_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([modelId])
+  @@index([sprint])
+  @@index([tenantId])
+  @@index([activity])
+  @@map("ai_usage_events")
+}
+
+model AiModelCatalog {
+  id            String    @id @default(uuid()) @db.Uuid
+  modelId       String    @unique @map("model_id") @db.VarChar(100)
+  name          String    @db.VarChar(255)
+  vendor        String    @db.VarChar(100)
+  purpose       String    @db.Text
+  priceIn       Decimal   @map("price_in") @db.Decimal(10, 4)
+  priceOut      Decimal   @map("price_out") @db.Decimal(10, 4)
+  cacheDiscount Decimal   @map("cache_discount") @db.Decimal(3, 2) @default(0.9)
+  isActive      Boolean   @default(true) @map("is_active")
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([modelId])
+  @@index([isActive])
+  @@map("ai_model_catalog")
+}
+
+model AiUsageAnalytics {
+  id              String   @id @default(uuid()) @db.Uuid
+  visibility      String   @db.VarChar(20)
+  userId          String   @map("user_id") @db.Uuid
+  sprints         Int      @default(7)
+  generatedAt     DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  totals          Json     @default("{}")
+  kpis            Json     @default("[]")
+  models          Json     @default("[]")
+  spendTrend      Json     @default("[]")
+  tokenTrend      Json     @default("[]")
+  activityMix     Json     @default("[]")
+  people          Json     @default("[]")
+  benchmarks      Json     @default("{}")
+  insights        Json     @default("[]")
+  canSeeCost      Boolean  @default(true) @map("can_see_cost")
+  canSeePeople    Boolean  @default(true) @map("can_see_people")
+
+  @@index([userId])
+  @@index([visibility])
+  @@index([generatedAt])
+  @@map("ai_usage_analytics")
 }

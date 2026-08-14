@@ -313,6 +313,11 @@ export async function validateToken(req: Request, res: Response): Promise<void> 
 
 export async function getUserRepositories(req: Request, res: Response): Promise<void> {
   try {
+    const tenantId = (req.query.tenantId as string) || '11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167'
+
+    // Set token from database for this tenant
+    await githubService.setTokenFromDatabase(tenantId)
+
     const repositories = await githubService.getUserRepositories()
 
     res.json({
