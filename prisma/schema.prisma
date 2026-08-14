@@ -56,6 +56,9 @@ model User {
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  squad                  String?   @db.VarChar(100)
+  aiIngestTokenHash      String?   @unique @map("ai_ingest_token_hash") @db.VarChar(64)
+  aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
 
   tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   tenantMemberships TenantMembership[]

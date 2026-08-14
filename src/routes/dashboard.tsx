@@ -17,6 +17,7 @@ import {
 } from "@/components/qm/charts";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
+import { TeamPerformanceMetrics } from "@/components/qm/TeamPerformanceMetrics";
 import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Role } from "@/lib/qm-data";
 
@@ -184,6 +185,21 @@ function Dashboard() {
           </GlassPanel>
           <GlassPanel title="Recent deliverables" subtitle="Demos, docs & RCAs">
             <DeliverablesFeed />
+          </GlassPanel>
+        </div>
+      )}
+
+      {/* Team Performance Dashboard for Product Manager */}
+      {role === "po" && (
+        <div className="mt-6">
+          <GlassPanel
+            title="Team Performance Analytics"
+            subtitle="Velocity, efficiency, and workload distribution insights"
+          >
+            <TeamPerformanceMetrics
+              productId="demo-product"
+              tenantId="11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167"
+            />
           </GlassPanel>
         </div>
       )}
