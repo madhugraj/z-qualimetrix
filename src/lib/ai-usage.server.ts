@@ -16,6 +16,7 @@ export type AiVisibility = "self" | "team" | "org" | "finance";
 export type AiActivity = "code" | "tests" | "docs" | "review";
 
 import { PrismaClient } from '@prisma/client';
+import { hashToken, generateSecureToken } from './encryption';
 
 const prisma = new PrismaClient();
 
@@ -137,7 +138,6 @@ let memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
 // Function to refresh AI directory from database
 export async function refreshAiDirectory() {
   try {
-    const prisma = new PrismaClient();
     const users = await prisma.user.findMany({
       where: { isActive: true }
     });
@@ -146,7 +146,7 @@ export async function refreshAiDirectory() {
       id: user.id,
       name: user.name || user.email,
       role: user.role as "Developer" | "Tester" | "Tech writer",
-      squad: "Default Squad", // This would come from team assignments in a full implementation
+      squad: user.squad ?? "Unassigned",
       seatBudgetUsd: 400 // Default budget
     }));
 
@@ -154,6 +154,83 @@ export async function refreshAiDirectory() {
     console.log(`🔄 Refreshed AI directory with ${AI_DIRECTORY.length} users`);
   } catch (error) {
     console.error('Error refreshing AI directory:', error);
+  }
+}
+
+/* ------------------------------------------------------- self-service connect */
+
+/**
+ * Find a user by email, or create one. Used by the self-service "Connect your
+ * Claude Code" flow — a developer explicitly typing their own email is a
+ * deliberate opt-in, unlike auto-provisioning from an unverified telemetry
+ * attribute.
+ */
+export async function findOrCreateUserByEmail(email: string, squad?: string) {
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    if (squad && existing.squad !== squad) {
+      return prisma.user.update({ where: { id: existing.id }, data: { squad } });
+    }
+    return existing;
+  }
+  return prisma.user.create({
+    data: {
+      email,
+      name: email.split("@")[0],
+      role: "Developer",
+      squad: squad ?? null,
+      isActive: true,
+    },
+  });
+}
+
+/**
+ * Issue a fresh personal ingest token for a user, invalidating any prior one.
+ * Only the hash is persisted — the plaintext is returned once and never stored.
+ */
+export async function issueAiIngestToken(userId: string): Promise<string> {
+  const rawToken = generateSecureToken();
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      aiIngestTokenHash: hashToken(rawToken),
+      aiIngestTokenCreatedAt: new Date(),
+    },
+  });
+  return rawToken;
+}
+
+/** Resolve a user from a presented raw ingest token. Never trusts payload-supplied identity. */
+export async function resolveUserByIngestToken(rawToken: string) {
+  const user = await prisma.user.findUnique({
+    where: { aiIngestTokenHash: hashToken(rawToken) },
+  });
+  return user && user.isActive ? user : null;
+}
+
+/**
+ * Auto-register a model catalog entry the first time an unrecognized modelId is
+ * seen from live telemetry (e.g. non-Anthropic models routed through a
+ * third-party-compatible proxy). Pricing is a placeholder until an admin verifies it.
+ */
+export async function ensureModelCatalogEntry(modelId: string): Promise<void> {
+  try {
+    const existing = await prisma.aiModelCatalog.findUnique({ where: { modelId } });
+    if (existing) return;
+    await prisma.aiModelCatalog.create({
+      data: {
+        modelId,
+        name: modelId,
+        vendor: "Unverified (auto-detected via OTel)",
+        purpose: "Auto-created placeholder from Claude Code telemetry — verify pricing before trusting cost figures.",
+        priceIn: 3,
+        priceOut: 15,
+        cacheDiscount: 0.9,
+        isActive: true,
+      },
+    });
+  } catch (error: any) {
+    if (error?.code !== "P2002") throw error; // ignore race on concurrent first-seen model
   }
 }
 
@@ -485,6 +562,7 @@ export async function aggregate(q: AiUsageQuery) {
   const budget = sprintBudget(q);
   const currentCost = await costOf(current);
   const priorCost = await costOf(prior);
+  const costsBySprint = await Promise.all(sprints.map((s) => costOf(scoped.filter((e) => e.sprint === s))));
   const totals = {
     costUsd: Math.round(await costOf(scoped)),
     currentSprintCostUsd: Math.round(currentCost),
@@ -506,7 +584,7 @@ export async function aggregate(q: AiUsageQuery) {
     currentCost,
     priorCost,
     totals,
-    costOf,
+    costsBySprint,
     tokensOf,
   });
 
@@ -564,12 +642,12 @@ function buildKpis(
     currentCost: number;
     priorCost: number;
     totals: { budgetUsd: number; acceptRate: number; activeUsers: number; seats: number };
-    costOf: (l: AiUsageEvent[]) => number;
+    costsBySprint: number[];
     tokensOf: (l: AiUsageEvent[]) => number;
   },
 ): Kpi[] {
   const bySprint = (s: string) => ctx.scoped.filter((e) => e.sprint === s);
-  const costSpark = ctx.sprints.map((s) => Math.round(ctx.costOf(bySprint(s))));
+  const costSpark = ctx.costsBySprint.map((c) => Math.round(c));
   const tokenSpark = ctx.sprints.map(
     (s) => Math.round((ctx.tokensOf(bySprint(s)) / 1_000_000) * 10) / 10,
   );
@@ -648,10 +726,10 @@ function buildKpis(
     delta: delta(costPerAcceptedNow, costPerAcceptedPrev),
     trend: dir(costPerAcceptedNow, costPerAcceptedPrev),
     tone: costPerAcceptedNow <= costPerAcceptedPrev ? "good" : "warning",
-    spark: ctx.sprints.map((s) => {
+    spark: ctx.sprints.map((s, i) => {
       const l = bySprint(s);
       return (
-        Math.round((ctx.costOf(l) / Math.max(1, l.filter((e) => e.accepted).length)) * 1000) / 1000
+        Math.round((ctx.costsBySprint[i] / Math.max(1, l.filter((e) => e.accepted).length)) * 1000) / 1000
       );
     }),
   };
@@ -687,7 +765,7 @@ function buildKpis(
       delta: delta(ctx.currentCost, ctx.priorCost),
       trend: dir(ctx.currentCost, ctx.priorCost),
       tone: budgetPct > 90 ? "critical" : budgetPct > 75 ? "warning" : "good",
-      spark: ctx.sprints.map((s) => pct(ctx.costOf(bySprint(s)), ctx.totals.budgetUsd)),
+      spark: ctx.costsBySprint.map((c) => pct(c, ctx.totals.budgetUsd)),
     },
     {
       label: "Effort saved (est.)",
@@ -705,10 +783,10 @@ function buildKpis(
       delta: "vs. $65/hr blended rate",
       trend: "up",
       tone: "good",
-      spark: ctx.sprints.map((s) => {
+      spark: ctx.sprints.map((s, i) => {
         const l = bySprint(s);
         const hrs = l.filter((e) => e.accepted && !e.reworked).length * 0.12;
-        return Math.round((hrs * 65) / Math.max(1, ctx.costOf(l)) * 10) / 10;
+        return Math.round((hrs * 65) / Math.max(1, ctx.costsBySprint[i]) * 10) / 10;
       }),
     },
     efficiencyKpi,
