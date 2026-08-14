@@ -72,14 +72,26 @@ export function EnhancedRepositorySelector({
   const loadAvailableRepositories = async () => {
     setIsLoadingRepos(true);
     try {
-      const response = await fetch('http://localhost:3001/api/v1/github/repositories', {
+      const response = await fetch('http://localhost:3001/api/v1/github/user-repositories', {
         headers: { 'X-Tenant-Id': tenantId }
       });
       const data = await response.json();
 
-      if (data.success && data.data.repositories) {
-        setAvailableRepos(data.data.repositories);
-        console.log(`✅ Loaded ${data.data.repositories.length} repositories from GitHub`);
+      if (data.success && data.data) {
+        // Transform GitHub API response to match our interface
+        const transformedRepos = data.data.map((repo: any) => ({
+          id: Math.random(), // Generate random ID since API doesn't provide one
+          full_name: repo.full_name,
+          name: repo.name,
+          description: repo.description || '',
+          private: repo.private || false,
+          stargazers_count: repo.stargazers_count || 0,
+          forks_count: repo.forks_count || 0,
+          updated_at: repo.updated_at || new Date().toISOString()
+        }));
+        setAvailableRepos(transformedRepos);
+        console.log(`✅ Loaded ${transformedRepos.length} real repositories from madhugraj's GitHub account`);
+        console.log(`📋 Repositories: ${transformedRepos.map(r => r.full_name).slice(0, 5).join(', ')}${transformedRepos.length > 5 ? '...' : ''}`);
       } else {
         // Fallback to mock data for demo
         const mockRepos = generateMockRepositories();
