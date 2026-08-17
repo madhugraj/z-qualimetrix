@@ -33,12 +33,33 @@ interface GitHubRepo {
   description: string;
 }
 
+interface ProviderStatus {
+  isConnected: boolean;
+  connectedAccountLabel?: string | null;
+  lastSyncedAt?: string | null;
+}
+
+const DEMO_USER_ID = '1f9c1029-80ed-48ef-8892-c9aa06092640';
+
+function timeAgo(iso?: string | null): string {
+  if (!iso) return '—';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const minutes = Math.round(diffMs / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} h ago`;
+}
+
 function Integrations() {
   const [isGitHubConnected, setIsGitHubConnected] = useState(false);
   const [githubUsername, setGithubUsername] = useState<string | null>(null);
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   const [tenantId] = useState('11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167');
+  const [jiraStatus, setJiraStatus] = useState<ProviderStatus>({ isConnected: false });
+  const [adoStatus, setAdoStatus] = useState<ProviderStatus>({ isConnected: false });
+  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
 
   // Check GitHub connection status from both localStorage and database
   useEffect(() => {
@@ -88,6 +109,53 @@ function Integrations() {
     checkGitHubConnection();
   }, []);
 
+  useEffect(() => {
+    const fetchProviderStatus = async (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) => {
+      try {
+        const response = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/status?tenantId=${tenantId}`);
+        const data = await response.json();
+        if (data.success) setter(data.data);
+      } catch (error) {
+        console.error(`Failed to check ${provider} status:`, error);
+      }
+    };
+
+    fetchProviderStatus("jira", setJiraStatus);
+    fetchProviderStatus("azure_devops", setAdoStatus);
+  }, [tenantId]);
+
+  async function handleProviderAction(provider: "jira" | "azure_devops", isConnected: boolean) {
+    if (!isConnected) {
+      try {
+        const response = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/connect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId, userId: DEMO_USER_ID }),
+        });
+        const data = await response.json();
+        if (data.success) window.location.href = data.data.authorizeUrl;
+      } catch (error) {
+        console.error(`Failed to start ${provider} connection:`, error);
+      }
+      return;
+    }
+
+    setSyncingProvider(provider);
+    try {
+      await fetch(`http://localhost:3001/api/v1/integrations/${provider}/sync?tenantId=${tenantId}`, { method: "POST" });
+      setTimeout(() => {
+        const setter = provider === "jira" ? setJiraStatus : setAdoStatus;
+        fetch(`http://localhost:3001/api/v1/integrations/${provider}/status?tenantId=${tenantId}`)
+          .then((r) => r.json())
+          .then((d) => { if (d.success) setter(d.data); });
+      }, 2000);
+    } catch (error) {
+      console.error(`Failed to sync ${provider}:`, error);
+    } finally {
+      setSyncingProvider(null);
+    }
+  }
+
   // Fetch GitHub repositories for the connected user
   const fetchGitHubRepositories = async () => {
     setIsLoadingRepos(true);
@@ -108,13 +176,27 @@ function Integrations() {
     fetchGitHubRepositories();
   };
 
-  // Update GitHub integration status dynamically
+  // Override mock status with live data for every provider we actually check
   const updatedIntegrations = INTEGRATIONS.map(integration => {
     if (integration.name === "GitHub") {
       return {
         ...integration,
         status: isGitHubConnected ? "Connected" : "Not configured",
         synced: isGitHubConnected ? "Just now" : "—"
+      };
+    }
+    if (integration.name === "Jira Cloud") {
+      return {
+        ...integration,
+        status: jiraStatus.isConnected ? "Connected" : "Not configured",
+        synced: jiraStatus.isConnected ? timeAgo(jiraStatus.lastSyncedAt) : "—",
+      };
+    }
+    if (integration.name === "Azure DevOps") {
+      return {
+        ...integration,
+        status: adoStatus.isConnected ? "Connected" : "Not configured",
+        synced: adoStatus.isConnected ? timeAgo(adoStatus.lastSyncedAt) : "—",
       };
     }
     return integration;
@@ -150,6 +232,12 @@ function Integrations() {
                   {i.name === "GitHub" && githubUsername && (
                     <p className="mt-1 text-xs text-primary">Connected as {githubUsername}</p>
                   )}
+                  {i.name === "Jira Cloud" && jiraStatus.connectedAccountLabel && (
+                    <p className="mt-1 text-xs text-primary">Connected as {jiraStatus.connectedAccountLabel}</p>
+                  )}
+                  {i.name === "Azure DevOps" && adoStatus.connectedAccountLabel && (
+                    <p className="mt-1 text-xs text-primary">Connected as {adoStatus.connectedAccountLabel}</p>
+                  )}
                 </div>
                 <span
                   className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
@@ -167,10 +255,20 @@ function Integrations() {
               <div className="flex items-center justify-between border-t border-glass-border/60 pt-3 text-xs text-muted-foreground">
                 <span>Last sync: {i.synced}</span>
                 <button
-                  onClick={i.name === "GitHub" ? refreshGitHubData : undefined}
+                  onClick={
+                    i.name === "GitHub"
+                      ? refreshGitHubData
+                      : i.name === "Jira Cloud"
+                      ? () => handleProviderAction("jira", jiraStatus.isConnected)
+                      : i.name === "Azure DevOps"
+                      ? () => handleProviderAction("azure_devops", adoStatus.isConnected)
+                      : undefined
+                  }
                   className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25"
                 >
-                  {isLoadingRepos && i.name === "GitHub" ? (
+                  {(isLoadingRepos && i.name === "GitHub") ||
+                  (syncingProvider === "jira" && i.name === "Jira Cloud") ||
+                  (syncingProvider === "azure_devops" && i.name === "Azure DevOps") ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
                   ) : (
                     <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
@@ -247,15 +345,15 @@ function Integrations() {
 
       <GlassPanel
         title="Sync pipeline"
-        subtitle="Webhook ingestion → normalisation → aggregation"
+        subtitle="OAuth connect → scheduled polling → normalisation → aggregation"
         className="mt-4"
       >
         <ol className="grid grid-cols-1 gap-3 text-xs text-muted-foreground sm:grid-cols-4">
           {[
-            ["1 · Ingest", "Webhook payloads queued durably with retry + backoff"],
-            ["2 · Normalise", "Jira & ADO payloads mapped to unified WorkItem model"],
-            ["3 · Aggregate", "Daily & sprint QualityMetricsSnapshot rollups"],
-            ["4 · Serve", "Cached dashboard aggregates under 200ms"],
+            ["1 · Poll", "Admin-configurable interval per integration (default every 5 min)"],
+            ["2 · Normalise", "Jira & ADO payloads mapped to the unified WorkItem/Sprint model"],
+            ["3 · Reconcile", "Items no longer at the source are soft-flagged, never deleted"],
+            ["4 · Serve", "Existing analytics endpoints read the synced data directly"],
           ].map(([t, d]) => (
             <li key={t} className="rounded-xl border border-glass-border/60 p-3">
               <p className="text-xs font-semibold text-foreground">{t}</p>

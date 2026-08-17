@@ -3,9 +3,16 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import { healthCheck, databaseInfo } from './controllers/health.controller'
 import apiRoutes from './routes'
+import { assertJwtSecretConfigured } from '../lib/jwt'
+import { startScheduler, registerSyncHandler } from '../lib/scheduler'
+import { syncAllProductsForIntegration as syncAllJira } from './services/jira-sync.service'
+import { syncAllProductsForIntegration as syncAllAdo } from './services/azure-devops-sync.service'
 
 // Load environment variables
 dotenv.config()
+
+// Fail closed rather than start with a forgeable OAuth-state secret.
+assertJwtSecretConfigured()
 
 // Initialize Express app
 const app = express()
@@ -66,6 +73,9 @@ app.use((req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`🚀 QualiMetrix API server running on http://localhost:${PORT}`)
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
+
+  registerSyncHandler('jira', syncAllJira)
+  startScheduler()
 })
 
 export default app
