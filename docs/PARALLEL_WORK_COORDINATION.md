@@ -34,35 +34,38 @@ answer it.
 this file's "Active work" section below — if someone else has an in-progress
 migration, coordinate timing rather than both editing `schema.prisma` at once.
 
-## Branch topology (confirmed 2026-08-17, via `git merge-base`/`git log --graph`)
+## Branch topology (updated 2026-08-17, resolved)
 
 ```
 main (55ec8cd)
- ├─→ ai-usage-real-capture        (+0701932)                    — this session, PR #1 open against main
- └─→ feature/product-manager-workflow-enhancement                — a third, separate effort (NOT this session,
-      (+0701932, +c5d8939, +20d0582)                                NOT the Jira/ADO session either) — branched
-                                                                     from ai-usage-real-capture's tip, then added
-                                                                     product-manager-workflow + a GitHub-repos fix
+ ├─→ ai-usage-real-capture         — this session, PR #1 (open): auth + tenant-scoped AI Usage
+ ├─→ feature/jira-azure-devops-clean — Jira/ADO session, PR #3 (open): Integration model + sync
+ └─→ feature/product-manager-workflow-enhancement — third effort, PR #2 (open, pre-existing)
 ```
 
-`main` does not yet have this session's AI-usage work merged (PR #1 is still open).
+Both this session's and the Jira/ADO session's work were developed uncommitted
+in the same shared working directory (this session ended up checked out on
+`feature/jira-azure-devops-integration` at one point, which is how the tangle
+happened — see git history below if you want the full story). Resolved by:
+1. Committing everything combined as a safety checkpoint on
+   `feature/jira-azure-devops-integration` (pushed, kept as a backup — not
+   meant to be merged; safe to delete once both PRs below are settled).
+2. Rebuilding each session's changes as its own clean commit directly off
+   `main` — `ai-usage-real-capture` (this session, fast-forwarded with a new
+   commit) and `feature/jira-azure-devops-clean` (new, PR #3) — including
+   hand-splitting the handful of files both sessions touched
+   (`schema.prisma`, `server.ts`, `routes/index.ts`, `.env.example`,
+   `package.json`) so each branch only carries its own additions.
+3. Verified independently: both branches typecheck, both boot the full
+   server cleanly, both round-trip against the live DB correctly.
 
-**Jira/Azure DevOps session**: no branch or file for this found anywhere in
-the repo as of this writing (checked `git branch -a` and searched for
-jira/azure-devops-named files). If you're that session: add your branch name
-below when you create one. If you're working in a separate clone/worktree
-rather than this shared working directory, note that here too, since it
-changes which risks below actually apply to you (a separate working directory
-avoids the file-conflict risk, but you're still hitting the **same Postgres
-database** via the same `DATABASE_URL` — the migration rule above still
-applies regardless of which directory you're in).
-
-**Recommendation going forward**: branch each new effort directly off `main`,
-not off another in-progress feature branch — the mixing above (one branch
-containing another's commits as ancestors) is exactly what makes it hard to
-tell whose work is whose. If you need another session's not-yet-merged change,
-wait for its PR to merge to `main` first, or say so explicitly here rather
-than branching from their tip silently.
+**If you're the Jira/ADO session picking this up**: your code is unchanged
+from how you wrote it — this was a mechanical extraction, not a rewrite. One
+thing to double check on your side: `schema.prisma` on your clean branch
+keeps `AiModelCatalog.modelId` as `@unique` (matching what your own
+migrations actually did to the DB) rather than the modelId-without-unique
+version from the tangled state — if you were relying on the other version,
+say so here.
 
 ## Active work
 
