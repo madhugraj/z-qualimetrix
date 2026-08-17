@@ -9,6 +9,7 @@ import analyticsController from '../controllers/analytics.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
 import productRepositoryRoutes from './product-repository.routes';
+import authRoutes from './auth.routes';
 import {
   saveGitHubToken,
   validateGitHubToken,
@@ -18,8 +19,12 @@ import {
 } from '../controllers/github-token.controller';
 import {
   getAiUsageAnalyticsHandler,
-  ingestAiUsageEvents
+  ingestAiUsageEvents,
+  connectAiUsage,
+  ingestOtlpLogs
 } from '../controllers/ai-usage.controller';
+import { requireAuth } from '../middleware/auth.middleware';
+import { requireIngestToken } from '../middleware/ingest-token.middleware';
 import adminRoutes from './admin.routes';
 
 const router = Router();
@@ -27,6 +32,9 @@ const router = Router();
 // Health & Info endpoints
 router.get('/health', healthCheck);
 router.get('/database-info', databaseInfo);
+
+// Session auth routes
+router.use('/auth', authRoutes);
 
 // Tenant routes
 router.get('/tenants', tenantController.getAllTenants);
@@ -101,8 +109,10 @@ router.delete('/github-token/tokens/:tenantId', deleteGitHubToken);
 router.use('/product-repository', productRepositoryRoutes);
 
 // AI Usage Analytics routes
-router.get('/ai-usage/analytics', getAiUsageAnalyticsHandler);
-router.post('/public/ai-usage/events', ingestAiUsageEvents);
+router.get('/ai-usage/analytics', requireAuth, getAiUsageAnalyticsHandler);
+router.post('/public/ai-usage/events', requireIngestToken, ingestAiUsageEvents);
+router.post('/ai-usage/connect', requireAuth, connectAiUsage);
+router.post('/ai-usage/otlp/logs', requireIngestToken, ingestOtlpLogs);
 
 // Admin configuration routes
 router.use('/admin', adminRoutes);

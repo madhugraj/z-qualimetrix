@@ -31,7 +31,9 @@ interface SetupData {
   adminUser: {
     email: string;
     name: string;
+    password: string;
   };
+  tenantId: string;
   users: string;
   teams: Array<{
     name: string;
@@ -52,8 +54,10 @@ function SetupWizard() {
     timezone: 'UTC',
     adminUser: {
       email: '',
-      name: ''
+      name: '',
+      password: ''
     },
+    tenantId: '',
     users: '',
     teams: [],
     budget: {
@@ -129,6 +133,7 @@ function SetupWizard() {
 
       const data = await response.json();
       if (data.success) {
+        updateSetupData({ tenantId: data.data.tenant.id });
         goToNextStep();
       } else {
         setError(data.error || 'Failed to setup organization');
@@ -153,7 +158,7 @@ function SetupWizard() {
         const response = await fetch('http://localhost:3001/api/v1/admin/users/bulk-import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ users, method: 'csv' })
+          body: JSON.stringify({ users, method: 'csv', tenantId: setupData.tenantId })
         });
 
         const data = await response.json();
@@ -211,7 +216,7 @@ function SetupWizard() {
   const isCurrentStepValid = () => {
     switch (currentStep) {
       case 'organization':
-        return setupData.organizationName && setupData.adminUser.email;
+        return setupData.organizationName && setupData.adminUser.email && setupData.adminUser.password.length >= 8;
       case 'users':
         return true; // Users are optional
       case 'teams':
@@ -424,6 +429,18 @@ function OrganizationStep({
             value={data.adminUser.name}
             onChange={(e) => onUpdate({ adminUser: { ...data.adminUser, name: e.target.value } })}
             placeholder="System Administrator"
+            className="w-full p-3 border border-border rounded-lg bg-background"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Admin Password *</label>
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={data.adminUser.password}
+            onChange={(e) => onUpdate({ adminUser: { ...data.adminUser, password: e.target.value } })}
+            placeholder="At least 8 characters"
             className="w-full p-3 border border-border rounded-lg bg-background"
           />
         </div>

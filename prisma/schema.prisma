@@ -39,6 +39,7 @@ model Tenant {
   sprints               Sprint[]
   githubIntegrations    GitHubIntegration[]
   aiUsageEvents         AiUsageEvent[]
+  aiModelCatalogs       AiModelCatalog[]
 
   @@index([slug])
   @@index([domain])
@@ -56,6 +57,10 @@ model User {
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  squad                  String?   @db.VarChar(100)
+  aiIngestTokenHash      String?   @unique @map("ai_ingest_token_hash") @db.VarChar(64)
+  aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
+  passwordHash           String?   @map("password_hash") @db.VarChar(60)
 
   tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   tenantMemberships TenantMembership[]
@@ -69,6 +74,7 @@ model User {
   aiUsageEvents     AiUsageEvent[]
 
   @@index([email])
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -363,7 +369,7 @@ model AiUsageEvent {
 
 model AiModelCatalog {
   id            String    @id @default(uuid()) @db.Uuid
-  modelId       String    @unique @map("model_id") @db.VarChar(100)
+  modelId       String    @map("model_id") @db.VarChar(100)
   name          String    @db.VarChar(255)
   vendor        String    @db.VarChar(100)
   purpose       String    @db.Text
@@ -371,11 +377,20 @@ model AiModelCatalog {
   priceOut      Decimal   @map("price_out") @db.Decimal(10, 4)
   cacheDiscount Decimal   @map("cache_discount") @db.Decimal(3, 2) @default(0.9)
   isActive      Boolean   @default(true) @map("is_active")
+  tenantId      String?   @map("tenant_id") @db.Uuid
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // modelId uniqueness is enforced by two partial unique indexes added by hand
+  // in the migration SQL (tenantId IS NOT NULL / tenantId IS NULL) — Postgres
+  // treats NULL <> NULL, so a single composite @@unique([tenantId, modelId])
+  // would silently allow duplicate global rows. Prisma's schema DSL can't
+  // express a partial index, so it isn't declared here.
   @@index([modelId])
   @@index([isActive])
+  @@index([tenantId, modelId])
   @@map("ai_model_catalog")
 }
 
