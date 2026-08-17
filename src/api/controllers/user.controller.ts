@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import { BaseController } from './base.controller';
 import { Prisma } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { isValidUUID, validationErrorResponse } from '../utils/validators';
+
+const BCRYPT_COST = 12;
 
 /**
  * User Controller
@@ -134,7 +137,7 @@ export class UserController extends BaseController {
    * Create new user
    */
   createUser = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId, email, name, avatarUrl, role, isActive } = req.body;
+    const { tenantId, email, name, avatarUrl, role, isActive, password } = req.body;
 
     // Validate required fields
     const error = this.validateRequired(req.body, ['email']);
@@ -150,7 +153,8 @@ export class UserController extends BaseController {
           name,
           avatarUrl,
           role: role || 'viewer',
-          isActive: isActive !== undefined ? isActive : true
+          isActive: isActive !== undefined ? isActive : true,
+          passwordHash: password ? await bcrypt.hash(password, BCRYPT_COST) : null
         },
         select: {
           id: true,
@@ -189,7 +193,7 @@ export class UserController extends BaseController {
       return validationErrorResponse(res);
     }
 
-    const { email, name, avatarUrl, role, isActive, lastLoginAt } = req.body;
+    const { email, name, avatarUrl, role, isActive, lastLoginAt, password } = req.body;
 
     try {
       const user = await this.prisma.user.update({
@@ -200,7 +204,8 @@ export class UserController extends BaseController {
           ...(avatarUrl && { avatarUrl }),
           ...(role && { role }),
           ...(isActive !== undefined && { isActive }),
-          ...(lastLoginAt && { lastLoginAt })
+          ...(lastLoginAt && { lastLoginAt }),
+          ...(password && { passwordHash: await bcrypt.hash(password, BCRYPT_COST) })
         },
         select: {
           id: true,

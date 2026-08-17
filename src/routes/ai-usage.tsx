@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Lock, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
@@ -14,7 +14,6 @@ import {
   AiTokenChart,
 } from "@/components/qm/ai-usage-charts";
 import {
-  AI_CURRENT_USER_ID,
   AI_VISIBILITY_NOTE,
   formatTokens,
   type AiVisibility,
@@ -58,27 +57,14 @@ const toneBorder: Record<string, string> = {
 
 function AiUsagePage() {
   const [level, setLevel] = useState<AiVisibility>("org");
-  const [userId, setUserId] = useState<string>(AI_CURRENT_USER_ID);
 
-  // localStorage is browser-only — this app is server-rendered, so the stored
-  // userId must be read client-side in an effect, never in the initial state.
-  useEffect(() => {
-    const stored = localStorage.getItem("qm.aiUsageUserId");
-    if (stored) setUserId(stored);
-
-    function handleUserChanged(e: Event) {
-      const detail = (e as CustomEvent<{ userId: string }>).detail;
-      if (detail?.userId) setUserId(detail.userId);
-    }
-    window.addEventListener("aiUsageUserChanged", handleUserChanged);
-    return () => window.removeEventListener("aiUsageUserChanged", handleUserChanged);
-  }, []);
-
-  // Fetch live AI usage data from API
+  // Fetch live AI usage data from API using session-based authentication
   const { data: analytics, isLoading, error } = useQuery({
-    queryKey: ['ai-usage-analytics', level, userId],
+    queryKey: ['ai-usage-analytics', level],
     queryFn: async () => {
-      const response = await fetch(`http://localhost:3001/api/v1/ai-usage/analytics?visibility=${level}&userId=${userId}`);
+      const response = await fetch(`http://localhost:3001/api/v1/ai-usage/analytics?visibility=${level}`, {
+        credentials: 'include',
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch AI usage analytics');
       }
@@ -134,7 +120,7 @@ function AiUsagePage() {
           subtitle="Real per-developer usage, not demo data"
           className="mb-5"
         >
-          <ConnectClaudeCodePanel onConnected={setUserId} />
+          <ConnectClaudeCodePanel />
         </GlassPanel>
       )}
 

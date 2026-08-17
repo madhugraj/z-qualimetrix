@@ -15,14 +15,19 @@ import type { AiUsageQuery, AiUsageAnalytics } from "./ai-usage.server";
 export async function getAiUsageAnalytics(params: {
   visibility: "self" | "team" | "org" | "finance";
   userId: string;
+  tenantId: string;
   sprints?: number;
   enhanced?: boolean; // Enable MCP-enhanced analytics
 }): Promise<AiUsageAnalytics> {
-  const { visibility, userId, sprints, enhanced = false } = params;
+  const { visibility, userId, tenantId, sprints, enhanced = false } = params;
 
   // Validate inputs
   if (!userId) {
     throw new Error("userId is required");
+  }
+
+  if (!tenantId) {
+    throw new Error("tenantId is required");
   }
 
   if (!["self", "team", "org", "finance"].includes(visibility)) {
@@ -37,9 +42,9 @@ export async function getAiUsageAnalytics(params: {
   try {
     if (enhanced) {
       console.log('Using MCP-enhanced analytics for better performance and insights');
-      return await getEnhancedAnalytics({ visibility, userId, sprints }, true) as AiUsageAnalytics;
+      return await getEnhancedAnalytics({ visibility, userId, tenantId, sprints }, true) as AiUsageAnalytics;
     } else {
-      return await aggregate({ visibility, userId, sprints });
+      return await aggregate({ visibility, userId, tenantId, sprints });
     }
   } catch (error) {
     console.error("Error generating AI usage analytics:", error);

@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
 import { healthCheck, databaseInfo } from './controllers/health.controller'
 import apiRoutes from './routes'
@@ -12,7 +13,11 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 // Middleware
-app.use(cors())
+// credentials:true + an explicit origin (not '*') is required for the httpOnly
+// session cookies issued by /api/v1/auth/* — browsers reject a wildcard origin
+// combined with credentialed requests.
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:8086', credentials: true }))
+app.use(cookieParser())
 app.use(express.json({ limit: '2mb' }))
 app.use(express.urlencoded({ extended: true, limit: '2mb' }))
 

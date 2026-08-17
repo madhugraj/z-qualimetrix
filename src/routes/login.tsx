@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/login")({
@@ -27,45 +26,45 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-// Mock-only authentication: no backend, no session. Any credentials pass, and the
-// second factor accepts the demo code 123456.
-const DEMO_CODE = "123456";
-
+// Real authentication with session cookies. User must exist in database with
+// password set (admin-created) and have tenantId assigned.
 function LoginPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<"credentials" | "otp">("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
 
-  function submitCredentials(e: React.FormEvent) {
+  async function submitCredentials(e: React.FormEvent) {
     e.preventDefault();
     if (!email || !password) {
       toast.error("Enter an email and password to continue");
       return;
     }
     setBusy(true);
-    setTimeout(() => {
-      setBusy(false);
-      setStep("otp");
-      toast.success(`Verification code sent to ${email}`, {
-        description: `Mock flow — use ${DEMO_CODE}`,
-      });
-    }, 650);
-  }
 
-  function submitCode(e: React.FormEvent) {
-    e.preventDefault();
-    if (code !== DEMO_CODE) {
-      toast.error("Invalid code", { description: `This is a mock — the code is ${DEMO_CODE}` });
-      return;
+    try {
+      const response = await fetch('http://localhost:3001/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        toast.error(result.error || 'Login failed');
+        setBusy(false);
+        return;
+      }
+
+      toast.success(`Welcome back, ${result.user.name || result.user.email}`);
+      navigate({ to: "/ai-usage" });
+    } catch (error) {
+      console.error('Login error:', error);
+      toast.error('Unable to connect to authentication service');
+      setBusy(false);
     }
-    setBusy(true);
-    setTimeout(() => {
-      toast.success("Verified — welcome back");
-      navigate({ to: "/dashboard" });
-    }, 500);
   }
 
   return (
@@ -101,18 +100,16 @@ function LoginPage() {
         <div className="gloss w-full max-w-md rounded-[2.25rem] p-8">
           <span className="gloss inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-primary" strokeWidth={1.75} />
-            Mock sign-in · no live authentication
+            Secure authentication
           </span>
 
-
-          {step === "credentials" ? (
-            <form onSubmit={submitCredentials} className="mt-6 space-y-5">
-              <div>
-                <h1 className="text-2xl font-semibold">Sign in</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Use any email and password — this demo does not store credentials.
-                </p>
-              </div>
+          <form onSubmit={submitCredentials} className="mt-6 space-y-5">
+            <div>
+              <h1 className="text-2xl font-semibold">Sign in</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Enter your credentials to access your workspace.
+              </p>
+            </div>
 
               <div className="space-y-2">
                 <Label htmlFor="email">Work email</Label>
@@ -157,56 +154,12 @@ function LoginPage() {
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <>
-                    Continue
+                    Sign in
                     <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
                   </>
                 )}
               </Button>
             </form>
-          ) : (
-            <form onSubmit={submitCode} className="mt-6 space-y-5">
-              <div>
-                <h1 className="text-2xl font-semibold">Two-factor verification</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Enter the 6-digit code sent to{" "}
-                  <span className="text-foreground">{email}</span>. Demo code:{" "}
-                  <span className="font-medium text-primary">{DEMO_CODE}</span>
-                </p>
-              </div>
-
-              <div className="flex justify-center">
-                <InputOTP maxLength={6} value={code} onChange={setCode}>
-                  <InputOTPGroup>
-                    {[0, 1, 2, 3, 4, 5].map((i) => (
-                      <InputOTPSlot key={i} index={i} />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-              </div>
-
-              <Button type="submit" className="gloss-cta w-full rounded-full border-0" disabled={busy}>
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>
-                    Verify &amp; continue
-                    <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
-                  </>
-                )}
-              </Button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setStep("credentials");
-                  setCode("");
-                }}
-                className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
-              >
-                Use a different account
-              </button>
-            </form>
-          )}
         </div>
       </main>
     </div>
