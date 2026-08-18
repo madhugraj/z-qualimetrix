@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qualimetrix
+  namespace: z-qualimetrix
+  labels:
+    app: qualimetrix
+    version: v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qualimetrix
+  template:
+    metadata:
+      labels:
+        app: qualimetrix
+        version: v1
+    spec:
+      containers:
+      - name: qualimetrix
+        image: asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:latest-final
+        imagePullPolicy: Always
+        ports:
+        - name: frontend
+          containerPort: 3000
+          protocol: TCP
+        - name: http
+          containerPort: 3001
+          protocol: TCP
+
+        envFrom:
+        - configMapRef:
+            name: qualimetrix-config
+        - secretRef:
+            name: qualimetrix-secrets
+
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "250m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+      volumes:
+      - name: uploads
+        emptyDir: {}

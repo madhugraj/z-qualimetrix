@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qualimetrix-config
+  namespace: z-qualimetrix
+data:
+  NODE_ENV: "production"

@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: qualimetrix-tls
+  namespace: z-qualimetrix
+spec:
+  secretName: qualimetrix-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days before expiration
+  dnsNames:
+  - qubeiq.yavar.ai
+  issuerRef:
+    name: letsencrypt-gateway
+    kind: ClusterIssuer
