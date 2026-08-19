@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { JiraConfig } from "@/components/qm/JiraConfig";
 import { AzureDevOpsConfig } from "@/components/qm/AzureDevOpsConfig";
 import { RequireRole } from "@/components/qm/RequireRole";
+import { TeamManagementPanel } from "@/components/qm/TeamManagementPanel";
 import { API_V1_URL } from "@/lib/api-config";
 import { useAuth } from "@/lib/auth-context";
 import { ROLES } from "@/lib/qm-data";
@@ -746,6 +747,10 @@ function Settings() {
                 ))}
               </ul>
             </GlassPanel>
+          </div>
+
+          <div className="mt-4">
+            <TeamManagementPanel />
           </div>
         </TabsContent>
       </Tabs>

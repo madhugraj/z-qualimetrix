@@ -143,6 +143,20 @@ export class MembershipController extends BaseController {
 
     return this.success(res, { delegations, count: delegations.length });
   });
+
+  /** Every active delegation in the tenant, for the team-management screen's single table. */
+  listAllDelegations = this.asyncHandler(async (req: Request, res: Response) => {
+    const delegations = await this.prisma.integrationDelegation.findMany({
+      where: { tenantId: req.user?.tenantId, revokedAt: null },
+      include: {
+        product: { select: { id: true, name: true } },
+        grantee: { select: { id: true, email: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return this.success(res, { delegations, count: delegations.length });
+  });
 }
 
 export default new MembershipController();

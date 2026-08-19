@@ -87,7 +87,7 @@ router.put('/users/:id', requireAdmin, userController.updateUser);
 router.delete('/users/:id', requireAdmin, userController.deleteUser);
 router.put('/users/:id/last-login', requireAuth, userController.updateLastLogin);
 router.get('/users/:id/activity', requireAuth, userController.getUserActivity);
-router.get('/tenants/:tenantId/users', requireAuth, userController.getUsersByTenant);
+router.get('/tenants/:tenantId/users', requireAdmin, userController.getUsersByTenant);
 
 // Analytics routes
 router.get('/analytics/mttr', requireAuth, analyticsController.getMTTR);

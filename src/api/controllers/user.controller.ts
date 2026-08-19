@@ -379,6 +379,13 @@ export class UserController extends BaseController {
       return validationErrorResponse(res);
     }
 
+    // requireAdmin only confirms the caller is a PM somewhere — without this,
+    // a PM of one tenant could list every user of any other tenant just by
+    // guessing its id.
+    if (tenantId !== req.user?.tenantId) {
+      return this.error(res, 'Cannot list users outside your own tenant', 403);
+    }
+
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'name', 'asc');
 
