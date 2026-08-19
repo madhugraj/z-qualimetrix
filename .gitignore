@@ -25,6 +25,9 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Filled-in k8s secrets (k8s/secret.example.yaml is the tracked template)
+k8s/secret.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

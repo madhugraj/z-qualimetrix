@@ -1,0 +1,37 @@
+# kubernetes.io/ingress.class: "gce" assumes GKE's built-in ingress
+# controller (the default on a stock GKE cluster). If yavar-studio-cluster
+# runs nginx-ingress instead, drop that annotation and use
+# `spec.ingressClassName: nginx` (or your controller's class) instead.
+#
+# No TLS is configured here — for GKE-managed HTTPS certs, add a
+# ManagedCertificate resource and reference it via the
+# networking.gke.io/managed-certificates annotation once you have a real
+# domain; for a self-managed cert, add a `tls:` block pointing at a
+# kubernetes.io/tls Secret.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: qualimetrix
+  namespace: qualimetrix
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+spec:
+  rules:
+    - host: qualimetrix.example.com
+      http:
+        paths:
+          # More specific /api prefix must come before the catch-all /.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: qualimetrix-api
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: qualimetrix-web
+                port:
+                  number: 3000

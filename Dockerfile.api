@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+#
+# Express + Prisma API (src/api/server.ts).
+#
+# There is no ahead-of-time tsc build for src/api — tsconfig.json explicitly
+# excludes it, and the existing `api:start` script runs it straight through
+# tsx. This image does the same in production rather than inventing a new
+# build step: tsx (and typescript) stay available at runtime, which is why
+# the full `npm ci` output is kept instead of a --omit=dev reinstall.
+
+FROM node:22-alpine AS base
+WORKDIR /app
+RUN apk add --no-cache openssl libc6-compat
+
+FROM base AS build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npx prisma generate
+
+FROM base AS runtime
+ENV NODE_ENV=production \
+    PORT=3001
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/src ./src
+COPY --from=build /app/package.json ./package.json
+EXPOSE 3001
+USER node
+CMD ["npx", "tsx", "src/api/server.ts"]

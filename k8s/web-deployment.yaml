@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qualimetrix-web
+  namespace: qualimetrix
+  labels:
+    app: qualimetrix
+    component: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: qualimetrix
+      component: web
+  template:
+    metadata:
+      labels:
+        app: qualimetrix
+        component: web
+    spec:
+      containers:
+        - name: web
+          # Replace with your Artifact Registry path + a real tag (git SHA)
+          # once CI builds and pushes it — :latest is a placeholder.
+          image: asia-south1-docker.pkg.dev/yavar-studio/qualimetrix/web:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: qualimetrix-secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            # Internal Service DNS for the API — same-namespace short name.
+            - name: API_BASE
+              value: "http://qualimetrix-api:3001/api/v1"
+          # No lightweight health route exists on this app yet, so probes
+          # fall back to a plain TCP check on the listen port.
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qualimetrix-web
+  namespace: qualimetrix
+spec:
+  selector:
+    app: qualimetrix
+    component: web
+  ports:
+    - port: 3000
+      targetPort: 3000

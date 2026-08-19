@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qualimetrix-api
+  namespace: qualimetrix
+  labels:
+    app: qualimetrix
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: qualimetrix
+      component: api
+  template:
+    metadata:
+      labels:
+        app: qualimetrix
+        component: api
+    spec:
+      containers:
+        - name: api
+          # Replace with your Artifact Registry path + a real tag (git SHA)
+          # once CI builds and pushes it — :latest is a placeholder.
+          image: asia-south1-docker.pkg.dev/yavar-studio/qualimetrix/api:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: qualimetrix-secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3001"
+          # /api/v1/health runs `SELECT 1` against Postgres, so it's a good
+          # readiness check but a risky liveness check — a DB blip would
+          # otherwise get pods killed and restarted for no reason.
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qualimetrix-api
+  namespace: qualimetrix
+spec:
+  selector:
+    app: qualimetrix
+    component: api
+  ports:
+    - port: 3001
+      targetPort: 3001
