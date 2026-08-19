@@ -69,7 +69,7 @@ export interface SprintMetrics {
  */
 export async function getGitHubRepositories(): Promise<GitHubRepository[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/user-repositories?tenantId=${TENANT_ID}`);
+    const response = await fetch(`${API_BASE}/github/user-repositories?tenantId=${TENANT_ID}`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -90,10 +90,10 @@ export async function getGitHubMetrics(owner: string, repo: string): Promise<Git
   try {
     // Fetch data from GitHub endpoints
     const [commitsResponse, prsResponse, issuesResponse, statusResponse] = await Promise.all([
-      fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`),
-      fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`),
-      fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`),
-      fetch(`${API_BASE}/github/${owner}/${repo}/status?tenantId=${TENANT_ID}`)
+      fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/status?tenantId=${TENANT_ID}`, { credentials: 'include' })
     ]);
 
     const [commitsData, prsData, issuesData, statusData] = await Promise.all([
@@ -144,7 +144,7 @@ export async function getGitHubMetrics(owner: string, repo: string): Promise<Git
  */
 export async function getCommitData(owner: string, repo: string, since: string): Promise<GitHubCommit[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`);
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -170,7 +170,7 @@ export async function getCommitData(owner: string, repo: string, since: string):
  */
 export async function getPullRequestData(owner: string, repo: string): Promise<GitHubPullRequest[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`);
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -198,7 +198,7 @@ export async function getPullRequestData(owner: string, repo: string): Promise<G
  */
 export async function getIssueData(owner: string, repo: string): Promise<GitHubIssue[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`);
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {

@@ -1,6 +1,7 @@
-export type Role = "tester" | "developer" | "po" | "executive";
+export type Role = "pm" | "tester" | "developer" | "po" | "executive";
 
 export const ROLES: { id: Role; label: string; blurb: string }[] = [
+  { id: "pm", label: "PM", blurb: "Program-wide: connections, products & teams" },
   { id: "tester", label: "Tester", blurb: "Execution, leakage & deliverables" },
   { id: "developer", label: "Developer", blurb: "MTTR, fix rate & bottlenecks" },
   { id: "po", label: "Product Owner", blurb: "Readiness, RTM & heatmap" },
@@ -159,6 +160,12 @@ export const KPIS: Record<Role, Kpi[]> = {
       spark: [28, 25, 22, 19, 16, 14, 11],
     },
   ],
+  // PM gets the same org-wide portfolio view as Leadership — the distinction
+  // between the two roles is connection/delegation capability, not what the
+  // dashboard shows.
+  get pm() {
+    return this.executive;
+  },
 };
 
 export const EXECUTION_TREND = [

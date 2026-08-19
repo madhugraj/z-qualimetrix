@@ -9,7 +9,7 @@
 -- be two partial ones, which Prisma's schema DSL can't express either way.
 -- Hand-written, as flagged in schema.prisma's comment above the model.
 
-ALTER TABLE "ai_model_catalog" DROP CONSTRAINT "ai_model_catalog_model_id_key";
+DROP INDEX "ai_model_catalog_model_id_key";
 
 -- Superseded by the partial unique index below (same columns, tenant_id IS NOT NULL case).
 DROP INDEX "ai_model_catalog_tenant_id_model_id_idx";

@@ -1,5 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/qm/AppShell";
+import { RequireRole } from "@/components/qm/RequireRole";
+import { API_V1_URL } from "@/lib/api-config";
 import { useState, useEffect } from "react";
 import { CheckCircle2, CircleDashed, Users, Settings, CreditCard, Shield, ChevronRight } from "lucide-react";
 
@@ -62,7 +64,7 @@ function AdminPanel() {
 
   const fetchConfigurationStatus = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/v1/admin/configuration-status');
+      const response = await fetch(`${API_V1_URL}/admin/configuration-status`, { credentials: 'include' });
       const data = await response.json();
       if (data.success) {
         setConfigData(data.data);
@@ -83,6 +85,7 @@ function AdminPanel() {
 
   if (loading) {
     return (
+      <RequireRole roles={["pm"]}>
       <AppShell>
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
@@ -91,10 +94,12 @@ function AdminPanel() {
           </div>
         </div>
       </AppShell>
+      </RequireRole>
     );
   }
 
   return (
+    <RequireRole roles={["pm"]}>
     <AppShell>
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
@@ -186,6 +191,7 @@ function AdminPanel() {
         </div>
       </div>
     </AppShell>
+    </RequireRole>
   );
 }
 
@@ -230,9 +236,10 @@ function UsersTab({ onUpdate }: { onUpdate: () => void }) {
     });
 
     try {
-      const response = await fetch('http://localhost:3001/api/v1/admin/users/bulk-import', {
+      const response = await fetch(`${API_V1_URL}/admin/users/bulk-import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ users, method: 'csv' })
       });
 
@@ -305,9 +312,10 @@ function TeamsTab({ onUpdate }: { onUpdate: () => void }) {
     setConfiguring(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/v1/admin/teams', {
+      const response = await fetch(`${API_V1_URL}/admin/teams`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           teams: [{ name: teamName, budget: parseInt(teamBudget), lead: teamLead, members: [] }]
         })
@@ -389,9 +397,10 @@ function BudgetTab({ onUpdate }: { onUpdate: () => void }) {
     setSaving(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/v1/admin/budget-configuration', {
+      const response = await fetch(`${API_V1_URL}/admin/budget-configuration`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           orgSprintBudget: parseInt(orgBudget),
           defaultSeatBudget: parseInt(seatBudget),

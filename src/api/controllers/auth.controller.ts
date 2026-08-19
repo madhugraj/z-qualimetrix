@@ -48,7 +48,7 @@ function refreshCookieOptions() {
   };
 }
 
-async function issueSession(res: Response, userId: string) {
+export async function issueSession(res: Response, userId: string) {
   const accessToken = jwt.sign({ sub: userId }, getJwtSecret(), { expiresIn: ACCESS_TOKEN_TTL });
   const rawRefreshToken = generateSecureToken();
   await prisma.refreshToken.create({

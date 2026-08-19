@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { issueSession } from './auth.controller';
 
 const prisma = new PrismaClient();
 const BCRYPT_COST = 12;
@@ -74,11 +75,14 @@ export async function setupOrganization(req: Request, res: Response) {
       });
 
       if (!existingAdmin) {
+        // The org creator becomes its PM (org-wide super-admin) — matches
+        // requireAdmin's role==='pm' check, so the rest of the setup wizard
+        // (bulk-import, teams) can run authenticated as this user below.
         const admin = await prisma.user.create({
           data: {
             email: adminUser.email,
             name: adminUser.name || 'System Administrator',
-            role: 'admin',
+            role: 'pm',
             tenantId: tenant.id,
             passwordHash: adminUser.password ? await bcrypt.hash(adminUser.password, BCRYPT_COST) : null,
           }
@@ -90,6 +94,13 @@ export async function setupOrganization(req: Request, res: Response) {
           name: admin.name,
           role: admin.role
         };
+
+        // Log the new PM in immediately so the rest of the setup wizard
+        // (bulk-import, teams) — reached with no separate login step — is an
+        // authenticated continuation of this same request, not a dead end.
+        if (admin.passwordHash) {
+          await issueSession(res, admin.id);
+        }
       }
     }
 

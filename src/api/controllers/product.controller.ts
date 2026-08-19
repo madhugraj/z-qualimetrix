@@ -15,12 +15,21 @@ export class ProductController extends BaseController {
   getAllProducts = this.asyncHandler(async (req: Request, res: Response) => {
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'name', 'asc');
-    const tenantId = this.getTenantId(req);
+    const tenantId = this.getTenantId(req) || req.user?.tenantId || '';
 
     // Build where clause
     const where: Prisma.ProductWhereInput = {};
     if (tenantId) {
       where.tenantId = tenantId;
+    }
+
+    // po/developer/tester only see the products their TenantMembership scopes
+    // them to; pm/executive see everything in the tenant (org-wide by design).
+    if (req.user && req.user.role !== 'pm' && req.user.role !== 'executive') {
+      const membership = await this.prisma.tenantMembership.findUnique({
+        where: { tenantId_userId: { tenantId: req.user.tenantId ?? '', userId: req.user.id } },
+      });
+      where.id = { in: membership?.accessibleProducts ?? [] };
     }
 
     // Add filters
@@ -312,8 +321,16 @@ export class ProductController extends BaseController {
   getProductsByTenant = this.asyncHandler(async (req: Request, res: Response) => {
     const { tenantId } = req.params;
 
+    const where: Prisma.ProductWhereInput = { tenantId };
+    if (req.user && req.user.role !== 'pm' && req.user.role !== 'executive') {
+      const membership = await this.prisma.tenantMembership.findUnique({
+        where: { tenantId_userId: { tenantId, userId: req.user.id } },
+      });
+      where.id = { in: membership?.accessibleProducts ?? [] };
+    }
+
     const products = await this.prisma.product.findMany({
-      where: { tenantId },
+      where,
       include: {
         _count: {
           select: {

@@ -6,22 +6,18 @@ import {
   getConfigurationStatus,
   updateBudgetConfiguration
 } from '../controllers/admin.controller';
+import { requireAuth, requireAdmin } from '../middleware/auth.middleware';
 
 const router = Router();
 
-// One-time organization setup
+// One-time organization setup — deliberately unauthenticated: this is what
+// creates the tenant and its first PM, so no session can exist yet.
 router.post('/setup-organization', setupOrganization);
 
-// Bulk user import
-router.post('/users/bulk-import', bulkImportUsers);
-
-// Team configuration
-router.post('/teams', configureTeams);
-
-// Get configuration status
-router.get('/configuration-status', getConfigurationStatus);
-
-// Update budget configuration
-router.put('/budget-configuration', updateBudgetConfiguration);
+// Everything below manages an existing org and is PM-only.
+router.post('/users/bulk-import', requireAdmin, bulkImportUsers);
+router.post('/teams', requireAdmin, configureTeams);
+router.get('/configuration-status', requireAuth, getConfigurationStatus);
+router.put('/budget-configuration', requireAdmin, updateBudgetConfiguration);
 
 export default router;

@@ -5,8 +5,12 @@ import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
 import { ProductRepositories } from "@/components/qm/ProductRepositories";
 import { GlassPanel } from "@/components/qm/GlassPanel";
+import { RequireRole } from "@/components/qm/RequireRole";
 import { INTEGRATIONS } from "@/lib/qm-data";
+import { API_V1_URL } from "@/lib/api-config";
+import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/integrations")({
   head: () => ({
@@ -39,8 +43,6 @@ interface ProviderStatus {
   lastSyncedAt?: string | null;
 }
 
-const DEMO_USER_ID = '1f9c1029-80ed-48ef-8892-c9aa06092640';
-
 function timeAgo(iso?: string | null): string {
   if (!iso) return '—';
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -52,11 +54,12 @@ function timeAgo(iso?: string | null): string {
 }
 
 function Integrations() {
+  const { user } = useAuth();
+  const tenantId = user?.tenantId ?? "";
   const [isGitHubConnected, setIsGitHubConnected] = useState(false);
   const [githubUsername, setGithubUsername] = useState<string | null>(null);
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
-  const [tenantId] = useState('11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167');
   const [jiraStatus, setJiraStatus] = useState<ProviderStatus>({ isConnected: false });
   const [adoStatus, setAdoStatus] = useState<ProviderStatus>({ isConnected: false });
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
@@ -79,7 +82,7 @@ function Integrations() {
 
       // Then check database status and sync token to localStorage
       try {
-        const response = await fetch("http://localhost:3001/api/v1/github-token/status/11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167");
+        const response = await fetch(`${API_V1_URL}/github-token/status/${tenantId}`, { credentials: "include" });
         const data = await response.json();
         if (data.success && data.data.isConnected) {
           setIsGitHubConnected(true);
@@ -89,7 +92,7 @@ function Integrations() {
 
           // Fetch the actual token and sync to localStorage for GitInsights
           try {
-            const tokenResponse = await fetch("http://localhost:3001/api/v1/github-token/get/11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167");
+            const tokenResponse = await fetch(`${API_V1_URL}/github-token/get/${tenantId}`, { credentials: "include" });
             const tokenData = await tokenResponse.json();
             if (tokenData.success && tokenData.data.token) {
               localStorage.setItem('github_token', tokenData.data.token);
@@ -106,13 +109,13 @@ function Integrations() {
       }
     };
 
-    checkGitHubConnection();
-  }, []);
+    if (tenantId) checkGitHubConnection();
+  }, [tenantId]);
 
   useEffect(() => {
     const fetchProviderStatus = async (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) => {
       try {
-        const response = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/status?tenantId=${tenantId}`);
+        const response = await fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" });
         const data = await response.json();
         if (data.success) setter(data.data);
       } catch (error) {
@@ -124,33 +127,75 @@ function Integrations() {
     fetchProviderStatus("azure_devops", setAdoStatus);
   }, [tenantId]);
 
+  // Connect opens the OAuth flow in a separate tab (see handleProviderAction) —
+  // refresh status when the user switches back here, since that's the only
+  // signal we get about what happened in the other tab.
+  useEffect(() => {
+    function onFocus() {
+      const refetch = (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) =>
+        fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" })
+          .then((r) => r.json())
+          .then((d) => { if (d.success) setter(d.data); })
+          .catch((error) => console.error(`Failed to check ${provider} status:`, error));
+      refetch("jira", setJiraStatus);
+      refetch("azure_devops", setAdoStatus);
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [tenantId]);
+
   async function handleProviderAction(provider: "jira" | "azure_devops", isConnected: boolean) {
+    const providerLabel = provider === "jira" ? "Jira" : "Azure DevOps";
+
     if (!isConnected) {
+      // Opened synchronously, before the await below, so browsers still treat this
+      // as a direct result of the click — doing it after would get popup-blocked.
+      // Redirecting this separate tab (rather than the current page) means a
+      // provider-side failure never stranded the user away from the app.
+      const oauthTab = window.open('', '_blank');
       try {
-        const response = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/connect`, {
+        const response = await fetch(`${API_V1_URL}/integrations/${provider}/connect`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tenantId, userId: DEMO_USER_ID }),
+          credentials: "include",
         });
         const data = await response.json();
-        if (data.success) window.location.href = data.data.authorizeUrl;
+        if (!response.ok || !data.success) {
+          throw new Error(data.error ?? "Failed to start connection");
+        }
+        if (oauthTab) {
+          oauthTab.location.href = data.data.authorizeUrl;
+        } else {
+          window.location.href = data.data.authorizeUrl;
+        }
       } catch (error) {
+        oauthTab?.close();
         console.error(`Failed to start ${provider} connection:`, error);
+        toast.error(`Couldn't connect ${providerLabel}`, {
+          description: error instanceof Error ? error.message : undefined,
+        });
       }
       return;
     }
 
     setSyncingProvider(provider);
     try {
-      await fetch(`http://localhost:3001/api/v1/integrations/${provider}/sync?tenantId=${tenantId}`, { method: "POST" });
+      const response = await fetch(`${API_V1_URL}/integrations/${provider}/sync`, { method: "POST", credentials: "include" });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error ?? "Sync failed to start");
+      }
+      toast.success(`${providerLabel} sync started`);
       setTimeout(() => {
         const setter = provider === "jira" ? setJiraStatus : setAdoStatus;
-        fetch(`http://localhost:3001/api/v1/integrations/${provider}/status?tenantId=${tenantId}`)
+        fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" })
           .then((r) => r.json())
           .then((d) => { if (d.success) setter(d.data); });
       }, 2000);
     } catch (error) {
       console.error(`Failed to sync ${provider}:`, error);
+      toast.error(`Couldn't sync ${providerLabel}`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
     } finally {
       setSyncingProvider(null);
     }
@@ -160,7 +205,7 @@ function Integrations() {
   const fetchGitHubRepositories = async () => {
     setIsLoadingRepos(true);
     try {
-      const response = await fetch("http://localhost:3001/api/v1/github/user-repositories");
+      const response = await fetch(`${API_V1_URL}/github/user-repositories`, { credentials: "include" });
       const data = await response.json();
       if (data.success && data.data) {
         setGithubRepos(data.data);
@@ -203,6 +248,7 @@ function Integrations() {
   });
 
   return (
+    <RequireRole roles={["pm"]}>
     <AppShell>
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -363,5 +409,6 @@ function Integrations() {
         </ol>
       </GlassPanel>
     </AppShell>
+    </RequireRole>
   );
 }

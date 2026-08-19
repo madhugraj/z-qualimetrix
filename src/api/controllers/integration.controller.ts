@@ -9,19 +9,19 @@ import { syncAllProductsForIntegration as syncAllJira } from '../services/jira-s
 import { syncAllProductsForIntegration as syncAllAdo } from '../services/azure-devops-sync.service';
 import { requestSyncNow } from '../../lib/scheduler';
 
-// TODO(admin-auth): every mutating endpoint below (connect/disconnect/update-frequency/sync-now)
-// should be gated behind requireAdmin once the user's concurrent password-auth work lands and
-// defines the session/JWT contract. Deliberately left unprotected for now — see plan file.
+// Mutating endpoints (connect/disconnect/update-frequency/sync-now) are gated
+// requireAdmin (PM-only) at the router level — see integration.routes.ts.
+// handleCallback is the deliberate exception (see its docstring).
 
 // Matches the CORS origin default in server.ts (FRONTEND_ORIGIN) — keep these in sync.
 const FRONTEND_URL = process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || 'http://localhost:8086';
 
 function getTenantId(req: Request): string {
-  return (req.body?.tenantId as string) || (req.query.tenantId as string) || (req.headers['x-tenant-id'] as string) || '';
+  return req.user?.tenantId || '';
 }
 
 function getUserId(req: Request): string {
-  return (req.body?.userId as string) || (req.query.userId as string) || (req.headers['x-user-id'] as string) || '';
+  return req.user?.id || '';
 }
 
 function isKnownProvider(provider: string): provider is IntegrationProvider {

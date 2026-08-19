@@ -3,48 +3,51 @@ import {
   BarChart3,
   Bot,
   Bug,
-  HeartPulse,
+  Users,
   LayoutDashboard,
   PlugZap,
   PenLine,
   Settings,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 import { GlobalSearch } from "@/components/qm/GlobalSearch";
 import { NotificationsBell } from "@/components/qm/NotificationsBell";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 
-// `roles` documents the RBAC gate for each destination; Engineering Health is
-// limited to managers / leads / HR once auth is wired. AI Usage is visible to
-// everyone but the depth of analytics is gated inside the page.
+// `roles` gates each destination for real: undefined means every signed-in
+// role sees it. Integrations and Settings are PM-only (raw credentials and
+// role/delegation administration live there). Engineering Health is
+// leadership/PM only, matching this app's manager/lead/HR intent.
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
-  { to: "/engineering-health", label: "Engineering Health", icon: HeartPulse },
+  { to: "/engineering-health", label: "Engineering Health", icon: Users, roles: ["pm", "executive"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
-  { to: "/integrations", label: "Integrations", icon: PlugZap },
+  { to: "/integrations", label: "Integrations", icon: PlugZap, roles: ["pm"] },
   { to: "/manual-log", label: "Manual Log", icon: PenLine },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/settings", label: "Settings", icon: Settings, roles: ["pm"] },
 ] as const;
 
 
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { user } = useAuth();
+  const nav = NAV.filter(
+    (item) => !("roles" in item) || (item.roles as readonly string[]).includes(user?.role ?? ""),
+  );
 
   return (
     <div className="flex min-h-screen">
       <aside className="glass sticky top-0 z-20 hidden h-screen w-[76px] flex-col items-center gap-1 rounded-none border-y-0 border-l-0 py-5 md:flex">
-        <Link to="/dashboard" className="mb-6 flex flex-col items-center gap-1" aria-label="YAVAR home">
-          <img
-            src={yavarLogo.url}
-            alt="YAVAR logo"
-            className="h-8 w-[54px] rounded-lg object-contain mix-blend-multiply"
-          />
+        <Link to="/dashboard" className="mb-6 flex flex-col items-center gap-1" aria-label="QubeIQ home">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/60">
+            <span className="text-xs font-bold text-primary-foreground">Q</span>
+          </div>
         </Link>
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active = pathname === item.to;
           return (
             <Link
@@ -81,7 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="glass flex gap-1 overflow-x-auto rounded-none border-x-0 border-t-0 px-3 py-2 md:hidden">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.to}
               to={item.to}

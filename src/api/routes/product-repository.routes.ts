@@ -7,8 +7,10 @@ import {
   getProductGitHubMetrics,
   getProductsWithRepositories
 } from '../controllers/product-repository.controller';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
+router.use(requireAuth);
 
 // Add a GitHub repository to a product
 router.post('/products/:productId/repositories', addRepositoryToProduct);

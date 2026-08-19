@@ -20,6 +20,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { JiraConfig } from "@/components/qm/JiraConfig";
 import { AzureDevOpsConfig } from "@/components/qm/AzureDevOpsConfig";
+import { RequireRole } from "@/components/qm/RequireRole";
+import { API_V1_URL } from "@/lib/api-config";
+import { useAuth } from "@/lib/auth-context";
 import { ROLES } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/settings")({
@@ -43,13 +46,13 @@ export const Route = createFileRoute("/settings")({
   component: Settings,
 });
 
-const PERMISSIONS = [
-  ["Admin", "Full workspace, integrations and billing control"],
-  ["Lead", "Manage squads, sprints and dashboard layouts"],
-  ["Tester", "Log executions, demos, docs and RCAs"],
-  ["Developer", "View defect and resolution analytics"],
-  ["Product Owner", "Release readiness, RTM and heatmaps"],
-  ["Viewer", "Read-only access to shared dashboards"],
+const PERMISSIONS: [string, string][] = [
+  ["PM", "Connects Jira/Azure DevOps/GitHub/AI tools, manages every product & team"],
+  ["Product Owner", "Own product's release readiness, RTM & heatmap; can be delegated mapping rights"],
+  ["Leadership", "Portfolio-wide read-only view across every product"],
+  ["Developer", "Defect and resolution analytics for their product/team"],
+  ["Tester", "Execution, leakage & deliverables for their product/team"],
+  ["Default", "No access until a PM assigns a role"],
 ];
 
 interface Entity {
@@ -168,6 +171,7 @@ function CreateDialog({
 
 // GitHub Configuration Component
 function GitHubConfig() {
+  const { user } = useAuth();
   const [token, setToken] = useState("");
   const [isTesting, setIsTesting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -231,13 +235,13 @@ function GitHubConfig() {
   const saveTokenToDatabase = async (accessToken: string, githubUsername: string) => {
     try {
       console.log('💾 Attempting to save token to database...');
-      const response = await fetch("http://localhost:3001/api/v1/github-token/tokens", {
+      const response = await fetch(`${API_V1_URL}/github-token/tokens`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           token: accessToken,
-          tenantId: "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167", // Demo Organization
-          userId: "1f9c1029-80ed-48ef-8892-c9aa06092640" // Admin User
+          tenantId: user?.tenantId,
         })
       });
 
@@ -615,6 +619,7 @@ function Settings() {
   };
 
   return (
+    <RequireRole roles={["pm"]}>
     <AppShell>
       <header className="mb-6">
         <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Settings</h1>
@@ -745,5 +750,6 @@ function Settings() {
         </TabsContent>
       </Tabs>
     </AppShell>
+    </RequireRole>
   );
 }

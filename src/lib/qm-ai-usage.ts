@@ -17,6 +17,7 @@ export const AI_VISIBILITY: Record<Role | "manager", AiVisibility> = {
   po: "team",
   manager: "org",
   executive: "finance",
+  pm: "finance",
 };
 
 export interface AiModel {

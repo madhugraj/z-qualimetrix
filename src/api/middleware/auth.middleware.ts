@@ -66,3 +66,84 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     res.status(500).json({ success: false, error: 'Authentication check failed' });
   }
 }
+
+/**
+ * `role` is free-text (`'pm' | 'po' | 'executive' | 'developer' | 'tester' |
+ * 'unassigned'` in practice, not a DB enum) per the same contract requireAuth
+ * documents. `pm` is the org-wide super-admin role — connects Jira/Azure
+ * DevOps/GitHub/AI tools and manages every product/team in the tenant.
+ */
+export const requireRole = (...roles: string[]) => [
+  requireAuth,
+  (req: Request, res: Response, next: NextFunction) =>
+    req.user && roles.includes(req.user.role)
+      ? next()
+      : res.status(403).json({ success: false, error: `Requires role: ${roles.join(' or ')}` }),
+];
+
+export const requireAdmin = requireRole('pm');
+
+/**
+ * Scopes a request to a product a PO/developer/tester was explicitly given
+ * access to (TenantMembership.accessibleProducts). `pm` and `executive` are
+ * exempt — org-wide by definition. Mount after requireAuth (or requireRole).
+ */
+export const requireProductScope = (getProductId: (req: Request) => string | undefined) =>
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+      if (req.user.role === 'pm' || req.user.role === 'executive') return next();
+
+      const productId = getProductId(req);
+      if (!productId) return res.status(400).json({ success: false, error: 'Product id required' });
+
+      const membership = await prisma.tenantMembership.findUnique({
+        where: { tenantId_userId: { tenantId: req.user.tenantId ?? '', userId: req.user.id } },
+      });
+      if (!membership || !membership.accessibleProducts.includes(productId)) {
+        return res.status(403).json({ success: false, error: 'Not scoped to this product' });
+      }
+      next();
+    } catch (error) {
+      console.error('Error in requireProductScope:', error);
+      res.status(500).json({ success: false, error: 'Scope check failed' });
+    }
+  };
+
+const PRODUCT_MAPPING_FIELDS = ['jiraProjectKey', 'jiraProjectId', 'azureDevopsAreaPath'];
+
+/**
+ * Gate for PUT /products/:id. `pm` can edit anything. A `po` may edit ONLY
+ * if they hold an active IntegrationDelegation for this product AND the
+ * request body touches nothing but the Jira/ADO mapping fields — never
+ * name/description/settings/etc. This is the concrete enforcement of "PM
+ * delegates connection-setup to the PO for their product."
+ */
+export async function requireProductWriteAccess(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user) return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (req.user.role === 'pm') return next();
+
+    const productId = req.params.id;
+    const bodyFields = Object.keys(req.body ?? {});
+    const onlyMappingFields = bodyFields.length > 0 && bodyFields.every((f) => PRODUCT_MAPPING_FIELDS.includes(f));
+
+    if (req.user.role !== 'po' || !onlyMappingFields) {
+      return res.status(403).json({
+        success: false,
+        error: 'Requires PM, or a PO with a mapping delegation editing only jiraProjectKey/jiraProjectId/azureDevopsAreaPath',
+      });
+    }
+
+    const delegation = await prisma.integrationDelegation.findFirst({
+      where: { productId, granteeId: req.user.id, revokedAt: null },
+    });
+    if (!delegation) {
+      return res.status(403).json({ success: false, error: 'No active mapping delegation for this product' });
+    }
+    next();
+  } catch (error) {
+    console.error('Error in requireProductWriteAccess:', error);
+    res.status(500).json({ success: false, error: 'Access check failed' });
+  }
+}

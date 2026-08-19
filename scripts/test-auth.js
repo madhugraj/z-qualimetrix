@@ -22,8 +22,8 @@ async function testLogin() {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
-        email: 'admin@demo.com',
-        password: 'admin123'
+        email: 'pm@demo.com',
+        password: 'demo1234'
       })
     });
 

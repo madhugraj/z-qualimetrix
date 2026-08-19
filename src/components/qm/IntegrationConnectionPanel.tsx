@@ -4,14 +4,7 @@ import { toast } from "sonner";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-
-const API_BASE_URL = "http://localhost:3001/api/v1";
-
-// Matches the hardcoded demo tenant/user used throughout the rest of the app
-// (e.g. ProductRepositories.tsx, settings.tsx's GitHubConfig) until real
-// session identity replaces these everywhere.
-const DEMO_TENANT_ID = "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167";
-const DEMO_USER_ID = "1f9c1029-80ed-48ef-8892-c9aa06092640";
+import { API_V1_URL as API_BASE_URL } from "@/lib/api-config";
 
 const SYNC_FREQUENCY_OPTIONS = [5, 15, 30, 60];
 
@@ -40,7 +33,7 @@ export function IntegrationConnectionPanel({
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/integrations/${provider}/status?tenantId=${DEMO_TENANT_ID}`);
+      const res = await fetch(`${API_BASE_URL}/integrations/${provider}/status`, { credentials: "include" });
       const data = await res.json();
       if (data.success) setStatus(data.data);
     } catch (error) {
@@ -52,6 +45,17 @@ export function IntegrationConnectionPanel({
 
   useEffect(() => {
     fetchStatus();
+  }, [fetchStatus]);
+
+  // The OAuth flow opens in a separate tab (see handleConnect) so a failure on the
+  // provider's side never strands the user away from the app. Refresh status when
+  // they switch back here, since we can't otherwise know the other tab's outcome.
+  useEffect(() => {
+    function onFocus() {
+      fetchStatus();
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, [fetchStatus]);
 
   // After the OAuth callback redirects back to /integrations?connected=<provider>,
@@ -68,20 +72,32 @@ export function IntegrationConnectionPanel({
   }, [provider, displayName, fetchStatus]);
 
   async function handleConnect() {
+    // Open a blank tab synchronously, in direct response to the click — doing this
+    // after the await below would lose the "user gesture" context and get blocked
+    // by popup blockers in most browsers. We redirect this tab once we have the
+    // real URL, so the OAuth flow (and any provider-side error) never replaces
+    // this page — closing that tab is always enough to get back to the app.
+    const oauthTab = window.open('', '_blank');
     setIsConnecting(true);
     try {
       const res = await fetch(`${API_BASE_URL}/integrations/${provider}/connect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tenantId: DEMO_TENANT_ID, userId: DEMO_USER_ID }),
+        credentials: "include",
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to start connection");
-      window.location.href = data.data.authorizeUrl;
+      if (oauthTab) {
+        oauthTab.location.href = data.data.authorizeUrl;
+      } else {
+        // Popup blocked despite the synchronous open (rare) — fall back to a normal redirect.
+        window.location.href = data.data.authorizeUrl;
+      }
     } catch (error) {
+      oauthTab?.close();
       toast.error(`Failed to connect ${displayName}`, {
         description: error instanceof Error ? error.message : undefined,
       });
+    } finally {
       setIsConnecting(false);
     }
   }
@@ -89,7 +105,7 @@ export function IntegrationConnectionPanel({
   async function handleSyncNow() {
     setIsSyncing(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/integrations/${provider}/sync?tenantId=${DEMO_TENANT_ID}`, { method: "POST" });
+      const res = await fetch(`${API_BASE_URL}/integrations/${provider}/sync`, { method: "POST", credentials: "include" });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "Sync failed to start");
       toast.success("Sync started");
@@ -103,7 +119,7 @@ export function IntegrationConnectionPanel({
 
   async function handleDisconnect() {
     try {
-      const res = await fetch(`${API_BASE_URL}/integrations/${provider}?tenantId=${DEMO_TENANT_ID}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/integrations/${provider}`, { method: "DELETE", credentials: "include" });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? "Failed to disconnect");
       toast.success(`${displayName} disconnected`);
@@ -115,9 +131,10 @@ export function IntegrationConnectionPanel({
 
   async function handleFrequencyChange(minutes: number) {
     try {
-      await fetch(`${API_BASE_URL}/integrations/${provider}/sync-frequency?tenantId=${DEMO_TENANT_ID}`, {
+      await fetch(`${API_BASE_URL}/integrations/${provider}/sync-frequency`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ minutes }),
       });
       setStatus((prev) => (prev ? { ...prev, syncFrequencyMinutes: minutes } : prev));

@@ -1,11 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
 import { CircularProgress } from "@/components/qm/CircularProgress";
-import { RoleSwitcher } from "@/components/qm/RoleSwitcher";
+import { useAuth } from "@/lib/auth-context";
 import { DefectHeatmap } from "@/components/qm/DefectHeatmap";
 import { DeliverablesFeed } from "@/components/qm/DeliverablesFeed";
 import { BottleneckList, RtmTable } from "@/components/qm/tables";
@@ -18,7 +17,7 @@ import {
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { BUGS } from "@/lib/qm-bugs";
-import { KPIS, ROLES, type Role } from "@/lib/qm-data";
+import { KPIS, ROLES } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -41,8 +40,31 @@ export const Route = createFileRoute("/dashboard")({
 });
 
 function Dashboard() {
-  const [role, setRole] = useState<Role>("tester");
-  const current = ROLES.find((r) => r.id === role)!;
+  const { user, isLoading } = useAuth();
+  const current = ROLES.find((r) => r.id === user?.role);
+
+  if (isLoading) {
+    return (
+      <AppShell>
+        <p className="text-sm text-muted-foreground">Loading your workspace…</p>
+      </AppShell>
+    );
+  }
+
+  if (!current) {
+    return (
+      <AppShell>
+        <GlassPanel title="No role assigned yet">
+          <p className="text-sm text-muted-foreground">
+            Your account doesn't have a role yet. Ask your PM to assign one before you can see a
+            dashboard.
+          </p>
+        </GlassPanel>
+      </AppShell>
+    );
+  }
+
+  const role = current.id;
 
   return (
     <AppShell>
@@ -55,7 +77,6 @@ function Dashboard() {
             {current.label} perspective · {current.blurb}
           </p>
         </div>
-        <RoleSwitcher role={role} onChange={setRole} />
       </header>
 
       <div className="mb-5">
@@ -188,7 +209,7 @@ function Dashboard() {
         </div>
       )}
 
-      {role === "executive" && (
+      {(role === "executive" || role === "pm") && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <GlassPanel
             title="Multi-product quality health"

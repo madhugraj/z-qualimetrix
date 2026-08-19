@@ -13,8 +13,10 @@ import {
   getUserRepositories,
   getMultiRepoStatus
 } from '../controllers/github.controller';
+import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
+router.use(requireAuth);
 
 // Static routes must come before dynamic parameterized routes
 router.post('/validate-token', validateToken);

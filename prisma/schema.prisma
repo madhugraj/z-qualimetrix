@@ -41,6 +41,7 @@ model Tenant {
   aiUsageEvents         AiUsageEvent[]
   aiModelCatalogs       AiModelCatalog[]
   integrations          Integration[]
+  integrationDelegations IntegrationDelegation[]
 
   @@index([slug])
   @@index([domain])
@@ -53,7 +54,7 @@ model User {
   email        String   @unique @db.VarChar(255)
   name         String?  @db.VarChar(255)
   avatarUrl    String?  @map("avatar_url") @db.VarChar(500)
-  role         String   @default("viewer") @db.VarChar(50)
+  role         String   @default("unassigned") @db.VarChar(50)
   isActive     Boolean  @default(true) @map("is_active")
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
@@ -74,6 +75,8 @@ model User {
   githubIntegrations GitHubIntegration[]
   aiUsageEvents     AiUsageEvent[]
   integrations      Integration[]
+  delegationsGranted  IntegrationDelegation[] @relation("DelegationGrantedBy")
+  delegationsReceived IntegrationDelegation[] @relation("DelegationGrantee")
 
   @@index([email])
   @@index([tenantId])
@@ -143,6 +146,7 @@ model Product {
   testCases    TestCase[]
   deliverables ManualDeliverable[]
   sprints      Sprint[]
+  integrationDelegations IntegrationDelegation[]
 
   @@unique([tenantId, key])
   @@index([tenantId])
@@ -468,4 +472,30 @@ model Integration {
   @@index([tenantId])
   @@index([isActive])
   @@map("integrations")
+}
+
+// A PM-granted, revocable right for a PO to edit their own product's
+// Jira/Azure DevOps project mapping (Product.jiraProjectKey/jiraProjectId/
+// azureDevopsAreaPath) without ever touching the tenant-wide Integration's
+// raw OAuth credentials. Modeled as a grant record rather than a role change
+// so revoking it can't accidentally strip anything else the PO can do.
+model IntegrationDelegation {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  productId    String    @map("product_id") @db.Uuid
+  granteeId    String    @map("grantee_id") @db.Uuid
+  grantedBy    String    @map("granted_by") @db.Uuid
+  capability   String    @default("manage_product_mapping") @db.VarChar(50)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  grantee User    @relation("DelegationGrantee", fields: [granteeId], references: [id], onDelete: Cascade)
+  granter User    @relation("DelegationGrantedBy", fields: [grantedBy], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([granteeId])
+  @@map("integration_delegations")
 }

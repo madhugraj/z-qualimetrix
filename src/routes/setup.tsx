@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/qm/AppShell";
 import { useState, useEffect } from "react";
 import { CheckCircle2, CircleDashed, ArrowRight, ArrowLeft, Building, Users, Shield, CreditCard, Sparkles } from "lucide-react";
+import { API_V1_URL } from "@/lib/api-config";
 
 export const Route = createFileRoute("/setup")({
   head: () => ({
@@ -119,9 +120,10 @@ function SetupWizard() {
   const handleOrganizationSetup = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:3001/api/v1/admin/setup-organization', {
+      const response = await fetch(`${API_V1_URL}/admin/setup-organization`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           organizationName: setupData.organizationName,
           domain: setupData.domain,
@@ -155,9 +157,10 @@ function SetupWizard() {
       });
 
       if (users.length > 0) {
-        const response = await fetch('http://localhost:3001/api/v1/admin/users/bulk-import', {
+        const response = await fetch(`${API_V1_URL}/admin/users/bulk-import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ users, method: 'csv', tenantId: setupData.tenantId })
         });
 
@@ -180,9 +183,10 @@ function SetupWizard() {
     setLoading(true);
     try {
       if (setupData.teams.length > 0) {
-        const response = await fetch('http://localhost:3001/api/v1/admin/teams', {
+        const response = await fetch(`${API_V1_URL}/admin/teams`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ teams: setupData.teams })
         });
 

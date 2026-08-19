@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { API_V1_URL } from '@/lib/api-config';
+import { useAuth } from '@/lib/auth-context';
 
 interface Product {
   id: string;
@@ -32,6 +34,8 @@ interface AggregatedMetrics {
 }
 
 export function ProductRepositories() {
+  const { user } = useAuth();
+  const tenantId = user?.tenantId ?? '';
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [repositories, setRepositories] = useState<ProductRepository[]>([]);
@@ -39,12 +43,11 @@ export function ProductRepositories() {
   const [isLoading, setIsLoading] = useState(false);
   const [isAddingRepo, setIsAddingRepo] = useState(false);
   const [newRepoInput, setNewRepoInput] = useState('');
-  const [tenantId] = useState('11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167');
 
-  // Load products on mount
+  // Load products once the signed-in user's tenant is known
   useEffect(() => {
-    loadProducts();
-  }, []);
+    if (tenantId) loadProducts();
+  }, [tenantId]);
 
   // Load repositories when product is selected
   useEffect(() => {
@@ -59,7 +62,7 @@ export function ProductRepositories() {
 
   const loadProducts = async () => {
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/products?tenantId=${tenantId}`);
+      const response = await fetch(`${API_V1_URL}/products`, { credentials: 'include' });
       const data = await response.json();
       if (data.success) {
         setProducts(data.data.products);
@@ -79,7 +82,7 @@ export function ProductRepositories() {
 
     setIsLoading(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/product-repository/products/${selectedProduct.id}/repositories`);
+      const response = await fetch(`${API_V1_URL}/product-repository/products/${selectedProduct.id}/repositories`, { credentials: 'include' });
       const data = await response.json();
       if (data.success) {
         setRepositories(data.data);
@@ -96,7 +99,7 @@ export function ProductRepositories() {
     if (!selectedProduct) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/product-repository/products/${selectedProduct.id}/github-metrics?tenantId=${tenantId}`);
+      const response = await fetch(`${API_V1_URL}/product-repository/products/${selectedProduct.id}/github-metrics`, { credentials: 'include' });
       const data = await response.json();
       if (data.success) {
         setMetrics(data.data.aggregated);
@@ -119,9 +122,10 @@ export function ProductRepositories() {
 
     setIsAddingRepo(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/product-repository/products/${selectedProduct.id}/repositories`, {
+      const response = await fetch(`${API_V1_URL}/product-repository/products/${selectedProduct.id}/repositories`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           productId: selectedProduct.id,
           githubRepo: repoFormat,
@@ -150,8 +154,9 @@ export function ProductRepositories() {
     if (!selectedProduct) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/product-repository/products/${selectedProduct.id}/repositories/${encodeURIComponent(githubRepo)}`, {
-        method: 'DELETE'
+      const response = await fetch(`${API_V1_URL}/product-repository/products/${selectedProduct.id}/repositories/${encodeURIComponent(githubRepo)}`, {
+        method: 'DELETE',
+        credentials: 'include',
       });
 
       const data = await response.json();
@@ -172,8 +177,9 @@ export function ProductRepositories() {
     if (!selectedProduct) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/v1/product-repository/products/${selectedProduct.id}/repositories/${encodeURIComponent(githubRepo)}/primary`, {
-        method: 'PUT'
+      const response = await fetch(`${API_V1_URL}/product-repository/products/${selectedProduct.id}/repositories/${encodeURIComponent(githubRepo)}/primary`, {
+        method: 'PUT',
+        credentials: 'include',
       });
 
       const data = await response.json();

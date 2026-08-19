@@ -2,24 +2,25 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import yavarLogo from "@/assets/yavar-logo.png.asset.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { API_V1_URL } from "@/lib/api-config";
+import { useAuth } from "@/lib/auth-context";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Sign in — QualiMetrix" },
+      { title: "Sign in — QubeIQ" },
       {
         name: "description",
         content:
-          "Sign in to QualiMetrix with two-factor verification to access quality, defect and engineering health analytics.",
+          "Sign in to QubeIQ with two-factor verification to access quality, defect and engineering health analytics.",
       },
-      { property: "og:title", content: "Sign in — QualiMetrix" },
+      { property: "og:title", content: "Sign in — QubeIQ" },
       {
         property: "og:description",
-        content: "Two-factor sign in to the QualiMetrix quality intelligence platform.",
+        content: "Two-factor sign in to the QubeIQ quality intelligence platform.",
       },
     ],
   }),
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/login")({
 // password set (admin-created) and have tenantId assigned.
 function LoginPage() {
   const navigate = useNavigate();
+  const { refetch } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -43,7 +45,7 @@ function LoginPage() {
     setBusy(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/v1/auth/login', {
+      const response = await fetch(`${API_V1_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -59,7 +61,8 @@ function LoginPage() {
       }
 
       toast.success(`Welcome back, ${result.user.name || result.user.email}`);
-      navigate({ to: "/ai-usage" });
+      await refetch();
+      navigate({ to: "/dashboard" });
     } catch (error) {
       console.error('Login error:', error);
       toast.error('Unable to connect to authentication service');
@@ -80,12 +83,10 @@ function LoginPage() {
 
       <header className="relative mx-auto flex w-full max-w-6xl items-center gap-4 px-5 py-6">
         <Link to="/" className="flex items-center gap-3">
-          <img
-            src={yavarLogo.url}
-            alt="YAVAR logo"
-            className="h-7 w-[48px] object-contain mix-blend-multiply"
-          />
-          <span className="text-sm font-semibold tracking-tight">QualiMetrix</span>
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/60">
+            <span className="text-xs font-bold text-primary-foreground">Q</span>
+          </div>
+          <span className="text-sm font-semibold tracking-tight">QubeIQ</span>
         </Link>
         <Link
           to="/"

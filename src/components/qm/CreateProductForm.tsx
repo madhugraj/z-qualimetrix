@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { API_V1_URL } from '@/lib/api-config';
 
 interface CreateProductData {
   tenantId: string;
@@ -55,11 +56,11 @@ export function CreateProductForm({ tenantId, onProductCreated, onCancel }: Crea
   useEffect(() => {
     async function loadProjectsIfConnected(provider: 'jira' | 'azure_devops', setter: (p: ExternalProject[]) => void) {
       try {
-        const statusRes = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/status?tenantId=${tenantId}`);
+        const statusRes = await fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" });
         const statusData = await statusRes.json();
         if (!statusData.success || !statusData.data.isConnected) return;
 
-        const projectsRes = await fetch(`http://localhost:3001/api/v1/integrations/${provider}/projects?tenantId=${tenantId}`);
+        const projectsRes = await fetch(`${API_V1_URL}/integrations/${provider}/projects`, { credentials: "include" });
         const projectsData = await projectsRes.json();
         if (projectsData.success) setter(projectsData.data);
       } catch (error) {
@@ -103,9 +104,10 @@ export function CreateProductForm({ tenantId, onProductCreated, onCancel }: Crea
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/v1/products', {
+      const response = await fetch(`${API_V1_URL}/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(formData)
       });
 

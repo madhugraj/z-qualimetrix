@@ -88,3 +88,126 @@ called machine-to-machine instead, use `requireIngestToken` from
 | `prisma/schema.prisma` — `Integration` model, `Product.jiraProjectId`, `WorkItem`/`Sprint` external-sync fields | PR #3 |
 | `src/api/services/{integration,jira-oauth,jira-sync,azure-devops-*}.service.ts`, `src/api/controllers/integration.controller.ts`, `src/api/routes/integration.routes.ts`, `src/lib/scheduler.ts`, `src/lib/jwt.ts` | PR #3 |
 | `src/api/server.ts`, `src/api/routes/index.ts`, `prisma/schema.prisma`'s `User`/`AiModelCatalog`/`AiUsageEvent` blocks | Both — check the other PR's diff before editing further |
+
+## PR #3 update (2026-08-18)
+
+- Fixed the flagged bug: `azure_devops` sync handler is now registered with
+  the scheduler alongside `jira` in `server.ts`. Thanks for catching that.
+- Saw the `requireAdmin` contract above — makes sense, and matches what I'd
+  hoped for. Not wiring it into `integration.controller.ts` yet since
+  `src/api/middleware/auth.middleware.ts` doesn't exist on this branch
+  (`feature/jira-azure-devops-clean` forks off `main`, not `ai-usage-real-capture`)
+  — adding the import now would just break this branch's standalone build.
+  Ready to wire the moment the branches converge (PR #1 merges first and I
+  rebase, or whoever integrates both does it) — it's a small, mechanical
+  change at that point given the contract's already spec'd out here.
+- Now investigating a separate, bigger question: where the Express API
+  backend actually runs in production. Confirmed `z-qualimetrix.lovable.app`
+  (the deployed frontend) is a Cloudflare-Workers-style edge function that
+  can't host this app's persistent Express+Postgres backend at all — every
+  API call from that deployed frontend 404s today, not just Jira/ADO's.
+  Scoping a fix now (likely: a separate host for the Express API, e.g.
+  Railway/Render, plus centralizing the ~30 hardcoded `localhost:3001`
+  references across both PRs' files into one configurable base URL). Will
+  post here once there's a concrete plan, since it touches files in both PRs.
+
+## PR #3: backend deployment plan + a real bug for PR #1 (2026-08-18)
+
+**Plan finalized** (full detail in `/Users/yavar/.claude/plans/dapper-munching-marble.md`,
+addendum section): Express+Prisma API deploys to Railway (always-on by
+default — this app's `node-cron` scheduler needs exactly one persistent
+process, ruling out anything that sleeps on idle or edge/Workers hosting).
+Frontend stays on Lovable, told where the API lives via one config value.
+
+**New shared frontend module — please converge on this rather than inventing
+a different pattern**: `src/lib/api-config.ts` (new, this branch only so far):
+```ts
+const RAW = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3001";
+export const API_BASE_URL = RAW.replace(/\/+$/, "");
+export const API_V1_URL = `${API_BASE_URL}/api/v1`;
+```
+`VITE_API_URL` is read at Vite build time (confirmed working through
+`@lovable.dev/vite-tanstack-config`'s `loadEnv`/`define`, independent of
+Lovable's own secrets dashboard) — not a secret, safe to commit in a
+`.env.production`. Falls back to today's `localhost:3001` when unset, so
+local dev is unaffected.
+
+**Scope note**: I only replaced hardcoded `localhost:3001` refs in files that
+exist on `feature/jira-azure-devops-clean` and matter for the Jira/ADO flow
+(`IntegrationConnectionPanel.tsx`, `CreateProductForm.tsx`, `integrations.tsx`,
+`settings.tsx`'s `GitHubConfig`). Deliberately did **not** touch
+`ProductRepositories.tsx`, `git.server.ts`, `github-data.service.ts`,
+`admin.tsx`, `ai-usage.tsx`, `setup.tsx`, `login.tsx` — several of those exist
+on both our branches independently, and fixing them twice would just produce
+conflicting diffs at merge time. Whoever merges second should do one pass
+importing `API_V1_URL` from `api-config.ts` across whatever's left, once both
+land on `main`.
+
+**Also fixed**: `server.ts`'s CORS on this branch was still `cors()` (wide
+open) — switched to the `FRONTEND_ORIGIN`-scoped + `credentials: true` version
+to match yours, so this reconciles cleanly at merge instead of one branch
+silently reverting the other's CORS hardening.
+
+**⚠️ Real bug for PR #1, found while researching the deployment** (not
+something I'm fixing, since it's your file): `auth.controller.ts`'s cookie
+config sets `sameSite: 'lax'`. That only works today because
+`localhost:8086` → `localhost:3001` are cross-*origin* but same-*site*
+(`SameSite` cares about the registrable domain, not the port). Once the
+frontend (`z-qualimetrix.lovable.app`) and this API (a new Railway domain)
+are genuinely cross-site, `Lax` cookies won't be attached to the frontend's
+fetch calls at all — `POST /auth/login` would still return 200, but the
+session cookie would never come back on the next request, so login would
+silently appear to work and then not persist. Before this matters (i.e.
+before PR #1 is tested against a real deployed frontend, not just localhost),
+`accessCookieOptions()`/`refreshCookieOptions()` need `sameSite: 'none'` +
+`secure: true` in production, and CORS needs an explicit origin (not `*`)
+with `credentials: true` — the CORS part's already true on your branch, just
+flagging the cookie half too so both land together.
+
+## PR #3: merged PR #1's auth in, built the PM/PO/delegation RBAC layer (2026-08-19)
+
+`origin/ai-usage-real-capture` (PR #1's real auth) is now merged into
+`feature/jira-azure-devops-clean` — not the `ai-provider-integrations`
+worktree (that one carries unrelated OpenAI/Gemini scope on top of the same
+auth code). Whoever eventually merges `ai-provider-integrations` to `main`
+will hit the same `AiModelCatalog`/`User` schema reconciliation described
+above a second time; this branch's resolution (below) is a worked example.
+
+- **Schema reconciliation**: unioned `User`'s new fields (`squad`,
+  `aiIngestTokenHash`, `passwordHash`, etc.) with this branch's own
+  `integrations` relation. Took PR #1's `AiModelCatalog` approach (partial
+  unique indexes over a plain `@unique`) but kept *this* branch's field
+  nullability, since its own `reconcile_ai_usage_drift` migration (already
+  applied here) is more current than what PR #1's migrations produce on a
+  fresh replay — verify against a shadow DB before trusting either side's
+  schema.prisma blindly, don't just pick one branch wholesale.
+  Also fixed a real bug in PR #1's own migration history:
+  `20260817130007_ai_model_catalog_partial_unique` did
+  `DROP CONSTRAINT ai_model_catalog_model_id_key`, but that object is a bare
+  `CREATE UNIQUE INDEX`, not a table constraint — Postgres accepted it
+  against the shared dev DB's already-drifted state (drops silently
+  succeeded there) but it fails a clean replay. Changed to `DROP INDEX`.
+- **`requireAdmin` now checks `role === 'pm'`**, not `'admin'` — matches the
+  business model (PM = org-wide super-admin who owns Jira/ADO/GitHub/AI-tool
+  connections). `admin.controller.ts`'s `setupOrganization` creates the org's
+  first user with `role: 'pm'` and now calls the (newly exported)
+  `issueSession()` from `auth.controller.ts` immediately after, since
+  `setup.tsx`'s wizard calls `bulk-import`/`teams` right after
+  `setup-organization` with no login step in between — those are `requireAdmin`-gated now, so the bootstrap request has to leave the caller signed in.
+- **New**: `IntegrationDelegation` model + `membership.routes.ts` (PM-only) —
+  models "PM delegates connection-setup to a PO for one product" as a
+  revocable grant, not a role change. `requireProductWriteAccess` in
+  `auth.middleware.ts` enforces it on `PUT /products/:id`: PM edits anything,
+  a PO may edit only `jiraProjectKey`/`jiraProjectId`/`azureDevopsAreaPath`,
+  and only with an active delegation for that specific product.
+- **Every fetch call needed `credentials: 'include'`** once routes went from
+  trusting `x-tenant-id`/query params to real cookie sessions — audit any
+  new frontend code that calls this API for that, including files this pass
+  didn't own before (`ProductRepositories.tsx`, `github-data.service.ts`,
+  `setup.tsx`). **Known gap, not fixed**: `src/lib/git.server.ts` calls this
+  API's `/github/*` endpoints from server-side code with no cookie to send —
+  those requests now 401. Needs either a forwarded-cookie or a service token,
+  whoever picks this up next.
+- Seed script for demo/local testing: `scripts/seed-demo-roles.ts` (one user
+  per role: `pm`/`po`/`developer`/`tester`/`executive`, password `demo1234`,
+  plus a live PM→PO delegation on the first seeded product).
