@@ -5,8 +5,10 @@
 
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+const BCRYPT_COST = 12;
 
 /**
  * POST /api/v1/admin/setup-organization
@@ -32,20 +34,19 @@ export async function setupOrganization(req: Request, res: Response) {
       });
     }
 
-    // Check if organization already exists
-    const existingTenant = await prisma.tenant.findFirst();
-    if (existingTenant) {
-      return res.status(400).json({
-        success: false,
-        error: 'Organization already configured. Use update endpoints instead.'
-      });
-    }
-
-    // Create organization slug
-    const slug = organizationName
+    // Create organization slug. Slug collisions were impossible while only one
+    // tenant could ever exist; now that setupOrganization allows many, a second
+    // "Acme Corp" needs a distinct slug rather than a raw 500 on the unique
+    // constraint.
+    const baseSlug = organizationName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
+    let slug = baseSlug;
+    let suffix = 1;
+    while (await prisma.tenant.findUnique({ where: { slug } })) {
+      slug = `${baseSlug}-${++suffix}`;
+    }
 
     // Create organization with default settings
     const tenant = await prisma.tenant.create({
@@ -78,7 +79,8 @@ export async function setupOrganization(req: Request, res: Response) {
             email: adminUser.email,
             name: adminUser.name || 'System Administrator',
             role: 'admin',
-            tenantId: tenant.id
+            tenantId: tenant.id,
+            passwordHash: adminUser.password ? await bcrypt.hash(adminUser.password, BCRYPT_COST) : null,
           }
         });
 
@@ -153,12 +155,21 @@ export async function bulkImportUsers(req: Request, res: Response) {
       });
     }
 
-    // Get the tenant (assuming single tenant for now)
-    const tenant = await prisma.tenant.findFirst();
+    // tenantId must be explicit now that more than one tenant can exist —
+    // silently picking "whichever tenant is first" would land every import
+    // in the wrong organization as soon as a second one exists.
+    const { tenantId } = req.body;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        error: 'tenantId is required'
+      });
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       return res.status(400).json({
         success: false,
-        error: 'Organization not configured. Please setup organization first.'
+        error: 'Organization not found for the given tenantId.'
       });
     }
 
@@ -191,7 +202,8 @@ export async function bulkImportUsers(req: Request, res: Response) {
             name: userData.name || userData.email.split('@')[0],
             role: userData.role || 'developer',
             tenantId: tenant.id,
-            isActive: true
+            isActive: true,
+            passwordHash: userData.password ? await bcrypt.hash(userData.password, BCRYPT_COST) : null,
           }
         });
 

@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
 import { healthCheck, databaseInfo } from './controllers/health.controller'
 import apiRoutes from './routes'
@@ -19,9 +20,37 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 // Middleware
-app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+// credentials:true + an explicit origin (not '*') is required once anything
+// on this API issues cookies — matches the CORS shape the parallel auth
+// session's branch already uses, kept consistent so it reconciles cleanly
+// when both branches merge.
+//
+// In development, accept any localhost/127.0.0.1 origin regardless of port —
+// Vite's dev server port varies (auto-increments when its default is taken),
+// so pinning CORS to one hardcoded port breaks every time it picks a
+// different one. Also trust *.devtunnels.ms (VS Code's port-forwarding
+// service) for remote testing (e.g. a PM completing an OAuth flow from
+// their own machine) — the exact subdomain changes per tunnel session, so
+// this is a pattern match, not a fixed origin. Production still requires an
+// exact FRONTEND_ORIGIN match — neither of these dev allowances apply there.
+const isProduction = process.env.NODE_ENV === 'production'
+const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+const devTunnelOriginPattern = /^https:\/\/[a-z0-9-]+\.devtunnels\.ms$/
+
+app.use(cors({
+  origin: isProduction
+    ? process.env.FRONTEND_ORIGIN
+    : (origin, callback) => {
+        if (!origin || localhostOriginPattern.test(origin) || devTunnelOriginPattern.test(origin)) {
+          return callback(null, true)
+        }
+        callback(new Error(`Origin ${origin} not allowed by CORS`))
+      },
+  credentials: true,
+}))
+app.use(cookieParser())
+app.use(express.json({ limit: '2mb' }))
+app.use(express.urlencoded({ extended: true, limit: '2mb' }))
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -56,11 +85,12 @@ app.get('/api/v1', (req: Request, res: Response) => {
 app.use('/api/v1', apiRoutes)
 
 // Error handling middleware
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error & { status?: number; statusCode?: number }, req: Request, res: Response, next: NextFunction) => {
   console.error('Error:', err)
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  const status = err.status ?? err.statusCode ?? 500
+  res.status(status).json({
+    success: false,
+    error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
   })
 })
 
@@ -75,6 +105,7 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
 
   registerSyncHandler('jira', syncAllJira)
+  registerSyncHandler('azure_devops', syncAllAdo)
   startScheduler()
 })
 

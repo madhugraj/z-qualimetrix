@@ -7,15 +7,16 @@
  * number is derived from those events at query time — nothing is hardcoded in
  * the UI.
  *
- * Storage now uses PostgreSQL persistence with Prisma ORM, replacing the
- * previous in-memory store. The system seeds with demo data if empty and
- * supports real-time event ingestion for live analytics.
+ * Every query in this file is scoped by tenantId, derived server-side from an
+ * authenticated session or ingest token — never from a client-supplied value.
+ * See docs/PARALLEL_WORK_COORDINATION.md for the current auth contract.
  */
 
 export type AiVisibility = "self" | "team" | "org" | "finance";
 export type AiActivity = "code" | "tests" | "docs" | "review";
 
 import { PrismaClient } from '@prisma/client';
+import { hashToken, generateSecureToken } from './encryption';
 
 const prisma = new PrismaClient();
 
@@ -56,20 +57,33 @@ export interface AiModelMeta {
   cacheDiscount: number;
 }
 
-export async function getModelCatalog(): Promise<AiModelMeta[]> {
+/**
+ * A tenantId IS NULL row is a global default (published vendor list price);
+ * a tenant only needs its own row if it negotiated a different rate. Ties
+ * are broken in favour of the tenant-specific row.
+ */
+export async function getModelCatalog(tenantId: string): Promise<AiModelMeta[]> {
   try {
-    const models = await prisma.aiModelCatalog.findMany({
-      where: { isActive: true }
+    const rows = await prisma.aiModelCatalog.findMany({
+      where: { isActive: true, OR: [{ tenantId }, { tenantId: null }] },
     });
 
-    return models.map(m => ({
+    const byModelId = new Map<string, typeof rows[number]>();
+    for (const row of rows) {
+      const existing = byModelId.get(row.modelId);
+      if (!existing || (existing.tenantId === null && row.tenantId !== null)) {
+        byModelId.set(row.modelId, row);
+      }
+    }
+
+    return Array.from(byModelId.values()).map(m => ({
       id: m.modelId,
       name: m.name,
       vendor: m.vendor,
-      purpose: m.purpose,
+      purpose: m.purpose ?? "",
       priceIn: Number(m.priceIn),
       priceOut: Number(m.priceOut),
-      cacheDiscount: Number(m.cacheDiscount),
+      cacheDiscount: Number(m.cacheDiscount ?? 0.9),
     }));
   } catch (error) {
     console.error('Error fetching model catalog:', error);
@@ -124,43 +138,83 @@ export interface AiMember {
   seatBudgetUsd: number;
 }
 
-export let AI_DIRECTORY: AiMember[] = [
-  { id: "1f9c1029-80ed-48ef-8892-c9aa06092640", name: "Admin User", role: "Developer", squad: "Squad Nova", seatBudgetUsd: 650 },
-  { id: "275905eb-e6e3-4115-9fb9-606b1d59101c", name: "Demo Tester", role: "Tester", squad: "Squad Kite", seatBudgetUsd: 400 },
-];
-
 export const SPRINTS = ["S6", "S7", "S8", "S9", "S10", "S11", "S12"];
 export const ORG_SPRINT_BUDGET_USD = 3200;
 
-let memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
+/**
+ * Loaded fresh per call, scoped to one tenant — replaces a previous
+ * module-level global cache that leaked across tenants (every visibility
+ * computation read from a single process-wide directory shared by every
+ * request) and raced under concurrent requests from different tenants.
+ */
+async function loadDirectory(tenantId: string): Promise<{ directory: AiMember[]; byId: Map<string, AiMember> }> {
+  const users = await prisma.user.findMany({ where: { isActive: true, tenantId } });
+  const directory: AiMember[] = users.map(user => ({
+    id: user.id,
+    name: user.name || user.email,
+    role: user.role as AiMember["role"],
+    squad: user.squad ?? "Unassigned",
+    seatBudgetUsd: 400,
+  }));
+  return { directory, byId: new Map(directory.map((m) => [m.id, m])) };
+}
 
-// Function to refresh AI directory from database
-export async function refreshAiDirectory() {
+/**
+ * Issue a fresh personal ingest token for a user, invalidating any prior one.
+ * Only the hash is persisted — the plaintext is returned once and never stored.
+ */
+export async function issueAiIngestToken(userId: string): Promise<string> {
+  const rawToken = generateSecureToken();
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      aiIngestTokenHash: hashToken(rawToken),
+      aiIngestTokenCreatedAt: new Date(),
+    },
+  });
+  return rawToken;
+}
+
+/** Resolve a user from a presented raw ingest token. Never trusts payload-supplied identity. */
+export async function resolveUserByIngestToken(rawToken: string) {
+  const user = await prisma.user.findUnique({
+    where: { aiIngestTokenHash: hashToken(rawToken) },
+  });
+  return user && user.isActive ? user : null;
+}
+
+/**
+ * Auto-register a GLOBAL model catalog entry the first time an unrecognized
+ * modelId is seen from live telemetry (e.g. non-Anthropic models routed
+ * through a third-party-compatible proxy). Pricing is a placeholder until an
+ * admin verifies it. Always global (tenantId: null), not tenant-scoped — an
+ * unrecognized model is "nobody has told us the right price yet," not one
+ * tenant's negotiated rate, so every tenant hitting the same unknown model
+ * shares one placeholder rather than each minting their own.
+ */
+export async function ensureModelCatalogEntry(modelId: string): Promise<void> {
   try {
-    const prisma = new PrismaClient();
-    const users = await prisma.user.findMany({
-      where: { isActive: true }
+    const existing = await prisma.aiModelCatalog.findFirst({ where: { modelId, tenantId: null } });
+    if (existing) return;
+    await prisma.aiModelCatalog.create({
+      data: {
+        modelId,
+        name: modelId,
+        vendor: "Unverified (auto-detected via OTel)",
+        purpose: "Auto-created placeholder from Claude Code telemetry — verify pricing before trusting cost figures.",
+        priceIn: 3,
+        priceOut: 15,
+        cacheDiscount: 0.9,
+        isActive: true,
+        tenantId: null,
+      },
     });
-
-    AI_DIRECTORY = users.map(user => ({
-      id: user.id,
-      name: user.name || user.email,
-      role: user.role as "Developer" | "Tester" | "Tech writer",
-      squad: "Default Squad", // This would come from team assignments in a full implementation
-      seatBudgetUsd: 400 // Default budget
-    }));
-
-    memberById = new Map(AI_DIRECTORY.map((m) => [m.id, m]));
-    console.log(`🔄 Refreshed AI directory with ${AI_DIRECTORY.length} users`);
-  } catch (error) {
-    console.error('Error refreshing AI directory:', error);
+  } catch (error: any) {
+    if (error?.code !== "P2002") throw error; // ignore race on concurrent first-seen model
   }
 }
 
-export async function eventCost(e: AiUsageEvent): Promise<number> {
-  const modelCatalog = await getModelCatalog();
-  const modelById = new Map(modelCatalog.map((m) => [m.id, m]));
-
+export function eventCost(e: AiUsageEvent, modelById: Map<string, AiModelMeta>): number {
   const m = modelById.get(e.modelId);
   if (!m) return 0;
   const billableIn = e.tokensIn - e.cachedIn + e.cachedIn * (1 - m.cacheDiscount);
@@ -169,14 +223,12 @@ export async function eventCost(e: AiUsageEvent): Promise<number> {
 
 /* ------------------------------------------------------------------ database store */
 
-export async function recordEvents(events: AiUsageEvent[]) {
+export async function recordEvents(events: AiUsageEvent[], tenantId: string) {
   try {
-    // Check if events array is empty
     if (events.length === 0) {
-      return { accepted: 0, total: await prisma.aiUsageEvent.count() };
+      return { accepted: 0, total: await prisma.aiUsageEvent.count({ where: { tenantId } }) };
     }
 
-    // Insert events into database
     await prisma.aiUsageEvent.createMany({
       data: events.map(e => ({
         id: e.id,
@@ -191,10 +243,11 @@ export async function recordEvents(events: AiUsageEvent[]) {
         latencyMs: e.latencyMs,
         accepted: e.accepted,
         reworked: e.reworked,
+        tenantId,
       }))
     });
 
-    const total = await prisma.aiUsageEvent.count();
+    const total = await prisma.aiUsageEvent.count({ where: { tenantId } });
     return { accepted: events.length, total };
   } catch (error) {
     console.error('Error recording AI usage events:', error);
@@ -202,139 +255,31 @@ export async function recordEvents(events: AiUsageEvent[]) {
   }
 }
 
-export async function allEvents(): Promise<AiUsageEvent[]> {
+export async function allEvents(tenantId: string): Promise<AiUsageEvent[]> {
   try {
-    const count = await prisma.aiUsageEvent.count();
-
-    // If no events exist, seed with demo data
-    if (count === 0) {
-      console.log('No AI usage events found, seeding with demo data...');
-      const seededEvents = seedEvents();
-      await recordEvents(seededEvents);
-      return seededEvents;
-    }
-
-    // Fetch all events from database
     const dbEvents = await prisma.aiUsageEvent.findMany({
+      where: { tenantId },
       orderBy: { timestamp: 'desc' }
     });
 
     return dbEvents.map(e => ({
       id: e.id,
-      ts: e.timestamp.toISOString(),
-      sprint: e.sprint,
+      ts: (e.timestamp ?? new Date()).toISOString(),
+      sprint: e.sprint ?? SPRINTS[SPRINTS.length - 1],
       userId: e.userId,
       modelId: e.modelId,
-      activity: e.activity as AiActivity,
+      activity: (e.activity ?? "code") as AiActivity,
       tokensIn: e.tokensIn,
       tokensOut: e.tokensOut,
-      cachedIn: e.cachedIn,
-      latencyMs: e.latencyMs,
-      accepted: e.accepted,
-      reworked: e.reworked,
+      cachedIn: e.cachedIn ?? 0,
+      latencyMs: e.latencyMs ?? 0,
+      accepted: e.accepted ?? false,
+      reworked: e.reworked ?? false,
     }));
   } catch (error) {
     console.error('Error fetching AI usage events:', error);
-    // Fallback to seeded data if database fails
-    console.log('Falling back to seeded demo data...');
-    return seedEvents();
+    return [];
   }
-}
-
-/* ---------------------------------------------------------------- seeding */
-
-function rng(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
-
-/** Per-person behavioural profile: volume, model mix, discipline. */
-const PROFILE: Record<
-  string,
-  { volume: number; models: [string, number][]; accept: number; rework: number }
-> = {
-  "1f9c1029-80ed-48ef-8892-c9aa06092640": {
-    volume: 1,
-    models: [["claude-sonnet", 0.6], ["codex", 0.3], ["yavar-inhouse", 0.1]],
-    accept: 0.78,
-    rework: 0.06,
-  },
-  "275905eb-e6e3-4115-9fb9-606b1d59101c": {
-    volume: 0.65,
-    models: [["yavar-inhouse", 0.6], ["codex", 0.25], ["gemini", 0.15]],
-    accept: 0.72,
-    rework: 0.05,
-  },
-};
-
-const ACTIVITY_BY_ROLE: Record<AiMember["role"], [AiActivity, number][]> = {
-  Developer: [["code", 0.6], ["tests", 0.2], ["review", 0.13], ["docs", 0.07]],
-  Tester: [["tests", 0.6], ["review", 0.2], ["docs", 0.13], ["code", 0.07]],
-  "Tech writer": [["docs", 0.75], ["review", 0.15], ["tests", 0.05], ["code", 0.05]],
-};
-
-function pick<T>(weights: [T, number][], r: number): T {
-  let acc = 0;
-  for (const [value, w] of weights) {
-    acc += w;
-    if (r <= acc) return value;
-  }
-  return weights[weights.length - 1][0];
-}
-
-const SPRINT_LENGTH_DAYS = 14;
-const SEED_ANCHOR = Date.UTC(2026, 7, 12); // end of the latest sprint
-
-function seedEvents(): AiUsageEvent[] {
-  const rand = rng(20260812);
-  const events: AiUsageEvent[] = [];
-
-  SPRINTS.forEach((sprint, sprintIdx) => {
-    // adoption ramps sprint over sprint, in-house share grows fastest
-    const ramp = 0.62 + sprintIdx * 0.075;
-    const sprintEnd = SEED_ANCHOR - (SPRINTS.length - 1 - sprintIdx) * SPRINT_LENGTH_DAYS * 864e5;
-
-    for (const member of AI_DIRECTORY) {
-      const profile = PROFILE[member.id];
-      const requests = Math.round(140 * profile.volume * ramp);
-
-      for (let i = 0; i < requests; i++) {
-        const r = rand();
-        let modelId = pick(profile.models, r);
-        // in-house displacement of paid tokens over time
-        if (modelId !== "yavar-inhouse" && rand() < sprintIdx * 0.035) modelId = "yavar-inhouse";
-
-        const activity = pick(ACTIVITY_BY_ROLE[member.role], rand());
-        const scale = activity === "code" ? 1.5 : activity === "docs" ? 1.1 : 1;
-        const tokensIn = Math.round((1800 + rand() * 5200) * scale);
-        const tokensOut = Math.round(tokensIn * (0.18 + rand() * 0.2));
-        const cacheRatio = Math.min(0.55, 0.1 + sprintIdx * 0.06) * (0.6 + rand() * 0.7);
-
-        events.push({
-          id: `${sprint}-${member.id}-${i}`,
-          ts: new Date(sprintEnd - rand() * SPRINT_LENGTH_DAYS * 864e5).toISOString(),
-          sprint,
-          userId: member.id,
-          modelId,
-          activity,
-          tokensIn,
-          tokensOut,
-          cachedIn: Math.round(tokensIn * cacheRatio),
-          latencyMs: Math.round(
-            (modelId === "codex" ? 850 : modelId === "yavar-inhouse" ? 1450 : 2000) *
-              (0.7 + rand() * 0.6),
-          ),
-          accepted: rand() < profile.accept + sprintIdx * 0.008,
-          reworked: rand() < profile.rework,
-        });
-      }
-    }
-  });
-
-  return events;
 }
 
 /* ------------------------------------------------------------ aggregation */
@@ -342,14 +287,15 @@ function seedEvents(): AiUsageEvent[] {
 export interface AiUsageQuery {
   visibility: AiVisibility;
   userId: string;
+  tenantId: string;
   sprints?: number;
 }
 
-function scopeEvents(events: AiUsageEvent[], q: AiUsageQuery) {
-  const viewer = memberById.get(q.userId);
+function scopeEvents(events: AiUsageEvent[], q: AiUsageQuery, byId: Map<string, AiMember>) {
+  const viewer = byId.get(q.userId);
   if (q.visibility === "self") return events.filter((e) => e.userId === q.userId);
   if (q.visibility === "team" && viewer)
-    return events.filter((e) => memberById.get(e.userId)?.squad === viewer.squad);
+    return events.filter((e) => byId.get(e.userId)?.squad === viewer.squad);
   return events;
 }
 
@@ -362,17 +308,19 @@ function pct(part: number, total: number) {
 }
 
 export async function aggregate(q: AiUsageQuery) {
+  const { directory, byId } = await loadDirectory(q.tenantId);
+
   const sprints = SPRINTS.slice(-(q.sprints ?? SPRINTS.length));
-  const all = await allEvents();
+  const all = await allEvents(q.tenantId);
   const sprintFiltered = all.filter((e) => sprints.includes(e.sprint));
-  const scoped = scopeEvents(sprintFiltered, q);
+  const scoped = scopeEvents(sprintFiltered, q, byId);
   const latest = sprints[sprints.length - 1];
   const previous = sprints[sprints.length - 2];
 
-  const costOf = async (list: AiUsageEvent[]) => {
-    const costs = await Promise.all(list.map(eventCost));
-    return sum(costs);
-  };
+  const modelCatalog = await getModelCatalog(q.tenantId);
+  const modelById = new Map(modelCatalog.map((m) => [m.id, m]));
+
+  const costOf = (list: AiUsageEvent[]) => sum(list.map((e) => eventCost(e, modelById)));
   const tokensOf = (list: AiUsageEvent[]) => sum(list.map((e) => e.tokensIn + e.tokensOut));
 
   const inSprint = (list: AiUsageEvent[], s?: string) =>
@@ -382,10 +330,8 @@ export async function aggregate(q: AiUsageQuery) {
   const prior = inSprint(scoped, previous);
 
   /* models */
-  const modelCatalog = await getModelCatalog();
-  const models = await Promise.all(modelCatalog.map(async (m) => {
+  const models = modelCatalog.map((m) => {
     const list = scoped.filter((e) => e.modelId === m.id);
-    const costValue = await costOf(list);
     return {
       id: m.id,
       name: m.name,
@@ -394,21 +340,21 @@ export async function aggregate(q: AiUsageQuery) {
       tokensIn: sum(list.map((e) => e.tokensIn)),
       tokensOut: sum(list.map((e) => e.tokensOut)),
       requests: list.length,
-      costUsd: Math.round(costValue * 10) / 10,
+      costUsd: Math.round(costOf(list) * 10) / 10,
       avgLatencyMs: list.length ? Math.round(sum(list.map((e) => e.latencyMs)) / list.length) : 0,
       acceptRate: pct(list.filter((e) => e.accepted).length, list.length),
     };
-  })).then((m) => m.filter((m) => m.requests > 0));
+  }).filter((m) => m.requests > 0);
 
   /* trends */
-  const spendTrend = await Promise.all(sprints.map(async (s) => {
-    const row: Record<string, string | number> = { sprint: s, budget: sprintBudget(q) };
+  const spendTrend = sprints.map((s) => {
+    const row: Record<string, string | number> = { sprint: s, budget: sprintBudget(q, directory, byId) };
     for (const m of modelCatalog) {
-      const sprintCost = await costOf(scoped.filter((e) => e.sprint === s && e.modelId === m.id));
+      const sprintCost = costOf(scoped.filter((e) => e.sprint === s && e.modelId === m.id));
       row[m.id] = Math.round(sprintCost);
     }
     return row;
-  }));
+  });
 
   const tokenTrend = sprints.map((s) => {
     const list = scoped.filter((e) => e.sprint === s);
@@ -421,25 +367,25 @@ export async function aggregate(q: AiUsageQuery) {
     };
   });
 
-  const activityMix = await Promise.all((Object.keys(ACTIVITY_LABEL) as AiActivity[]).map(async (a) => {
+  const activityMix = (Object.keys(ACTIVITY_LABEL) as AiActivity[]).map((a) => {
     const list = scoped.filter((e) => e.activity === a);
     return {
       activity: ACTIVITY_LABEL[a],
       tokens: Math.round((tokensOf(list) / 1_000_000) * 10) / 10,
-      costUsd: Math.round(await costOf(list)),
+      costUsd: Math.round(costOf(list)),
     };
-  }));
+  });
 
   /* people — visibility controls who is listed and whether cost is exposed */
   const visibleMembers =
     q.visibility === "self"
-      ? AI_DIRECTORY.filter((m) => m.id === q.userId)
+      ? directory.filter((m) => m.id === q.userId)
       : q.visibility === "team"
-        ? AI_DIRECTORY.filter((m) => m.squad === memberById.get(q.userId)?.squad)
-        : AI_DIRECTORY;
+        ? directory.filter((m) => m.squad === byId.get(q.userId)?.squad)
+        : directory;
 
-  const people = await Promise.all(visibleMembers
-    .map(async (member) => {
+  const people = visibleMembers
+    .map((member) => {
       const list = scoped.filter((e) => e.userId === member.id);
       const topModel = models
         .map((m) => ({ m, n: list.filter((e) => e.modelId === m.id).length }))
@@ -451,18 +397,18 @@ export async function aggregate(q: AiUsageQuery) {
         role: member.role,
         squad: member.squad,
         tokens: Math.round((tokensOf(list) / 1_000_000) * 10) / 10,
-        costUsd: q.visibility === "self" ? null : Math.round(await costOf(list)),
+        costUsd: q.visibility === "self" ? null : Math.round(costOf(list)),
         requests: list.length,
         acceptRate: pct(assisted.length, list.length),
         aiAssistedOutput: pct(sum(assisted.map((e) => e.tokensOut)), sum(list.map((e) => e.tokensOut))),
         reworkRate: pct(list.filter((e) => e.reworked).length, assisted.length),
         topModel: topModel?.m.name ?? "—",
       };
-    }))
-    .then((people) => people.sort((a, b) => b.tokens - a.tokens));
+    })
+    .sort((a, b) => b.tokens - a.tokens);
 
   /* org-wide medians so "self" viewers get context without seeing colleagues */
-  const orgPeople = AI_DIRECTORY.map((member) => {
+  const orgPeople = directory.map((member) => {
     const list = all.filter((e) => e.userId === member.id);
     const assisted = list.filter((e) => e.accepted);
     return {
@@ -482,11 +428,12 @@ export async function aggregate(q: AiUsageQuery) {
   };
 
   /* totals + KPIs */
-  const budget = sprintBudget(q);
-  const currentCost = await costOf(current);
-  const priorCost = await costOf(prior);
+  const budget = sprintBudget(q, directory, byId);
+  const currentCost = costOf(current);
+  const priorCost = costOf(prior);
+  const costsBySprint = sprints.map((s) => costOf(scoped.filter((e) => e.sprint === s)));
   const totals = {
-    costUsd: Math.round(await costOf(scoped)),
+    costUsd: Math.round(costOf(scoped)),
     currentSprintCostUsd: Math.round(currentCost),
     tokens: tokensOf(scoped),
     requests: scoped.length,
@@ -506,7 +453,7 @@ export async function aggregate(q: AiUsageQuery) {
     currentCost,
     priorCost,
     totals,
-    costOf,
+    costsBySprint,
     tokensOf,
   });
 
@@ -533,12 +480,12 @@ export async function aggregate(q: AiUsageQuery) {
 
 export type AiUsageAnalytics = ReturnType<typeof aggregate>;
 
-function sprintBudget(q: AiUsageQuery) {
-  if (q.visibility === "self") return memberById.get(q.userId)?.seatBudgetUsd ?? 400;
+function sprintBudget(q: AiUsageQuery, directory: AiMember[], byId: Map<string, AiMember>) {
+  if (q.visibility === "self") return byId.get(q.userId)?.seatBudgetUsd ?? 400;
   if (q.visibility === "team") {
-    const squad = memberById.get(q.userId)?.squad;
+    const squad = byId.get(q.userId)?.squad;
     return sum(
-      AI_DIRECTORY.filter((m) => m.squad === squad).map((m) => m.seatBudgetUsd),
+      directory.filter((m) => m.squad === squad).map((m) => m.seatBudgetUsd),
     );
   }
   return ORG_SPRINT_BUDGET_USD;
@@ -564,12 +511,12 @@ function buildKpis(
     currentCost: number;
     priorCost: number;
     totals: { budgetUsd: number; acceptRate: number; activeUsers: number; seats: number };
-    costOf: (l: AiUsageEvent[]) => number;
+    costsBySprint: number[];
     tokensOf: (l: AiUsageEvent[]) => number;
   },
 ): Kpi[] {
   const bySprint = (s: string) => ctx.scoped.filter((e) => e.sprint === s);
-  const costSpark = ctx.sprints.map((s) => Math.round(ctx.costOf(bySprint(s))));
+  const costSpark = ctx.costsBySprint.map((c) => Math.round(c));
   const tokenSpark = ctx.sprints.map(
     (s) => Math.round((ctx.tokensOf(bySprint(s)) / 1_000_000) * 10) / 10,
   );
@@ -648,10 +595,10 @@ function buildKpis(
     delta: delta(costPerAcceptedNow, costPerAcceptedPrev),
     trend: dir(costPerAcceptedNow, costPerAcceptedPrev),
     tone: costPerAcceptedNow <= costPerAcceptedPrev ? "good" : "warning",
-    spark: ctx.sprints.map((s) => {
+    spark: ctx.sprints.map((s, i) => {
       const l = bySprint(s);
       return (
-        Math.round((ctx.costOf(l) / Math.max(1, l.filter((e) => e.accepted).length)) * 1000) / 1000
+        Math.round((ctx.costsBySprint[i] / Math.max(1, l.filter((e) => e.accepted).length)) * 1000) / 1000
       );
     }),
   };
@@ -687,7 +634,7 @@ function buildKpis(
       delta: delta(ctx.currentCost, ctx.priorCost),
       trend: dir(ctx.currentCost, ctx.priorCost),
       tone: budgetPct > 90 ? "critical" : budgetPct > 75 ? "warning" : "good",
-      spark: ctx.sprints.map((s) => pct(ctx.costOf(bySprint(s)), ctx.totals.budgetUsd)),
+      spark: ctx.costsBySprint.map((c) => pct(c, ctx.totals.budgetUsd)),
     },
     {
       label: "Effort saved (est.)",
@@ -705,10 +652,10 @@ function buildKpis(
       delta: "vs. $65/hr blended rate",
       trend: "up",
       tone: "good",
-      spark: ctx.sprints.map((s) => {
+      spark: ctx.sprints.map((s, i) => {
         const l = bySprint(s);
         const hrs = l.filter((e) => e.accepted && !e.reworked).length * 0.12;
-        return Math.round((hrs * 65) / Math.max(1, ctx.costOf(l)) * 10) / 10;
+        return Math.round((hrs * 65) / Math.max(1, ctx.costsBySprint[i]) * 10) / 10;
       }),
     },
     efficiencyKpi,
@@ -773,7 +720,7 @@ function buildInsights(
 
 /* ------------------------------------------------------------ ingest util */
 
-export async function parseIngestPayload(body: unknown): Promise<AiUsageEvent[]> {
+export async function parseIngestPayload(body: unknown, tenantId: string): Promise<AiUsageEvent[]> {
   const rows = Array.isArray(body)
     ? body
     : Array.isArray((body as { events?: unknown[] })?.events)
@@ -782,16 +729,13 @@ export async function parseIngestPayload(body: unknown): Promise<AiUsageEvent[]>
   if (!rows) throw new Error("Body must be an array of events or { events: [...] }.");
   if (rows.length > 1000) throw new Error("Max 1000 events per batch.");
 
-  // Refresh AI directory to include newly added users
-  await refreshAiDirectory();
-
-  // Get valid model IDs from database
-  const modelCatalog = await getModelCatalog();
+  const { byId } = await loadDirectory(tenantId);
+  const modelCatalog = await getModelCatalog(tenantId);
   const validModelIds = new Set(modelCatalog.map(m => m.id));
 
   return rows.map((raw, i) => {
     const e = raw as Partial<AiUsageEvent>;
-    if (!e.userId || !memberById.has(e.userId)) throw new Error(`events[${i}]: unknown userId.`);
+    if (!e.userId || !byId.has(e.userId)) throw new Error(`events[${i}]: unknown userId.`);
     if (!e.modelId || !validModelIds.has(e.modelId)) throw new Error(`events[${i}]: unknown modelId.`);
     const activity = (e.activity ?? "code") as AiActivity;
     if (!(activity in ACTIVITY_LABEL)) throw new Error(`events[${i}]: unknown activity.`);

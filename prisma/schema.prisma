@@ -58,6 +58,10 @@ model User {
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  squad                  String?   @db.VarChar(100)
+  aiIngestTokenHash      String?   @unique @map("ai_ingest_token_hash") @db.VarChar(64)
+  aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
+  passwordHash           String?   @map("password_hash") @db.VarChar(60)
 
   tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   tenantMemberships TenantMembership[]
@@ -72,6 +76,7 @@ model User {
   integrations      Integration[]
 
   @@index([email])
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -379,7 +384,7 @@ model AiUsageEvent {
 
 model AiModelCatalog {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  modelId       String    @unique @map("model_id") @db.VarChar(100)
+  modelId       String    @map("model_id") @db.VarChar(100)
   name          String    @db.VarChar(255)
   vendor        String    @db.VarChar(100)
   purpose       String?
@@ -393,6 +398,11 @@ model AiModelCatalog {
 
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  // modelId uniqueness is enforced by two partial unique indexes added by hand
+  // in the migration SQL (tenantId IS NOT NULL / tenantId IS NULL) — Postgres
+  // treats NULL <> NULL, so a single composite @@unique([tenantId, modelId])
+  // would silently allow duplicate global rows. Prisma's schema DSL can't
+  // express a partial index, so it isn't declared here.
   @@index([modelId], map: "idx_ai_model_catalog_model_id")
   @@index([isActive], map: "idx_ai_model_catalog_is_active")
   @@index([tenantId, modelId])
