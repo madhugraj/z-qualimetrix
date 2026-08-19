@@ -1,0 +1,16 @@
+node_modules
+.git
+.output
+.vinxi
+.tanstack
+.nitro
+.wrangler
+dist
+dist-ssr
+*.log
+.env
+.env.*
+!.env.example
+.vscode
+.idea
+k8s/secret.yaml

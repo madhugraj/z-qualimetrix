@@ -1,0 +1,22 @@
+# One-shot Prisma migration runner. Jobs don't update in place — re-running
+# after a new migration means either `kubectl delete job qualimetrix-migrate`
+# first, or naming each run uniquely (e.g. qualimetrix-migrate-<git-sha>) from
+# CI. Apply this (and let it complete) before rolling out a new API image
+# that depends on its migrations.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qualimetrix-migrate
+  namespace: qualimetrix
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: asia-south1-docker.pkg.dev/yavar-studio/qualimetrix/api:latest
+          command: ["npx", "prisma", "migrate", "deploy"]
+          envFrom:
+            - secretRef:
+                name: qualimetrix-secrets
