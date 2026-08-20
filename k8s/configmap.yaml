@@ -5,3 +5,8 @@ metadata:
   namespace: z-qualimetrix
 data:
   NODE_ENV: "production"
+  # CORS requires an exact origin match once credentials:true is set (needed
+  # for cookie-based auth) — see src/api/server.ts.
+  FRONTEND_ORIGIN: "https://qubeiq.yavar.ai"
+  JIRA_REDIRECT_URI: "https://qubeiq.yavar.ai/api/v1/integrations/jira/callback"
+  AZURE_DEVOPS_REDIRECT_URI: "https://qubeiq.yavar.ai/api/v1/integrations/azure_devops/callback"

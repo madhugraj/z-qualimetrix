@@ -10,6 +10,16 @@ spec:
   hostnames:
   - "qubeiq.yavar.ai"
   rules:
+  # More specific /api prefix must come first — HTTPRoute matches in list
+  # order, and the catch-all "/" rule below would otherwise shadow this one.
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /api
+    backendRefs:
+    - name: qualimetrix-service
+      port: 3001
+      kind: Service
   - matches:
     - path:
         type: PathPrefix

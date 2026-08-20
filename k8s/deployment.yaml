@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: qualimetrix
-        image: asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:latest-final
+        image: IMAGE_PLACEHOLDER
         imagePullPolicy: Always
         ports:
         - name: frontend
