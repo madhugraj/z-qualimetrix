@@ -9,6 +9,7 @@ import analyticsController from '../controllers/analytics.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
 import productRepositoryRoutes from './product-repository.routes';
+import integrationRoutes from './integration.routes';
 import {
   saveGitHubToken,
   validateGitHubToken,
@@ -106,5 +107,8 @@ router.post('/public/ai-usage/events', ingestAiUsageEvents);
 
 // Admin configuration routes
 router.use('/admin', adminRoutes);
+
+// Jira / Azure DevOps integration routes
+router.use('/integrations', integrationRoutes);
 
 export default router;

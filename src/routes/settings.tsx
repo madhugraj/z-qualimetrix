@@ -18,6 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { JiraConfig } from "@/components/qm/JiraConfig";
+import { AzureDevOpsConfig } from "@/components/qm/AzureDevOpsConfig";
 import { ROLES } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/settings")({
@@ -706,7 +708,11 @@ function Settings() {
         </TabsContent>
 
         <TabsContent value="integrations">
-          <GitHubConfig />
+          <div className="space-y-4">
+            <GitHubConfig />
+            <JiraConfig />
+            <AzureDevOpsConfig />
+          </div>
         </TabsContent>
 
         <TabsContent value="access">

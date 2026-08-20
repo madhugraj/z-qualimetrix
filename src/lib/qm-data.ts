@@ -354,24 +354,26 @@ export const BOTTLENECKS: Bottleneck[] = [
   { item: "ATL-1063", title: "Awaiting code review", waiting: "9 hrs", severity: "neutral" },
 ];
 
+// Jira/Azure DevOps/GitHub status here is a fallback only — integrations.tsx
+// overrides these with live status from the API for all three once fetched.
 export const INTEGRATIONS = [
   {
     name: "Jira Cloud",
-    detail: "OAuth 2.0 · REST API v3 · webhook ingestion",
-    status: "Connected",
-    synced: "4 min ago",
+    detail: "OAuth 2.0 · REST API v3 · scheduled sync",
+    status: "Not configured",
+    synced: "—",
   },
   {
     name: "Azure DevOps",
-    detail: "ADO REST API 7.0 · area path mapping",
-    status: "Connected",
-    synced: "11 min ago",
+    detail: "OAuth 2.0 · REST API 7.0 · area path mapping",
+    status: "Not configured",
+    synced: "—",
   },
   {
     name: "GitHub",
     detail: "Commit & PR linkage for defect density",
-    status: "Connected",
-    synced: "1 h ago",
+    status: "Not configured",
+    synced: "—",
   },
   {
     name: "CI Pipelines",

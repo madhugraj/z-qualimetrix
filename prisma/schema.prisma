@@ -39,6 +39,8 @@ model Tenant {
   sprints               Sprint[]
   githubIntegrations    GitHubIntegration[]
   aiUsageEvents         AiUsageEvent[]
+  aiModelCatalogs       AiModelCatalog[]
+  integrations          Integration[]
 
   @@index([slug])
   @@index([domain])
@@ -67,6 +69,7 @@ model User {
   refreshTokens     RefreshToken[]
   githubIntegrations GitHubIntegration[]
   aiUsageEvents     AiUsageEvent[]
+  integrations      Integration[]
 
   @@index([email])
   @@map("users")
@@ -122,6 +125,7 @@ model Product {
   iconUrl            String?  @map("icon_url") @db.VarChar(500)
   color              String?  @db.VarChar(7)
   jiraProjectKey     String?  @map("jira_project_key") @db.VarChar(20)
+  jiraProjectId      String?  @map("jira_project_id") @db.VarChar(50)
   azureDevopsAreaPath String?  @map("azure_devops_area_path") @db.VarChar(255)
   settings           Json?    @default("{}")
   isActive           Boolean  @default(true) @map("is_active")
@@ -164,6 +168,10 @@ model WorkItem {
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
   resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz
   closedAt          DateTime? @map("closed_at") @db.Timestamptz
+  externalSystem    String   @default("manual") @map("external_system") @db.VarChar(20)
+  isActive          Boolean  @default(true) @map("is_active")
+  lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
+  externalMetadata  Json?    @default("{}") @map("external_metadata")
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -171,11 +179,13 @@ model WorkItem {
   creator  User     @relation("WorkItemCreator", fields: [createdBy], references: [id])
   updater  User?    @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
 
+  @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
   @@index([productId])
   @@index([externalId])
   @@index([status])
   @@index([assigneeId])
+  @@index([externalSystem])
   @@map("work_items")
 }
 
@@ -270,14 +280,20 @@ model Sprint {
   goal        String?  @db.Text
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  externalSystem    String   @default("manual") @map("external_system") @db.VarChar(20)
+  isActive          Boolean  @default(true) @map("is_active")
+  lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
+  externalMetadata  Json?    @default("{}") @map("external_metadata")
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   workItems  WorkItem[]
 
+  @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
   @@index([productId])
   @@index([status])
+  @@index([externalSystem])
   @@map("sprints")
 }
 
@@ -334,71 +350,112 @@ model ProductRepository {
 // ============================================================================
 
 model AiUsageEvent {
-  id           String   @id @default(uuid()) @db.Uuid
-  timestamp    DateTime @default(now()) @map("timestamp") @db.Timestamptz
-  sprint       String   @db.VarChar(50)
-  userId       String   @map("user_id") @db.Uuid
-  modelId      String   @map("model_id") @db.VarChar(100)
-  activity     String   @db.VarChar(50)
-  tokensIn     Int      @map("tokens_in")
-  tokensOut    Int      @map("tokens_out")
-  cachedIn     Int      @map("cached_in") @default(0)
-  latencyMs    Int      @map("latency_ms")
-  accepted     Boolean  @default(false)
-  reworked     Boolean  @default(false)
-  tenantId     String?  @map("tenant_id") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timestamp    DateTime? @default(now()) @map("timestamp") @db.Timestamptz
+  sprint       String?   @db.VarChar(50)
+  userId       String    @map("user_id") @db.Uuid
+  modelId      String    @map("model_id") @db.VarChar(100)
+  activity     String?   @db.VarChar(50)
+  tokensIn     Int       @map("tokens_in")
+  tokensOut    Int       @map("tokens_out")
+  cachedIn     Int?      @map("cached_in") @default(0)
+  latencyMs    Int?      @map("latency_ms")
+  accepted     Boolean?  @default(false)
+  reworked     Boolean?  @default(false)
+  tenantId     String?   @map("tenant_id") @db.Uuid
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz
 
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
-  @@index([timestamp])
-  @@index([userId])
-  @@index([modelId])
-  @@index([sprint])
-  @@index([tenantId])
-  @@index([activity])
+  @@index([timestamp], map: "idx_ai_usage_events_timestamp")
+  @@index([userId], map: "idx_ai_usage_events_user_id")
+  @@index([modelId], map: "idx_ai_usage_events_model_id")
+  @@index([sprint], map: "idx_ai_usage_events_sprint")
+  @@index([tenantId], map: "idx_ai_usage_events_tenant_id")
+  @@index([activity], map: "idx_ai_usage_events_activity")
   @@map("ai_usage_events")
 }
 
 model AiModelCatalog {
-  id            String    @id @default(uuid()) @db.Uuid
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   modelId       String    @unique @map("model_id") @db.VarChar(100)
   name          String    @db.VarChar(255)
   vendor        String    @db.VarChar(100)
-  purpose       String    @db.Text
+  purpose       String?
   priceIn       Decimal   @map("price_in") @db.Decimal(10, 4)
   priceOut      Decimal   @map("price_out") @db.Decimal(10, 4)
-  cacheDiscount Decimal   @map("cache_discount") @db.Decimal(3, 2) @default(0.9)
-  isActive      Boolean   @default(true) @map("is_active")
-  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  cacheDiscount Decimal?  @default(0.9) @map("cache_discount") @db.Decimal(3, 2)
+  isActive      Boolean?  @default(true) @map("is_active")
+  tenantId      String?   @map("tenant_id") @db.Uuid
+  updatedAt     DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt     DateTime? @default(now()) @map("created_at") @db.Timestamptz
 
-  @@index([modelId])
-  @@index([isActive])
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([modelId], map: "idx_ai_model_catalog_model_id")
+  @@index([isActive], map: "idx_ai_model_catalog_is_active")
+  @@index([tenantId, modelId])
   @@map("ai_model_catalog")
 }
 
 model AiUsageAnalytics {
-  id              String   @id @default(uuid()) @db.Uuid
-  visibility      String   @db.VarChar(20)
-  userId          String   @map("user_id") @db.Uuid
-  sprints         Int      @default(7)
-  generatedAt     DateTime @default(now()) @map("generated_at") @db.Timestamptz
-  totals          Json     @default("{}")
-  kpis            Json     @default("[]")
-  models          Json     @default("[]")
-  spendTrend      Json     @default("[]")
-  tokenTrend      Json     @default("[]")
-  activityMix     Json     @default("[]")
-  people          Json     @default("[]")
-  benchmarks      Json     @default("{}")
-  insights        Json     @default("[]")
-  canSeeCost      Boolean  @default(true) @map("can_see_cost")
-  canSeePeople    Boolean  @default(true) @map("can_see_people")
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  visibility      String    @db.VarChar(20)
+  userId          String    @map("user_id") @db.Uuid
+  sprints         Int?      @default(7)
+  generatedAt     DateTime? @default(now()) @map("generated_at") @db.Timestamptz
+  totals          Json?     @default("{}")
+  kpis            Json?     @default("[]")
+  models          Json?     @default("[]")
+  spendTrend      Json?     @default("[]") @map("spend_trend")
+  tokenTrend      Json?     @default("[]") @map("token_trend")
+  activityMix     Json?     @default("[]") @map("activity_mix")
+  people          Json?     @default("[]")
+  benchmarks      Json?     @default("{}")
+  insights        Json?     @default("[]")
+  canSeeCost      Boolean?  @default(true) @map("can_see_cost")
+  canSeePeople    Boolean?  @default(true) @map("can_see_people")
 
-  @@index([userId])
-  @@index([visibility])
-  @@index([generatedAt])
+  @@index([userId], map: "idx_ai_usage_analytics_user_id")
+  @@index([visibility], map: "idx_ai_usage_analytics_visibility")
+  @@index([generatedAt], map: "idx_ai_usage_analytics_generated_at")
   @@map("ai_usage_analytics")
+}
+
+// ============================================================================
+// JIRA / AZURE DEVOPS INTEGRATIONS (generic, provider-discriminated)
+// ============================================================================
+
+model Integration {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  provider              String   @db.VarChar(20) // 'jira' | 'azure_devops'
+  status                String   @default("connected") @db.VarChar(20) // connected|error|reauth_required|disconnected
+
+  encryptedAccessToken  String   @map("encrypted_access_token") @db.Text
+  encryptedRefreshToken String?  @map("encrypted_refresh_token") @db.Text
+  tokenExpiresAt        DateTime? @map("token_expires_at") @db.Timestamptz
+  scopes                String[] @default([])
+
+  externalMetadata      Json     @default("{}") @map("external_metadata") // Jira: {cloudId, siteUrl, storyPointsFieldId, statusMap}; ADO: {organization, accountId, statusMap}
+  connectedAccountLabel String?  @map("connected_account_label") @db.VarChar(255)
+
+  syncFrequencyMinutes  Int      @default(5) @map("sync_frequency_minutes")
+  lastSyncedAt          DateTime? @map("last_synced_at") @db.Timestamptz
+  lastSyncStartedAt     DateTime? @map("last_sync_started_at") @db.Timestamptz
+  lastSyncError         String?  @db.Text @map("last_sync_error")
+  isActive              Boolean  @default(true) @map("is_active")
+
+  createdBy             String   @map("created_by") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("integrations")
 }
