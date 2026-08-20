@@ -42,6 +42,7 @@ model Tenant {
   aiModelCatalogs       AiModelCatalog[]
   integrations          Integration[]
   integrationDelegations IntegrationDelegation[]
+  aiProviderKeyMappings AiProviderKeyMapping[]
 
   @@index([slug])
   @@index([domain])
@@ -77,6 +78,7 @@ model User {
   integrations      Integration[]
   delegationsGranted  IntegrationDelegation[] @relation("DelegationGrantedBy")
   delegationsReceived IntegrationDelegation[] @relation("DelegationGrantee")
+  aiProviderKeyMappings AiProviderKeyMapping[]
 
   @@index([email])
   @@index([tenantId])
@@ -374,6 +376,18 @@ model AiUsageEvent {
   tenantId     String?   @map("tenant_id") @db.Uuid
   createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz
 
+  // Pull-based vendor sync support (OpenAI/Vertex usage-API adapters), added
+  // alongside Claude Code's existing per-request push rows. provider defaults
+  // to 'claude_code' so existing rows backfill for free. bucketStart/groupKey
+  // are only set on pull-based aggregate rows; a hand-written partial unique
+  // index on (tenantId, provider, modelId, bucketStart, groupKey) WHERE
+  // bucketStart IS NOT NULL makes re-sync idempotent. Adapters must always
+  // set a non-null groupKey when bucketStart is set — Postgres treats
+  // NULL <> NULL, so a null groupKey would silently defeat the dedup index.
+  provider    String    @default("claude_code") @db.VarChar(20)
+  bucketStart DateTime? @map("bucket_start") @db.Timestamptz
+  groupKey    String?   @map("group_key") @db.VarChar(255)
+
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
@@ -383,6 +397,7 @@ model AiUsageEvent {
   @@index([sprint], map: "idx_ai_usage_events_sprint")
   @@index([tenantId], map: "idx_ai_usage_events_tenant_id")
   @@index([activity], map: "idx_ai_usage_events_activity")
+  @@index([provider], map: "idx_ai_usage_events_provider")
   @@map("ai_usage_events")
 }
 
@@ -498,4 +513,25 @@ model IntegrationDelegation {
   @@index([productId])
   @@index([granteeId])
   @@map("integration_delegations")
+}
+
+// Attributes an org-level usage-API vendor's per-developer key/account id
+// (e.g. OpenAI's api_key_id) to a QualiMetrix user, so pull-based usage sync
+// (see openai-usage-sync.service.ts) can credit the right person instead of
+// a per-tenant system user.
+model AiProviderKeyMapping {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  provider      String   @db.VarChar(20)
+  externalKeyId String   @map("external_key_id") @db.VarChar(255)
+  userId        String   @map("user_id") @db.Uuid
+  label         String?  @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, externalKeyId])
+  @@index([tenantId])
+  @@map("ai_provider_key_mappings")
 }

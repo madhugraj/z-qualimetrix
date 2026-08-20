@@ -5,9 +5,8 @@ import integrationService, { IntegrationProvider, MIN_SYNC_FREQUENCY_MINUTES } f
 import { signOAuthState, verifyOAuthState } from '../../lib/jwt';
 import jiraOAuthService from '../services/jira-oauth.service';
 import azureDevOpsOAuthService from '../services/azure-devops-oauth.service';
-import { syncAllProductsForIntegration as syncAllJira } from '../services/jira-sync.service';
-import { syncAllProductsForIntegration as syncAllAdo } from '../services/azure-devops-sync.service';
-import { requestSyncNow } from '../../lib/scheduler';
+import { requestSyncNow, getSyncHandler } from '../../lib/scheduler';
+import { maskToken } from '../../lib/encryption';
 
 // Mutating endpoints (connect/disconnect/update-frequency/sync-now) are gated
 // requireAdmin (PM-only) at the router level — see integration.routes.ts.
@@ -25,13 +24,17 @@ function getUserId(req: Request): string {
 }
 
 function isKnownProvider(provider: string): provider is IntegrationProvider {
+  return provider === 'jira' || provider === 'azure_devops' || provider === 'openai' || provider === 'vertex_ai';
+}
+
+function isOAuthProvider(provider: IntegrationProvider): provider is 'jira' | 'azure_devops' {
   return provider === 'jira' || provider === 'azure_devops';
 }
 
 export async function startConnect(req: Request, res: Response) {
   const { provider } = req.params;
-  if (!isKnownProvider(provider)) {
-    return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
+  if (!isKnownProvider(provider) || !isOAuthProvider(provider)) {
+    return res.status(400).json({ success: false, error: `Unknown or non-OAuth provider: ${provider}` });
   }
 
   const tenantId = getTenantId(req);
@@ -64,7 +67,7 @@ export async function handleCallback(req: Request, res: Response) {
   if (oauthError) {
     return res.redirect(`${FRONTEND_URL}/integrations?error=${encodeURIComponent(String(oauthError))}`);
   }
-  if (!isKnownProvider(provider) || typeof code !== 'string' || typeof state !== 'string') {
+  if (!isKnownProvider(provider) || !isOAuthProvider(provider) || typeof code !== 'string' || typeof state !== 'string') {
     return res.redirect(`${FRONTEND_URL}/integrations?error=invalid_callback`);
   }
 
@@ -189,7 +192,10 @@ export async function triggerSync(req: Request, res: Response) {
     return res.status(404).json({ success: false, error: 'Integration not connected' });
   }
 
-  const syncFn = provider === 'jira' ? syncAllJira : syncAllAdo;
+  const syncFn = getSyncHandler(provider);
+  if (!syncFn) {
+    return res.status(501).json({ success: false, error: `No sync handler registered for provider "${provider}"` });
+  }
   const accepted = requestSyncNow(integration.id, () => syncFn(integration));
   if (!accepted) {
     return res.status(409).json({ success: false, error: 'A sync for this integration is already running' });
@@ -199,8 +205,8 @@ export async function triggerSync(req: Request, res: Response) {
 
 export async function listProjects(req: Request, res: Response) {
   const { provider } = req.params;
-  if (!isKnownProvider(provider)) {
-    return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
+  if (!isKnownProvider(provider) || !isOAuthProvider(provider)) {
+    return res.status(400).json({ success: false, error: `Unknown or non-project-based provider: ${provider}` });
   }
   const tenantId = getTenantId(req);
 
@@ -245,4 +251,87 @@ export async function listProjects(req: Request, res: Response) {
     success: true,
     data: (data.value ?? []).map((p: any) => ({ id: p.id, key: p.name, name: p.name })),
   });
+}
+
+/**
+ * OpenAI/Vertex use a pasted API credential, not an OAuth redirect — no
+ * startConnect/handleCallback equivalent needed. requireAdmin-gated at the
+ * route level, same as every other credential-mutating endpoint here.
+ */
+export async function connectOpenAi(req: Request, res: Response) {
+  const { adminApiKey } = req.body ?? {};
+  if (typeof adminApiKey !== 'string' || adminApiKey.trim().length < 10) {
+    return res.status(400).json({ success: false, error: 'adminApiKey is required' });
+  }
+
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
+
+  await integrationService.upsertConnection({
+    tenantId,
+    provider: 'openai',
+    accessToken: adminApiKey.trim(),
+    connectedAccountLabel: `Admin key ${maskToken(adminApiKey.trim())}`,
+    createdBy: req.user!.id,
+  });
+
+  res.json({ success: true });
+}
+
+/**
+ * Attributes an org-level usage-API vendor's per-developer key/account id
+ * (e.g. OpenAI's api_key_id) to a QualiMetrix user — see AiProviderKeyMapping's
+ * schema comment. Tenant-scoped from req.user, requireAdmin-gated (mounted
+ * in routes).
+ */
+export async function listKeyMappings(req: Request, res: Response) {
+  const { provider } = req.params;
+  if (!isKnownProvider(provider)) {
+    return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
+  }
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
+
+  const mappings = await prisma.aiProviderKeyMapping.findMany({
+    where: { tenantId, provider },
+    include: { user: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  res.json({ success: true, data: mappings });
+}
+
+export async function upsertKeyMapping(req: Request, res: Response) {
+  const { provider } = req.params;
+  if (!isKnownProvider(provider)) {
+    return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
+  }
+  const { externalKeyId, userId, label } = req.body ?? {};
+  if (typeof externalKeyId !== 'string' || !externalKeyId.trim()) {
+    return res.status(400).json({ success: false, error: 'externalKeyId is required' });
+  }
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
+
+  const targetUser = await prisma.user.findFirst({ where: { id: userId, tenantId } });
+  if (!targetUser) return res.status(400).json({ success: false, error: 'userId must belong to your organization' });
+
+  const mapping = await prisma.aiProviderKeyMapping.upsert({
+    where: { tenantId_provider_externalKeyId: { tenantId, provider, externalKeyId: externalKeyId.trim() } },
+    create: { tenantId, provider, externalKeyId: externalKeyId.trim(), userId: targetUser.id, label: label || null },
+    update: { userId: targetUser.id, label: label || null },
+  });
+  res.json({ success: true, data: mapping });
+}
+
+export async function deleteKeyMapping(req: Request, res: Response) {
+  const { id } = req.params;
+  const tenantId = req.user!.tenantId;
+  if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
+
+  const mapping = await prisma.aiProviderKeyMapping.findUnique({ where: { id } });
+  if (!mapping || mapping.tenantId !== tenantId) {
+    return res.status(404).json({ success: false, error: 'Mapping not found' });
+  }
+  await prisma.aiProviderKeyMapping.delete({ where: { id } });
+  res.json({ success: true });
 }

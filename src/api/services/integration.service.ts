@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../lib/prisma';
 import { encrypt, decrypt } from '../../lib/encryption';
 
-export type IntegrationProvider = 'jira' | 'azure_devops';
+export type IntegrationProvider = 'jira' | 'azure_devops' | 'openai' | 'vertex_ai';
 export type IntegrationStatus = 'connected' | 'error' | 'reauth_required' | 'disconnected';
 
 export const MIN_SYNC_FREQUENCY_MINUTES = 5;
@@ -144,6 +144,22 @@ class IntegrationService {
     return prisma.integration.update({
       where: { tenantId_provider: { tenantId, provider } },
       data: { syncFrequencyMinutes: clamped },
+    });
+  }
+
+  /**
+   * Merges into externalMetadata without touching credentials/status — used
+   * by pull-based sync adapters (OpenAI, Vertex) to persist an incremental
+   * cursor (e.g. lastIngestedUnixTime) every tick without re-encrypting and
+   * rewriting the access token on every sync, which upsertConnection would do.
+   */
+  async updateExternalMetadata(tenantId: string, provider: IntegrationProvider, patch: Record<string, unknown>) {
+    const integration = await prisma.integration.findUnique({ where: { tenantId_provider: { tenantId, provider } } });
+    if (!integration) return;
+    const merged = { ...(integration.externalMetadata as Record<string, unknown>), ...patch };
+    return prisma.integration.update({
+      where: { tenantId_provider: { tenantId, provider } },
+      data: { externalMetadata: merged as Prisma.InputJsonValue },
     });
   }
 

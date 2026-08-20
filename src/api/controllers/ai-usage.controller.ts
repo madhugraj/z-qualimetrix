@@ -183,3 +183,25 @@ export async function ingestOtlpLogs(req: Request, res: Response) {
     });
   }
 }
+
+export async function manualUsageEntry(req: Request, res: Response) {
+  try {
+    const tenantId = req.user!.tenantId;
+    if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
+
+    const events = await parseIngestPayload([req.body], tenantId);
+    // recordEvents defaults provider to 'claude_code' when unset — correct for
+    // the OTLP/generic ingest paths, wrong here: a manually-logged row didn't
+    // come from Claude Code's telemetry regardless of which model it's against.
+    const stamped = events.map((e) => ({ ...e, provider: 'manual' }));
+    const result = await recordEvents(stamped, tenantId);
+
+    res.json({ success: true, accepted: result.accepted, total: result.total });
+  } catch (error) {
+    console.error('Error recording manual AI usage entry:', error);
+    res.status(400).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to record entry',
+    });
+  }
+}

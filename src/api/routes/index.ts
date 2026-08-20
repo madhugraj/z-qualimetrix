@@ -23,8 +23,15 @@ import {
   getAiUsageAnalyticsHandler,
   ingestAiUsageEvents,
   connectAiUsage,
-  ingestOtlpLogs
+  ingestOtlpLogs,
+  manualUsageEntry
 } from '../controllers/ai-usage.controller';
+import {
+  listModelCatalog,
+  createModelCatalogEntry,
+  updateModelCatalogEntry,
+  deactivateModelCatalogEntry
+} from '../controllers/ai-model-catalog.controller';
 import { requireAuth, requireAdmin, requireProductWriteAccess } from '../middleware/auth.middleware';
 import { requireIngestToken } from '../middleware/ingest-token.middleware';
 import adminRoutes from './admin.routes';
@@ -120,6 +127,14 @@ router.get('/ai-usage/analytics', requireAuth, getAiUsageAnalyticsHandler);
 router.post('/public/ai-usage/events', requireIngestToken, ingestAiUsageEvents);
 router.post('/ai-usage/connect', requireAuth, connectAiUsage);
 router.post('/ai-usage/otlp/logs', requireIngestToken, ingestOtlpLogs);
+router.post('/ai-usage/manual-entry', requireAdmin, manualUsageEntry);
+
+// AI model catalog (pricing per vendor/model, tenant-scoped) — the "add a
+// new provider" surface for anything without a live sync adapter.
+router.get('/ai-usage/model-catalog', requireAuth, listModelCatalog);
+router.post('/ai-usage/model-catalog', requireAdmin, createModelCatalogEntry);
+router.put('/ai-usage/model-catalog/:id', requireAdmin, updateModelCatalogEntry);
+router.delete('/ai-usage/model-catalog/:id', requireAdmin, deactivateModelCatalogEntry);
 
 // Admin configuration routes
 router.use('/admin', adminRoutes);

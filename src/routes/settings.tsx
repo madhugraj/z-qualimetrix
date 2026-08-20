@@ -22,6 +22,7 @@ import { JiraConfig } from "@/components/qm/JiraConfig";
 import { AzureDevOpsConfig } from "@/components/qm/AzureDevOpsConfig";
 import { RequireRole } from "@/components/qm/RequireRole";
 import { TeamManagementPanel } from "@/components/qm/TeamManagementPanel";
+import { AiToolPicker } from "@/components/qm/AiToolPicker";
 import { API_V1_URL } from "@/lib/api-config";
 import { useAuth } from "@/lib/auth-context";
 import { ROLES } from "@/lib/qm-data";
@@ -634,6 +635,7 @@ function Settings() {
         <TabsList className="glass mb-4">
           <TabsTrigger value="provision">Provisioning</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
+          <TabsTrigger value="ai-providers">AI Providers</TabsTrigger>
           <TabsTrigger value="access">Access & defaults</TabsTrigger>
         </TabsList>
 
@@ -719,6 +721,10 @@ function Settings() {
             <JiraConfig />
             <AzureDevOpsConfig />
           </div>
+        </TabsContent>
+
+        <TabsContent value="ai-providers">
+          <AiToolPicker />
         </TabsContent>
 
         <TabsContent value="access">

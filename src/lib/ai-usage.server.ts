@@ -43,6 +43,12 @@ export interface AiUsageEvent {
   accepted: boolean;
   /** AI-assisted change later reopened / rejected in review */
   reworked: boolean;
+  /** 'claude_code' (default) for push-based per-request rows; a vendor sync adapter's own provider id otherwise */
+  provider?: string;
+  /** set only on pull-based aggregate rows written by a usage-sync adapter (e.g. OpenAI, Vertex) */
+  bucketStart?: string;
+  /** required alongside bucketStart — see AiUsageEvent's schema comment on why NULL would defeat the dedup index */
+  groupKey?: string;
 }
 
 export interface AiModelMeta {
@@ -183,6 +189,13 @@ export async function resolveUserByIngestToken(rawToken: string) {
   return user && user.isActive ? user : null;
 }
 
+export interface ModelCatalogHint {
+  vendor: string;
+  priceIn: number;
+  priceOut: number;
+  purpose?: string;
+}
+
 /**
  * Auto-register a GLOBAL model catalog entry the first time an unrecognized
  * modelId is seen from live telemetry (e.g. non-Anthropic models routed
@@ -191,8 +204,13 @@ export async function resolveUserByIngestToken(rawToken: string) {
  * unrecognized model is "nobody has told us the right price yet," not one
  * tenant's negotiated rate, so every tenant hitting the same unknown model
  * shares one placeholder rather than each minting their own.
+ *
+ * `hint` lets a vendor-specific caller (e.g. the OpenAI sync adapter) supply
+ * its own vendor name and a reasonable default price instead of silently
+ * falling back to Claude's $3/$15 — a real GPT model ending up catalogued at
+ * Anthropic's rate was a known wart before this parameter existed.
  */
-export async function ensureModelCatalogEntry(modelId: string): Promise<void> {
+export async function ensureModelCatalogEntry(modelId: string, hint?: ModelCatalogHint): Promise<void> {
   try {
     const existing = await prisma.aiModelCatalog.findFirst({ where: { modelId, tenantId: null } });
     if (existing) return;
@@ -200,10 +218,10 @@ export async function ensureModelCatalogEntry(modelId: string): Promise<void> {
       data: {
         modelId,
         name: modelId,
-        vendor: "Unverified (auto-detected via OTel)",
-        purpose: "Auto-created placeholder from Claude Code telemetry — verify pricing before trusting cost figures.",
-        priceIn: 3,
-        priceOut: 15,
+        vendor: hint?.vendor ?? "Unverified (auto-detected via OTel)",
+        purpose: hint?.purpose ?? "Auto-created placeholder — verify pricing before trusting cost figures.",
+        priceIn: hint?.priceIn ?? 3,
+        priceOut: hint?.priceOut ?? 15,
         cacheDiscount: 0.9,
         isActive: true,
         tenantId: null,
@@ -244,6 +262,9 @@ export async function recordEvents(events: AiUsageEvent[], tenantId: string) {
         accepted: e.accepted,
         reworked: e.reworked,
         tenantId,
+        provider: e.provider ?? 'claude_code',
+        bucketStart: e.bucketStart ? new Date(e.bucketStart) : null,
+        groupKey: e.groupKey ?? null,
       }))
     });
 

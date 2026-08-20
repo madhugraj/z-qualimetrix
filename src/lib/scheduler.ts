@@ -20,6 +20,11 @@ export function registerSyncHandler(provider: IntegrationProvider, handler: Sync
   syncHandlers[provider] = handler;
 }
 
+/** Used by the manual "sync now" endpoint so it doesn't need its own hardcoded provider-to-handler mapping. */
+export function getSyncHandler(provider: IntegrationProvider): SyncHandler | undefined {
+  return syncHandlers[provider];
+}
+
 // In-memory overlap lock — shared between the scheduled tick and manual
 // "Sync now" requests so a button click can't race a concurrently-running
 // scheduled sync for the same integration. Single-process only: if this API

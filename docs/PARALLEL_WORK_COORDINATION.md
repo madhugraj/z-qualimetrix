@@ -211,3 +211,13 @@ above a second time; this branch's resolution (below) is a worked example.
 - Seed script for demo/local testing: `scripts/seed-demo-roles.ts` (one user
   per role: `pm`/`po`/`developer`/`tester`/`executive`, password `demo1234`,
   plus a live PM→PO delegation on the first seeded product).
+
+## PR #3 merged to main (2026-08-20)
+
+`feature/jira-azure-devops-clean` (PR #3) is now merged into `main` at
+`20c7263`. Whoever merges PR #1 next: `main` now has the `Integration` model,
+`Product.jiraProjectId`, and `WorkItem`/`Sprint` external-sync fields — rebase
+onto this rather than the old `main` tip (`55ec8cd`) to avoid redoing that
+diff. Backend is being deployed to Railway separately (in progress); frontend
+stays on Lovable, which tracks `main` and should pick this up on its next
+build.
