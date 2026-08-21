@@ -22,8 +22,8 @@ import {
 import {
   getAiUsageAnalyticsHandler,
   ingestAiUsageEvents,
-  connectAiUsage,
-  ingestOtlpLogs,
+  ingestOrganizationOtlpLogs,
+  ingestOrganizationOtlpMetrics,
   manualUsageEntry
 } from '../controllers/ai-usage.controller';
 import {
@@ -34,6 +34,7 @@ import {
 } from '../controllers/ai-model-catalog.controller';
 import { requireAuth, requireAdmin, requireProductWriteAccess } from '../middleware/auth.middleware';
 import { requireIngestToken } from '../middleware/ingest-token.middleware';
+import { requireProviderConnectionToken } from '../middleware/provider-connection-token.middleware';
 import adminRoutes from './admin.routes';
 
 const router = Router();
@@ -125,8 +126,8 @@ router.use('/product-repository', productRepositoryRoutes);
 // AI Usage Analytics routes
 router.get('/ai-usage/analytics', requireAuth, getAiUsageAnalyticsHandler);
 router.post('/public/ai-usage/events', requireIngestToken, ingestAiUsageEvents);
-router.post('/ai-usage/connect', requireAuth, connectAiUsage);
-router.post('/ai-usage/otlp/logs', requireIngestToken, ingestOtlpLogs);
+router.post('/ai-usage/otlp/:connectionId/logs', requireProviderConnectionToken, ingestOrganizationOtlpLogs);
+router.post('/ai-usage/otlp/:connectionId/metrics', requireProviderConnectionToken, ingestOrganizationOtlpMetrics);
 router.post('/ai-usage/manual-entry', requireAdmin, manualUsageEntry);
 
 // AI model catalog (pricing per vendor/model, tenant-scoped) — the "add a

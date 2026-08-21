@@ -1,6 +1,7 @@
 import cron from 'node-cron';
-import type { Integration } from '@prisma/client';
+import type { AiProviderConnection, Integration } from '@prisma/client';
 import integrationService, { IntegrationProvider } from '../api/services/integration.service';
+import aiProviderConnectionService from '../api/services/ai-provider-connection.service';
 
 /**
  * node-cron only supports fixed cron expressions, not per-row dynamic
@@ -13,8 +14,10 @@ const TICK_CRON_EXPRESSION = '* * * * *';
 const MAX_CONCURRENT_SYNCS = 8;
 
 type SyncHandler = (integration: Integration) => Promise<void>;
+type AiProviderSyncHandler = (connection: AiProviderConnection) => Promise<void>;
 
 const syncHandlers: Partial<Record<IntegrationProvider, SyncHandler>> = {};
+const aiProviderSyncHandlers: Record<string, AiProviderSyncHandler> = {};
 
 export function registerSyncHandler(provider: IntegrationProvider, handler: SyncHandler): void {
   syncHandlers[provider] = handler;
@@ -23,6 +26,10 @@ export function registerSyncHandler(provider: IntegrationProvider, handler: Sync
 /** Used by the manual "sync now" endpoint so it doesn't need its own hardcoded provider-to-handler mapping. */
 export function getSyncHandler(provider: IntegrationProvider): SyncHandler | undefined {
   return syncHandlers[provider];
+}
+
+export function registerAiProviderSyncHandler(vendor: string, handler: AiProviderSyncHandler): void {
+  aiProviderSyncHandlers[vendor] = handler;
 }
 
 // In-memory overlap lock — shared between the scheduled tick and manual
@@ -49,6 +56,22 @@ async function runSync(integration: Integration): Promise<void> {
   }
 }
 
+async function runAiProviderSync(connection: AiProviderConnection): Promise<void> {
+  const handler = aiProviderSyncHandlers[connection.vendor];
+  if (!handler) {
+    console.warn(`[scheduler] No AI provider sync handler registered for vendor "${connection.vendor}" — skipping ${connection.id}`);
+    return;
+  }
+  runningIntegrationIds.add(connection.id);
+  try {
+    await handler(connection);
+  } catch (err) {
+    console.error(`[scheduler] AI provider sync failed for ${connection.id} (${connection.vendor}):`, err);
+  } finally {
+    runningIntegrationIds.delete(connection.id);
+  }
+}
+
 /**
  * Used by the manual "Sync now" endpoint. Returns false (caller should 409)
  * if a sync for this integration is already running, whether kicked off by
@@ -65,7 +88,10 @@ export function requestSyncNow(integrationId: string, run: () => Promise<void>):
 }
 
 async function dispatchDueIntegrations(): Promise<void> {
-  const candidates = await integrationService.listDueForSync();
+  const [candidates, aiProviderCandidates] = await Promise.all([
+    integrationService.listDueForSync(),
+    aiProviderConnectionService.listDueAnthropicApiConnections(),
+  ]);
   const now = Date.now();
 
   const due = candidates.filter((integration) => {
@@ -78,6 +104,15 @@ async function dispatchDueIntegrations(): Promise<void> {
   for (let i = 0; i < due.length; i += MAX_CONCURRENT_SYNCS) {
     const chunk = due.slice(i, i + MAX_CONCURRENT_SYNCS);
     await Promise.allSettled(chunk.map((integration) => runSync(integration)));
+  }
+
+  const dueAiProviders = aiProviderCandidates.filter((connection) => {
+    if (runningIntegrationIds.has(connection.id)) return false;
+    const lastSyncedAtMs = connection.lastSyncedAt?.getTime() ?? 0;
+    return now >= lastSyncedAtMs + connection.syncFrequencyMinutes * 60_000;
+  });
+  for (let i = 0; i < dueAiProviders.length; i += MAX_CONCURRENT_SYNCS) {
+    await Promise.allSettled(dueAiProviders.slice(i, i + MAX_CONCURRENT_SYNCS).map(runAiProviderSync));
   }
 }
 

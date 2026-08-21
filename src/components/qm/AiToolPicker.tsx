@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { ConnectClaudeCodePanel } from "@/components/qm/ConnectClaudeCodePanel";
+import { AnthropicProviderConnections } from "@/components/qm/AnthropicProviderConnections";
 import { AiProviderSettings } from "@/components/qm/AiProviderSettings";
 import { ModelCatalogTable } from "@/components/qm/ModelCatalogTable";
 import { ManualUsageEntryPanel } from "@/components/qm/ManualUsageEntryPanel";
@@ -8,7 +9,7 @@ import { ManualUsageEntryPanel } from "@/components/qm/ManualUsageEntryPanel";
 type Tool = "claude" | "gemini" | "openai" | "other";
 
 const TOOLS: { id: Tool; label: string; hint: string }[] = [
-  { id: "claude", label: "Claude Code", hint: "Personal token, fully automatic" },
+  { id: "claude", label: "Claude Code", hint: "Organization connection, provider API and/or centrally managed telemetry" },
   { id: "gemini", label: "Gemini", hint: "Personal token, small snippet you add" },
   { id: "openai", label: "OpenAI", hint: "Org admin key, automatic sync" },
   { id: "other", label: "Other (DeepSeek, in-house, …)", hint: "No live sync — manual pricing + entries" },
@@ -52,11 +53,7 @@ export function AiToolPicker() {
         </div>
       </GlassPanel>
 
-      {tool === "claude" && (
-        <GlassPanel title="Claude Code" subtitle="Personal, per-developer — anyone can connect their own">
-          <ConnectClaudeCodePanel mode="claude" />
-        </GlassPanel>
-      )}
+      {tool === "claude" && <AnthropicProviderConnections />}
 
       {tool === "gemini" && (
         <GlassPanel title="Gemini" subtitle="Personal, per-developer — anyone can connect their own">

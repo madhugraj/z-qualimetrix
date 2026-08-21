@@ -62,6 +62,129 @@ export interface ExtractedApiRequest {
   timeUnixNano?: string;
 }
 
+export interface ExtractedClaudeCodeLogRecord {
+  eventName: string;
+  attrs: Record<string, string | number | boolean | undefined>;
+  timeUnixNano?: string;
+}
+
+const SENSITIVE_ATTRIBUTE_PARTS = [
+  'prompt',
+  'tool_input',
+  'tool_parameters',
+  'tool_content',
+  'file_content',
+  'code_snippet',
+  'message_content',
+  'response_content',
+  'completion_content',
+  'command_line',
+];
+
+/** Defense-in-depth: managed settings disable these fields, then the receiver drops them again. */
+export function sanitizeTelemetryAttributes(
+  attrs: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  const safe: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(attrs)) {
+    const normalized = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    if (value === undefined || SENSITIVE_ATTRIBUTE_PARTS.some((part) => normalized.includes(part))) continue;
+    // Bound provider-controlled strings before placing them in JSON storage.
+    safe[key] = typeof value === 'string' ? value.slice(0, 1000) : value;
+  }
+  return safe;
+}
+
+/** Extract all Claude Code events, not only token-bearing api_request events. */
+export function extractClaudeCodeLogRecords(body: unknown): ExtractedClaudeCodeLogRecord[] {
+  const req = body as OtelExportLogsServiceRequest;
+  const out: ExtractedClaudeCodeLogRecord[] = [];
+  for (const resourceLog of req?.resourceLogs ?? []) {
+    const resourceAttrs = flattenAttributes(resourceLog.resource?.attributes);
+    for (const scopeLog of resourceLog.scopeLogs ?? []) {
+      for (const record of scopeLog.logRecords ?? []) {
+        const attrs = sanitizeTelemetryAttributes({ ...resourceAttrs, ...flattenAttributes(record.attributes) });
+        const rawEventName = record.eventName ?? attrs['event.name'] ?? attrs.event;
+        const eventName =
+          typeof rawEventName === 'string'
+            ? rawEventName.slice(0, 200)
+            : 'claude_code.unknown';
+        out.push({
+          eventName,
+          attrs,
+          timeUnixNano: record.timeUnixNano !== undefined ? String(record.timeUnixNano) : undefined,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+type OtelMetricPoint = {
+  attributes?: OtelAttribute[];
+  timeUnixNano?: string | number;
+  startTimeUnixNano?: string | number;
+  asInt?: string | number;
+  asDouble?: number;
+  count?: string | number;
+  sum?: number;
+};
+
+type OtelMetric = {
+  name?: string;
+  unit?: string;
+  sum?: { dataPoints?: OtelMetricPoint[] };
+  gauge?: { dataPoints?: OtelMetricPoint[] };
+  histogram?: { dataPoints?: OtelMetricPoint[] };
+};
+
+type OtelExportMetricsServiceRequest = {
+  resourceMetrics?: {
+    resource?: { attributes?: OtelAttribute[] };
+    scopeMetrics?: { metrics?: OtelMetric[] }[];
+  }[];
+};
+
+export interface ExtractedClaudeCodeMetricPoint {
+  metricName: string;
+  unit?: string;
+  attrs: Record<string, string | number | boolean>;
+  value: number;
+  timeUnixNano?: string;
+  startTimeUnixNano?: string;
+}
+
+/**
+ * Extract metric points for raw provenance. Counters may be cumulative, so the
+ * ingest service intentionally does not add them into normalized totals.
+ */
+export function extractClaudeCodeMetricPoints(body: unknown): ExtractedClaudeCodeMetricPoint[] {
+  const req = body as OtelExportMetricsServiceRequest;
+  const out: ExtractedClaudeCodeMetricPoint[] = [];
+  for (const resourceMetric of req?.resourceMetrics ?? []) {
+    const resourceAttrs = flattenAttributes(resourceMetric.resource?.attributes);
+    for (const scopeMetric of resourceMetric.scopeMetrics ?? []) {
+      for (const metric of scopeMetric.metrics ?? []) {
+        const points = metric.sum?.dataPoints ?? metric.gauge?.dataPoints ?? metric.histogram?.dataPoints ?? [];
+        for (const point of points) {
+          const raw = point.asInt ?? point.asDouble ?? point.sum ?? point.count ?? 0;
+          const value = Number(raw);
+          if (!metric.name || !Number.isFinite(value)) continue;
+          out.push({
+            metricName: metric.name,
+            unit: metric.unit,
+            attrs: sanitizeTelemetryAttributes({ ...resourceAttrs, ...flattenAttributes(point.attributes) }),
+            value,
+            timeUnixNano: point.timeUnixNano === undefined ? undefined : String(point.timeUnixNano),
+            startTimeUnixNano: point.startTimeUnixNano === undefined ? undefined : String(point.startTimeUnixNano),
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** Extract every `claude_code.api_request` log record from a raw OTLP JSON body. */
 export function extractApiRequestAttrs(body: unknown): ExtractedApiRequest[] {
   const req = body as OtelExportLogsServiceRequest;

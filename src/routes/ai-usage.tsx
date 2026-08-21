@@ -6,7 +6,6 @@ import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
 import { FilterBar } from "@/components/qm/FilterBar";
-import { ConnectClaudeCodePanel } from "@/components/qm/ConnectClaudeCodePanel";
 import {
   AiActivityDonut,
   AiModelEfficiencyChart,
@@ -113,16 +112,6 @@ function AiUsagePage() {
         <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={1.6} />
         <span>{AI_VISIBILITY_NOTE[level]}</span>
       </div>
-
-      {level === "self" && (
-        <GlassPanel
-          title="Connect your Claude Code"
-          subtitle="Real per-developer usage, not demo data"
-          className="mb-5"
-        >
-          <ConnectClaudeCodePanel />
-        </GlassPanel>
-      )}
 
       <div className="mb-5">
         <FilterBar />

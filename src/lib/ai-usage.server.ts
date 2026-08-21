@@ -31,18 +31,22 @@ export interface AiUsageEvent {
   id: string;
   /** ISO timestamp of the request */
   ts: string;
-  sprint: string;
-  userId: string;
+  sprint: string | null;
+  userId: string | null;
   modelId: string;
-  activity: AiActivity;
+  activity: AiActivity | null;
   tokensIn: number;
   tokensOut: number;
   cachedIn: number;
-  latencyMs: number;
+  latencyMs: number | null;
   /** suggestion kept in the final artefact */
-  accepted: boolean;
+  accepted: boolean | null;
   /** AI-assisted change later reopened / rejected in review */
-  reworked: boolean;
+  reworked: boolean | null;
+  requestCount?: number;
+  providerCostUsd?: number | null;
+  estimatedCostUsd?: number | null;
+  costSource?: string | null;
   /** 'claude_code' (default) for push-based per-request rows; a vendor sync adapter's own provider id otherwise */
   provider?: string;
   /** set only on pull-based aggregate rows written by a usage-sync adapter (e.g. OpenAI, Vertex) */
@@ -233,6 +237,8 @@ export async function ensureModelCatalogEntry(modelId: string, hint?: ModelCatal
 }
 
 export function eventCost(e: AiUsageEvent, modelById: Map<string, AiModelMeta>): number {
+  if (e.providerCostUsd !== null && e.providerCostUsd !== undefined) return e.providerCostUsd;
+  if (e.estimatedCostUsd !== null && e.estimatedCostUsd !== undefined) return e.estimatedCostUsd;
   const m = modelById.get(e.modelId);
   if (!m) return 0;
   const billableIn = e.tokensIn - e.cachedIn + e.cachedIn * (1 - m.cacheDiscount);
@@ -286,16 +292,20 @@ export async function allEvents(tenantId: string): Promise<AiUsageEvent[]> {
     return dbEvents.map(e => ({
       id: e.id,
       ts: (e.timestamp ?? new Date()).toISOString(),
-      sprint: e.sprint ?? SPRINTS[SPRINTS.length - 1],
+      sprint: e.sprint,
       userId: e.userId,
       modelId: e.modelId,
-      activity: (e.activity ?? "code") as AiActivity,
+      activity: e.activity as AiActivity | null,
       tokensIn: e.tokensIn,
       tokensOut: e.tokensOut,
       cachedIn: e.cachedIn ?? 0,
-      latencyMs: e.latencyMs ?? 0,
-      accepted: e.accepted ?? false,
-      reworked: e.reworked ?? false,
+      latencyMs: e.latencyMs,
+      accepted: e.accepted,
+      reworked: e.reworked,
+      requestCount: e.requestCount,
+      providerCostUsd: e.providerCostUsd === null ? null : Number(e.providerCostUsd),
+      estimatedCostUsd: e.estimatedCostUsd === null ? null : Number(e.estimatedCostUsd),
+      costSource: e.costSource,
     }));
   } catch (error) {
     console.error('Error fetching AI usage events:', error);
@@ -316,7 +326,7 @@ function scopeEvents(events: AiUsageEvent[], q: AiUsageQuery, byId: Map<string, 
   const viewer = byId.get(q.userId);
   if (q.visibility === "self") return events.filter((e) => e.userId === q.userId);
   if (q.visibility === "team" && viewer)
-    return events.filter((e) => byId.get(e.userId)?.squad === viewer.squad);
+    return events.filter((e) => e.userId ? byId.get(e.userId)?.squad === viewer.squad : false);
   return events;
 }
 
@@ -333,7 +343,7 @@ export async function aggregate(q: AiUsageQuery) {
 
   const sprints = SPRINTS.slice(-(q.sprints ?? SPRINTS.length));
   const all = await allEvents(q.tenantId);
-  const sprintFiltered = all.filter((e) => sprints.includes(e.sprint));
+  const sprintFiltered = all.filter((e) => e.sprint !== null && sprints.includes(e.sprint));
   const scoped = scopeEvents(sprintFiltered, q, byId);
   const latest = sprints[sprints.length - 1];
   const previous = sprints[sprints.length - 2];
@@ -360,10 +370,16 @@ export async function aggregate(q: AiUsageQuery) {
       purpose: m.purpose,
       tokensIn: sum(list.map((e) => e.tokensIn)),
       tokensOut: sum(list.map((e) => e.tokensOut)),
-      requests: list.length,
+      requests: sum(list.map((e) => e.requestCount ?? 1)),
       costUsd: Math.round(costOf(list) * 10) / 10,
-      avgLatencyMs: list.length ? Math.round(sum(list.map((e) => e.latencyMs)) / list.length) : 0,
-      acceptRate: pct(list.filter((e) => e.accepted).length, list.length),
+      avgLatencyMs: (() => {
+        const known = list.map((e) => e.latencyMs).filter((value): value is number => value !== null);
+        return known.length ? Math.round(sum(known) / known.length) : 0;
+      })(),
+      acceptRate: (() => {
+        const known = list.filter((e) => e.accepted !== null);
+        return pct(known.filter((e) => e.accepted === true).length, known.length);
+      })(),
     };
   }).filter((m) => m.requests > 0);
 
@@ -419,8 +435,8 @@ export async function aggregate(q: AiUsageQuery) {
         squad: member.squad,
         tokens: Math.round((tokensOf(list) / 1_000_000) * 10) / 10,
         costUsd: q.visibility === "self" ? null : Math.round(costOf(list)),
-        requests: list.length,
-        acceptRate: pct(assisted.length, list.length),
+        requests: sum(list.map((e) => e.requestCount ?? 1)),
+        acceptRate: pct(assisted.length, list.filter((e) => e.accepted !== null).length),
         aiAssistedOutput: pct(sum(assisted.map((e) => e.tokensOut)), sum(list.map((e) => e.tokensOut))),
         reworkRate: pct(list.filter((e) => e.reworked).length, assisted.length),
         topModel: topModel?.m.name ?? "—",
@@ -457,13 +473,13 @@ export async function aggregate(q: AiUsageQuery) {
     costUsd: Math.round(costOf(scoped)),
     currentSprintCostUsd: Math.round(currentCost),
     tokens: tokensOf(scoped),
-    requests: scoped.length,
+    requests: sum(scoped.map((e) => e.requestCount ?? 1)),
     budgetUsd: budget,
     budgetConsumedPct: pct(currentCost, budget),
     cachedPct: pct(sum(current.map((e) => e.cachedIn)), sum(current.map((e) => e.tokensIn))),
-    activeUsers: new Set(current.map((e) => e.userId)).size,
+    activeUsers: new Set(current.map((e) => e.userId).filter((id): id is string => id !== null)).size,
     seats: visibleMembers.length,
-    acceptRate: pct(scoped.filter((e) => e.accepted).length, scoped.length),
+    acceptRate: pct(scoped.filter((e) => e.accepted === true).length, scoped.filter((e) => e.accepted !== null).length),
   };
 
   const kpis = buildKpis(q.visibility, {

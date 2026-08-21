@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
 }
 
@@ -17,32 +17,36 @@ datasource db {
 // ============================================================================
 
 model Tenant {
-  id               String   @id @default(uuid()) @db.Uuid
-  name             String   @db.VarChar(255)
-  slug             String   @unique @db.VarChar(100)
-  domain           String?  @unique @db.VarChar(255)
-  logoUrl          String?  @map("logo_url") @db.VarChar(500)
-  settings         Json?    @default("{\"timezone\":\"UTC\",\"dateFormat\":\"YYYY-MM-DD\",\"defaultSprintLength\":14,\"workingDays\":[\"Mon\",\"Tue\",\"Wed\",\"Thu\",\"Fri\"]}")
-  subscriptionTier String   @default("starter") @map("subscription_tier") @db.VarChar(50)
-  maxUsers         Int      @default(10) @map("max_users")
-  maxProducts      Int      @default(3) @map("max_products")
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String    @db.VarChar(255)
+  slug             String    @unique @db.VarChar(100)
+  domain           String?   @unique @db.VarChar(255)
+  logoUrl          String?   @map("logo_url") @db.VarChar(500)
+  settings         Json?     @default("{\"timezone\":\"UTC\",\"dateFormat\":\"YYYY-MM-DD\",\"defaultSprintLength\":14,\"workingDays\":[\"Mon\",\"Tue\",\"Wed\",\"Thu\",\"Fri\"]}")
+  subscriptionTier String    @default("starter") @map("subscription_tier") @db.VarChar(50)
+  maxUsers         Int       @default(10) @map("max_users")
+  maxProducts      Int       @default(3) @map("max_products")
   trialEndsAt      DateTime? @map("trial_ends_at") @db.Timestamptz
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  products              Product[]
-  tenantMemberships     TenantMembership[]
-  users                 User[]
-  workItems             WorkItem[]
-  testCases             TestCase[]
-  deliverables          ManualDeliverable[]
-  sprints               Sprint[]
-  githubIntegrations    GitHubIntegration[]
-  aiUsageEvents         AiUsageEvent[]
-  aiModelCatalogs       AiModelCatalog[]
-  integrations          Integration[]
-  integrationDelegations IntegrationDelegation[]
-  aiProviderKeyMappings AiProviderKeyMapping[]
+  products                  Product[]
+  tenantMemberships         TenantMembership[]
+  users                     User[]
+  workItems                 WorkItem[]
+  testCases                 TestCase[]
+  deliverables              ManualDeliverable[]
+  sprints                   Sprint[]
+  githubIntegrations        GitHubIntegration[]
+  aiUsageEvents             AiUsageEvent[]
+  aiModelCatalogs           AiModelCatalog[]
+  integrations              Integration[]
+  integrationDelegations    IntegrationDelegation[]
+  aiProviderKeyMappings     AiProviderKeyMapping[]
+  aiProviderConnections     AiProviderConnection[]
+  aiProviderIdentities      AiProviderIdentity[]
+  aiProviderRawEvents       AiProviderRawEvent[]
+  aiProviderDailyActivities AiProviderDailyActivity[]
 
   @@index([slug])
   @@index([domain])
@@ -50,35 +54,37 @@ model Tenant {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String?  @map("tenant_id") @db.Uuid
-  email        String   @unique @db.VarChar(255)
-  name         String?  @db.VarChar(255)
-  avatarUrl    String?  @map("avatar_url") @db.VarChar(500)
-  role         String   @default("unassigned") @db.VarChar(50)
-  isActive     Boolean  @default(true) @map("is_active")
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String?   @map("tenant_id") @db.Uuid
+  email                  String    @unique @db.VarChar(255)
+  name                   String?   @db.VarChar(255)
+  avatarUrl              String?   @map("avatar_url") @db.VarChar(500)
+  role                   String    @default("unassigned") @db.VarChar(50)
+  isActive               Boolean   @default(true) @map("is_active")
+  lastLoginAt            DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   squad                  String?   @db.VarChar(100)
   aiIngestTokenHash      String?   @unique @map("ai_ingest_token_hash") @db.VarChar(64)
   aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
   passwordHash           String?   @map("password_hash") @db.VarChar(60)
 
-  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  tenantMemberships TenantMembership[]
-  createdWorkItems  WorkItem[]        @relation("WorkItemCreator")
-  updatedWorkItems  WorkItem[]        @relation("WorkItemUpdater")
-  createdTestCases  TestCase[]        @relation("TestCaseCreator")
-  updatedTestCases  TestCase[]        @relation("TestCaseUpdater")
-  createdDeliverables ManualDeliverable[] @relation("DeliverableCreator")
-  refreshTokens     RefreshToken[]
-  githubIntegrations GitHubIntegration[]
-  aiUsageEvents     AiUsageEvent[]
-  integrations      Integration[]
-  delegationsGranted  IntegrationDelegation[] @relation("DelegationGrantedBy")
-  delegationsReceived IntegrationDelegation[] @relation("DelegationGrantee")
-  aiProviderKeyMappings AiProviderKeyMapping[]
+  tenant                       Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenantMemberships            TenantMembership[]
+  createdWorkItems             WorkItem[]              @relation("WorkItemCreator")
+  updatedWorkItems             WorkItem[]              @relation("WorkItemUpdater")
+  createdTestCases             TestCase[]              @relation("TestCaseCreator")
+  updatedTestCases             TestCase[]              @relation("TestCaseUpdater")
+  createdDeliverables          ManualDeliverable[]     @relation("DeliverableCreator")
+  refreshTokens                RefreshToken[]
+  githubIntegrations           GitHubIntegration[]
+  aiUsageEvents                AiUsageEvent[]
+  integrations                 Integration[]
+  delegationsGranted           IntegrationDelegation[] @relation("DelegationGrantedBy")
+  delegationsReceived          IntegrationDelegation[] @relation("DelegationGrantee")
+  aiProviderKeyMappings        AiProviderKeyMapping[]
+  aiProviderConnectionsCreated AiProviderConnection[]  @relation("AiProviderConnectionCreator")
+  aiProviderIdentities         AiProviderIdentity[]
 
   @@index([email])
   @@index([tenantId])
@@ -98,8 +104,8 @@ model TenantMembership {
   joinedAt             DateTime @default(now()) @map("joined_at") @db.Timestamptz
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, userId])
   @@index([tenantId])
@@ -108,11 +114,11 @@ model TenantMembership {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  token     String   @unique @db.VarChar(500)
-  userId    String   @map("user_id") @db.Uuid
-  expiresAt DateTime @map("expires_at") @db.Timestamptz
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id        String    @id @default(uuid()) @db.Uuid
+  token     String    @unique @db.VarChar(500)
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -127,27 +133,27 @@ model RefreshToken {
 // ============================================================================
 
 model Product {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @map("tenant_id") @db.Uuid
-  name               String   @db.VarChar(255)
-  key                String   @db.VarChar(50)
-  description        String?  @db.Text
-  iconUrl            String?  @map("icon_url") @db.VarChar(500)
-  color              String?  @db.VarChar(7)
-  jiraProjectKey     String?  @map("jira_project_key") @db.VarChar(20)
-  jiraProjectId      String?  @map("jira_project_id") @db.VarChar(50)
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  name                String   @db.VarChar(255)
+  key                 String   @db.VarChar(50)
+  description         String?  @db.Text
+  iconUrl             String?  @map("icon_url") @db.VarChar(500)
+  color               String?  @db.VarChar(7)
+  jiraProjectKey      String?  @map("jira_project_key") @db.VarChar(20)
+  jiraProjectId       String?  @map("jira_project_id") @db.VarChar(50)
   azureDevopsAreaPath String?  @map("azure_devops_area_path") @db.VarChar(255)
-  settings           Json?    @default("{}")
-  isActive           Boolean  @default(true) @map("is_active")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  settings            Json?    @default("{}")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  productRepositories ProductRepository[]
-  workItems    WorkItem[]
-  testCases    TestCase[]
-  deliverables ManualDeliverable[]
-  sprints      Sprint[]
+  tenant                 Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productRepositories    ProductRepository[]
+  workItems              WorkItem[]
+  testCases              TestCase[]
+  deliverables           ManualDeliverable[]
+  sprints                Sprint[]
   integrationDelegations IntegrationDelegation[]
 
   @@unique([tenantId, key])
@@ -161,34 +167,34 @@ model Product {
 // ============================================================================
 
 model WorkItem {
-  id                String   @id @default(uuid()) @db.Uuid
-  tenantId          String   @map("tenant_id") @db.Uuid
-  productId         String   @map("product_id") @db.Uuid
-  externalId        String?  @map("external_id") @db.VarChar(100)
-  type              String   @db.VarChar(50)
-  status            String   @db.VarChar(50)
-  priority          String?  @db.VarChar(20)
-  title             String   @db.VarChar(500)
-  description       String?  @db.Text
-  assigneeId        String?  @map("assignee_id") @db.Uuid
-  sprintId          String?  @map("sprint_id") @db.Uuid
-  storyPoints       Int?     @map("story_points")
-  createdBy         String   @map("created_by") @db.Uuid
-  updatedBy         String?  @map("updated_by") @db.Uuid
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz
-  closedAt          DateTime? @map("closed_at") @db.Timestamptz
-  externalSystem    String   @default("manual") @map("external_system") @db.VarChar(20)
-  isActive          Boolean  @default(true) @map("is_active")
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  productId          String    @map("product_id") @db.Uuid
+  externalId         String?   @map("external_id") @db.VarChar(100)
+  type               String    @db.VarChar(50)
+  status             String    @db.VarChar(50)
+  priority           String?   @db.VarChar(20)
+  title              String    @db.VarChar(500)
+  description        String?   @db.Text
+  assigneeId         String?   @map("assignee_id") @db.Uuid
+  sprintId           String?   @map("sprint_id") @db.Uuid
+  storyPoints        Int?      @map("story_points")
+  createdBy          String    @map("created_by") @db.Uuid
+  updatedBy          String?   @map("updated_by") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  resolvedAt         DateTime? @map("resolved_at") @db.Timestamptz
+  closedAt           DateTime? @map("closed_at") @db.Timestamptz
+  externalSystem     String    @default("manual") @map("external_system") @db.VarChar(20)
+  isActive           Boolean   @default(true) @map("is_active")
   lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
-  externalMetadata  Json?    @default("{}") @map("external_metadata")
+  externalMetadata   Json?     @default("{}") @map("external_metadata")
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sprint   Sprint?  @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  creator  User     @relation("WorkItemCreator", fields: [createdBy], references: [id])
-  updater  User?    @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sprint  Sprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  creator User    @relation("WorkItemCreator", fields: [createdBy], references: [id])
+  updater User?   @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -201,25 +207,25 @@ model WorkItem {
 }
 
 model TestCase {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @map("tenant_id") @db.Uuid
-  productId   String   @map("product_id") @db.Uuid
-  externalId  String?  @map("external_id") @db.VarChar(100)
-  name        String   @db.VarChar(500)
-  description String?  @db.Text
-  type        String   @default("functional") @db.VarChar(50)
-  status      String   @default("draft") @db.VarChar(50)
-  priority    String?  @db.VarChar(20)
-  automationStatus String? @map("automation_status") @db.VarChar(50)
-  createdBy   String   @map("created_by") @db.Uuid
-  updatedBy   String?  @map("updated_by") @db.Uuid
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  productId        String   @map("product_id") @db.Uuid
+  externalId       String?  @map("external_id") @db.VarChar(100)
+  name             String   @db.VarChar(500)
+  description      String?  @db.Text
+  type             String   @default("functional") @db.VarChar(50)
+  status           String   @default("draft") @db.VarChar(50)
+  priority         String?  @db.VarChar(20)
+  automationStatus String?  @map("automation_status") @db.VarChar(50)
+  createdBy        String   @map("created_by") @db.Uuid
+  updatedBy        String?  @map("updated_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  creator    User       @relation("TestCaseCreator", fields: [createdBy], references: [id])
-  updater    User?      @relation("TestCaseUpdater", fields: [updatedBy], references: [id])
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator    User            @relation("TestCaseCreator", fields: [createdBy], references: [id])
+  updater    User?           @relation("TestCaseUpdater", fields: [updatedBy], references: [id])
   executions TestExecution[]
 
   @@index([tenantId])
@@ -230,14 +236,14 @@ model TestCase {
 }
 
 model TestExecution {
-  id          String   @id @default(uuid()) @db.Uuid
-  testCaseId  String   @map("test_case_id") @db.Uuid
-  status      String   @db.VarChar(20)
-  executedBy  String   @map("executed_by") @db.Uuid
-  executedAt  DateTime @default(now()) @map("executed_at") @db.Timestamptz
-  notes       String?  @db.Text
-  duration    Int?     // in seconds
-  buildUrl    String?  @map("build_url") @db.VarChar(500)
+  id         String   @id @default(uuid()) @db.Uuid
+  testCaseId String   @map("test_case_id") @db.Uuid
+  status     String   @db.VarChar(20)
+  executedBy String   @map("executed_by") @db.Uuid
+  executedAt DateTime @default(now()) @map("executed_at") @db.Timestamptz
+  notes      String?  @db.Text
+  duration   Int? // in seconds
+  buildUrl   String?  @map("build_url") @db.VarChar(500)
 
   testCase TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
 
@@ -258,15 +264,15 @@ model ManualDeliverable {
   title       String   @db.VarChar(500)
   description String?  @db.Text
   metadata    Json?    @default("{}")
-  rating      Float?   // for demos, 1-5
+  rating      Float? // for demos, 1-5
   links       String[] @default([])
   createdBy   String   @map("created_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  creator  User     @relation("DeliverableCreator", fields: [createdBy], references: [id])
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator User    @relation("DeliverableCreator", fields: [createdBy], references: [id])
 
   @@index([tenantId])
   @@index([productId])
@@ -280,25 +286,25 @@ model ManualDeliverable {
 // ============================================================================
 
 model Sprint {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @map("tenant_id") @db.Uuid
-  productId   String   @map("product_id") @db.Uuid
-  name        String   @db.VarChar(255)
-  externalId  String?  @map("external_id") @db.VarChar(100)
-  status      String   @default("planning") @db.VarChar(50)
-  startDate   DateTime @map("start_date") @db.Timestamptz
-  endDate     DateTime @map("end_date") @db.Timestamptz
-  goal        String?  @db.Text
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-  externalSystem    String   @default("manual") @map("external_system") @db.VarChar(20)
-  isActive          Boolean  @default(true) @map("is_active")
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  productId          String    @map("product_id") @db.Uuid
+  name               String    @db.VarChar(255)
+  externalId         String?   @map("external_id") @db.VarChar(100)
+  status             String    @default("planning") @db.VarChar(50)
+  startDate          DateTime  @map("start_date") @db.Timestamptz
+  endDate            DateTime  @map("end_date") @db.Timestamptz
+  goal               String?   @db.Text
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  externalSystem     String    @default("manual") @map("external_system") @db.VarChar(20)
+  isActive           Boolean   @default(true) @map("is_active")
   lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
-  externalMetadata  Json?    @default("{}") @map("external_metadata")
+  externalMetadata   Json?     @default("{}") @map("external_metadata")
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  workItems  WorkItem[]
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItems WorkItem[]
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -318,15 +324,15 @@ model GitHubIntegration {
   encryptedToken String    @map("encrypted_token") @db.Text
   tokenType      String    @map("token_type") @db.VarChar(50)
   githubUsername String?   @map("github_username") @db.VarChar(255)
-  lastValidated DateTime?  @map("last_validated") @db.Timestamptz
-  lastUsed       DateTime?  @map("last_used") @db.Timestamptz
+  lastValidated  DateTime? @map("last_validated") @db.Timestamptz
+  lastUsed       DateTime? @map("last_used") @db.Timestamptz
   isActive       Boolean   @default(true) @map("is_active")
   createdBy      String    @map("created_by") @db.Uuid
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  creator   User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
 
   @@unique([tenantId])
   @@index([tenantId])
@@ -339,13 +345,13 @@ model GitHubIntegration {
 // ============================================================================
 
 model ProductRepository {
-  id        String   @id @default(uuid()) @db.Uuid
-  productId String   @map("product_id") @db.Uuid
-  githubRepo String  @map("github_repo") @db.VarChar(255) // Format: "owner/repo"
-  isPrimary Boolean  @default(false) @map("is_primary")
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id         String   @id @default(uuid()) @db.Uuid
+  productId  String   @map("product_id") @db.Uuid
+  githubRepo String   @map("github_repo") @db.VarChar(255) // Format: "owner/repo"
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -361,20 +367,20 @@ model ProductRepository {
 // ============================================================================
 
 model AiUsageEvent {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  timestamp    DateTime? @default(now()) @map("timestamp") @db.Timestamptz
-  sprint       String?   @db.VarChar(50)
-  userId       String    @map("user_id") @db.Uuid
-  modelId      String    @map("model_id") @db.VarChar(100)
-  activity     String?   @db.VarChar(50)
-  tokensIn     Int       @map("tokens_in")
-  tokensOut    Int       @map("tokens_out")
-  cachedIn     Int?      @map("cached_in") @default(0)
-  latencyMs    Int?      @map("latency_ms")
-  accepted     Boolean?  @default(false)
-  reworked     Boolean?  @default(false)
-  tenantId     String?   @map("tenant_id") @db.Uuid
-  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamptz
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timestamp DateTime? @default(now()) @map("timestamp") @db.Timestamptz
+  sprint    String?   @db.VarChar(50)
+  userId    String?   @map("user_id") @db.Uuid
+  modelId   String    @map("model_id") @db.VarChar(100)
+  activity  String?   @db.VarChar(50)
+  tokensIn  Int       @map("tokens_in")
+  tokensOut Int       @map("tokens_out")
+  cachedIn  Int?      @default(0) @map("cached_in")
+  latencyMs Int?      @map("latency_ms")
+  accepted  Boolean?  @default(false)
+  reworked  Boolean?  @default(false)
+  tenantId  String?   @map("tenant_id") @db.Uuid
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz
 
   // Pull-based vendor sync support (OpenAI/Vertex usage-API adapters), added
   // alongside Claude Code's existing per-request push rows. provider defaults
@@ -388,8 +394,21 @@ model AiUsageEvent {
   bucketStart DateTime? @map("bucket_start") @db.Timestamptz
   groupKey    String?   @map("group_key") @db.VarChar(255)
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  providerConnectionId String?  @map("provider_connection_id") @db.Uuid
+  providerIdentityId   String?  @map("provider_identity_id") @db.Uuid
+  source               String   @default("event") @db.VarChar(50)
+  externalEventId      String?  @map("external_event_id") @db.VarChar(255)
+  sessionId            String?  @map("session_id") @db.VarChar(255)
+  requestCount         Int      @default(1) @map("request_count")
+  providerCostUsd      Decimal? @map("provider_cost_usd") @db.Decimal(18, 8)
+  estimatedCostUsd     Decimal? @map("estimated_cost_usd") @db.Decimal(18, 8)
+  costSource           String?  @map("cost_source") @db.VarChar(30)
+  metadata             Json?    @default("{}")
+
+  user               User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tenant             Tenant?               @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  providerConnection AiProviderConnection? @relation(fields: [providerConnectionId], references: [id], onDelete: Cascade)
+  providerIdentity   AiProviderIdentity?   @relation(fields: [providerIdentityId], references: [id], onDelete: SetNull)
 
   @@index([timestamp], map: "idx_ai_usage_events_timestamp")
   @@index([userId], map: "idx_ai_usage_events_user_id")
@@ -398,7 +417,140 @@ model AiUsageEvent {
   @@index([tenantId], map: "idx_ai_usage_events_tenant_id")
   @@index([activity], map: "idx_ai_usage_events_activity")
   @@index([provider], map: "idx_ai_usage_events_provider")
+  @@index([providerConnectionId], map: "idx_ai_usage_events_provider_connection_id")
+  @@index([providerIdentityId], map: "idx_ai_usage_events_provider_identity_id")
   @@map("ai_usage_events")
+}
+
+// A tenant-owned connection to one vendor organization/account. This is
+// deliberately separate from Integration: a tenant may connect multiple
+// Anthropic organizations and each can expose a different collection channel.
+model AiProviderConnection {
+  id                      String    @id @default(uuid()) @db.Uuid
+  tenantId                String    @map("tenant_id") @db.Uuid
+  vendor                  String    @db.VarChar(50)
+  product                 String    @default("claude_code") @db.VarChar(50)
+  acquisitionChannel      String    @map("acquisition_channel") @db.VarChar(50)
+  planType                String    @map("plan_type") @db.VarChar(50)
+  organizationName        String    @map("organization_name") @db.VarChar(255)
+  externalAccountId       String    @map("external_account_id") @db.VarChar(255)
+  domain                  String?   @db.VarChar(255)
+  collectionMode          String    @map("collection_mode") @db.VarChar(50)
+  authType                String    @default("none") @map("auth_type") @db.VarChar(50)
+  encryptedCredential     String?   @map("encrypted_credential") @db.Text
+  credentialLabel         String?   @map("credential_label") @db.VarChar(255)
+  telemetryTokenHash      String?   @unique @map("telemetry_token_hash") @db.VarChar(64)
+  telemetryTokenCreatedAt DateTime? @map("telemetry_token_created_at") @db.Timestamptz
+  status                  String    @default("awaiting_configuration") @db.VarChar(40)
+  scopes                  String[]  @default([])
+  capabilities            Json      @default("{}")
+  config                  Json      @default("{}")
+  syncCursor              Json      @default("{}") @map("sync_cursor")
+  syncFrequencyMinutes    Int       @default(60) @map("sync_frequency_minutes")
+  lastValidatedAt         DateTime? @map("last_validated_at") @db.Timestamptz
+  lastTelemetryAt         DateTime? @map("last_telemetry_at") @db.Timestamptz
+  lastSyncedAt            DateTime? @map("last_synced_at") @db.Timestamptz
+  lastSyncStartedAt       DateTime? @map("last_sync_started_at") @db.Timestamptz
+  lastSyncError           String?   @map("last_sync_error") @db.Text
+  isActive                Boolean   @default(true) @map("is_active")
+  createdBy               String    @map("created_by") @db.Uuid
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator         User                      @relation("AiProviderConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  identities      AiProviderIdentity[]
+  rawEvents       AiProviderRawEvent[]
+  dailyActivities AiProviderDailyActivity[]
+  usageEvents     AiUsageEvent[]
+
+  @@unique([tenantId, vendor, acquisitionChannel, externalAccountId], map: "ai_provider_connections_tenant_vendor_channel_account_key")
+  @@index([tenantId, vendor])
+  @@index([isActive, status])
+  @@map("ai_provider_connections")
+}
+
+// Provider identities are observed from official API/telemetry records. They
+// are not QualiMetrix login accounts; userId is populated only when an existing
+// tenant user can be mapped safely.
+model AiProviderIdentity {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  connectionId   String   @map("connection_id") @db.Uuid
+  externalUserId String   @map("external_user_id") @db.VarChar(255)
+  email          String?  @db.VarChar(255)
+  displayName    String?  @map("display_name") @db.VarChar(255)
+  userId         String?  @map("user_id") @db.Uuid
+  firstSeenAt    DateTime @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+  metadata       Json     @default("{}")
+
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection      AiProviderConnection      @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  user            User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  rawEvents       AiProviderRawEvent[]
+  dailyActivities AiProviderDailyActivity[]
+  usageEvents     AiUsageEvent[]
+
+  @@unique([connectionId, externalUserId])
+  @@index([tenantId, email])
+  @@index([userId])
+  @@map("ai_provider_identities")
+}
+
+model AiProviderRawEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  connectionId    String    @map("connection_id") @db.Uuid
+  identityId      String?   @map("identity_id") @db.Uuid
+  source          String    @db.VarChar(50)
+  externalEventId String    @map("external_event_id") @db.VarChar(255)
+  occurredAt      DateTime  @map("occurred_at") @db.Timestamptz
+  receivedAt      DateTime  @default(now()) @map("received_at") @db.Timestamptz
+  sessionId       String?   @map("session_id") @db.VarChar(255)
+  schemaVersion   String    @default("1") @map("schema_version") @db.VarChar(20)
+  payload         Json
+  processedAt     DateTime? @map("processed_at") @db.Timestamptz
+  processingError String?   @map("processing_error") @db.Text
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection AiProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  identity   AiProviderIdentity?  @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@unique([connectionId, source, externalEventId])
+  @@index([tenantId, occurredAt])
+  @@index([identityId])
+  @@map("ai_provider_raw_events")
+}
+
+model AiProviderDailyActivity {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  connectionId        String   @map("connection_id") @db.Uuid
+  identityId          String   @map("identity_id") @db.Uuid
+  date                DateTime @db.Date
+  product             String   @default("claude_code") @db.VarChar(50)
+  source              String   @db.VarChar(50)
+  sessionCount        Int      @default(0) @map("session_count")
+  requestCount        Int      @default(0) @map("request_count")
+  commits             Int      @default(0)
+  pullRequests        Int      @default(0) @map("pull_requests")
+  linesAdded          Int      @default(0) @map("lines_added")
+  linesRemoved        Int      @default(0) @map("lines_removed")
+  suggestionsAccepted Int      @default(0) @map("suggestions_accepted")
+  suggestionsRejected Int      @default(0) @map("suggestions_rejected")
+  toolMetrics         Json     @default("{}") @map("tool_metrics")
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection AiProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  identity   AiProviderIdentity   @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, identityId, date, product, source])
+  @@index([tenantId, date])
+  @@map("ai_provider_daily_activities")
 }
 
 model AiModelCatalog {
@@ -429,22 +581,22 @@ model AiModelCatalog {
 }
 
 model AiUsageAnalytics {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  visibility      String    @db.VarChar(20)
-  userId          String    @map("user_id") @db.Uuid
-  sprints         Int?      @default(7)
-  generatedAt     DateTime? @default(now()) @map("generated_at") @db.Timestamptz
-  totals          Json?     @default("{}")
-  kpis            Json?     @default("[]")
-  models          Json?     @default("[]")
-  spendTrend      Json?     @default("[]") @map("spend_trend")
-  tokenTrend      Json?     @default("[]") @map("token_trend")
-  activityMix     Json?     @default("[]") @map("activity_mix")
-  people          Json?     @default("[]")
-  benchmarks      Json?     @default("{}")
-  insights        Json?     @default("[]")
-  canSeeCost      Boolean?  @default(true) @map("can_see_cost")
-  canSeePeople    Boolean?  @default(true) @map("can_see_people")
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  visibility   String    @db.VarChar(20)
+  userId       String    @map("user_id") @db.Uuid
+  sprints      Int?      @default(7)
+  generatedAt  DateTime? @default(now()) @map("generated_at") @db.Timestamptz
+  totals       Json?     @default("{}")
+  kpis         Json?     @default("[]")
+  models       Json?     @default("[]")
+  spendTrend   Json?     @default("[]") @map("spend_trend")
+  tokenTrend   Json?     @default("[]") @map("token_trend")
+  activityMix  Json?     @default("[]") @map("activity_mix")
+  people       Json?     @default("[]")
+  benchmarks   Json?     @default("{}")
+  insights     Json?     @default("[]")
+  canSeeCost   Boolean?  @default(true) @map("can_see_cost")
+  canSeePeople Boolean?  @default(true) @map("can_see_people")
 
   @@index([userId], map: "idx_ai_usage_analytics_user_id")
   @@index([visibility], map: "idx_ai_usage_analytics_visibility")
@@ -457,28 +609,28 @@ model AiUsageAnalytics {
 // ============================================================================
 
 model Integration {
-  id                    String   @id @default(uuid()) @db.Uuid
-  tenantId              String   @map("tenant_id") @db.Uuid
-  provider              String   @db.VarChar(20) // 'jira' | 'azure_devops'
-  status                String   @default("connected") @db.VarChar(20) // connected|error|reauth_required|disconnected
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  provider String @db.VarChar(20) // 'jira' | 'azure_devops'
+  status   String @default("connected") @db.VarChar(20) // connected|error|reauth_required|disconnected
 
-  encryptedAccessToken  String   @map("encrypted_access_token") @db.Text
-  encryptedRefreshToken String?  @map("encrypted_refresh_token") @db.Text
+  encryptedAccessToken  String    @map("encrypted_access_token") @db.Text
+  encryptedRefreshToken String?   @map("encrypted_refresh_token") @db.Text
   tokenExpiresAt        DateTime? @map("token_expires_at") @db.Timestamptz
-  scopes                String[] @default([])
+  scopes                String[]  @default([])
 
-  externalMetadata      Json     @default("{}") @map("external_metadata") // Jira: {cloudId, siteUrl, storyPointsFieldId, statusMap}; ADO: {organization, accountId, statusMap}
-  connectedAccountLabel String?  @map("connected_account_label") @db.VarChar(255)
+  externalMetadata      Json    @default("{}") @map("external_metadata") // Jira: {cloudId, siteUrl, storyPointsFieldId, statusMap}; ADO: {organization, accountId, statusMap}
+  connectedAccountLabel String? @map("connected_account_label") @db.VarChar(255)
 
-  syncFrequencyMinutes  Int      @default(5) @map("sync_frequency_minutes")
-  lastSyncedAt          DateTime? @map("last_synced_at") @db.Timestamptz
-  lastSyncStartedAt     DateTime? @map("last_sync_started_at") @db.Timestamptz
-  lastSyncError         String?  @db.Text @map("last_sync_error")
-  isActive              Boolean  @default(true) @map("is_active")
+  syncFrequencyMinutes Int       @default(5) @map("sync_frequency_minutes")
+  lastSyncedAt         DateTime? @map("last_synced_at") @db.Timestamptz
+  lastSyncStartedAt    DateTime? @map("last_sync_started_at") @db.Timestamptz
+  lastSyncError        String?   @map("last_sync_error") @db.Text
+  isActive             Boolean   @default(true) @map("is_active")
 
-  createdBy             String   @map("created_by") @db.Uuid
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
@@ -495,14 +647,14 @@ model Integration {
 // raw OAuth credentials. Modeled as a grant record rather than a role change
 // so revoking it can't accidentally strip anything else the PO can do.
 model IntegrationDelegation {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  productId    String    @map("product_id") @db.Uuid
-  granteeId    String    @map("grantee_id") @db.Uuid
-  grantedBy    String    @map("granted_by") @db.Uuid
-  capability   String    @default("manage_product_mapping") @db.VarChar(50)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  productId  String    @map("product_id") @db.Uuid
+  granteeId  String    @map("grantee_id") @db.Uuid
+  grantedBy  String    @map("granted_by") @db.Uuid
+  capability String    @default("manage_product_mapping") @db.VarChar(50)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)

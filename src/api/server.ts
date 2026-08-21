@@ -5,10 +5,11 @@ import dotenv from 'dotenv'
 import { healthCheck, databaseInfo } from './controllers/health.controller'
 import apiRoutes from './routes'
 import { assertJwtSecretConfigured } from '../lib/jwt'
-import { startScheduler, registerSyncHandler } from '../lib/scheduler'
+import { startScheduler, registerAiProviderSyncHandler, registerSyncHandler } from '../lib/scheduler'
 import { syncAllProductsForIntegration as syncAllJira } from './services/jira-sync.service'
 import { syncAllProductsForIntegration as syncAllAdo } from './services/azure-devops-sync.service'
 import { syncOpenAiUsage } from './services/openai-usage-sync.service'
+import { syncAnthropicConnection } from './services/anthropic-usage-sync.service'
 
 // Load environment variables
 dotenv.config()
@@ -108,6 +109,7 @@ app.listen(PORT, () => {
   registerSyncHandler('jira', syncAllJira)
   registerSyncHandler('azure_devops', syncAllAdo)
   registerSyncHandler('openai', syncOpenAiUsage)
+  registerAiProviderSyncHandler('anthropic', syncAnthropicConnection)
   startScheduler()
 })
 

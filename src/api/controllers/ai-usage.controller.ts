@@ -19,6 +19,7 @@ import {
   ensureModelCatalogEntry,
 } from '../../lib/ai-usage.server';
 import { extractApiRequestAttrs, mapToRawEvent } from '../../lib/otel-claude-code.server';
+import { ingestAnthropicOtelLogs, ingestAnthropicOtelMetrics } from '../services/anthropic-otel-ingest.service';
 
 /**
  * GET /api/v1/ai-usage/analytics
@@ -181,6 +182,28 @@ export async function ingestOtlpLogs(req: Request, res: Response) {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to process OTLP payload',
     });
+  }
+}
+
+/** Organization-managed Claude Code OTLP receiver. Authentication resolves a
+ * tenant-owned provider connection, not a developer or QualiMetrix login. */
+export async function ingestOrganizationOtlpLogs(req: Request, res: Response) {
+  try {
+    const result = await ingestAnthropicOtelLogs(req.aiProviderConnection!, req.body);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error ingesting organization OTLP logs:', error);
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to process OTLP logs' });
+  }
+}
+
+export async function ingestOrganizationOtlpMetrics(req: Request, res: Response) {
+  try {
+    const result = await ingestAnthropicOtelMetrics(req.aiProviderConnection!, req.body);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error ingesting organization OTLP metrics:', error);
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to process OTLP metrics' });
   }
 }
 

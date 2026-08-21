@@ -12,6 +12,7 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "format": "prettier --write .",
     "api:dev": "tsx watch src/api/server.ts",
     "api:start": "tsx src/api/server.ts",
