@@ -19,9 +19,11 @@ import {
   createAnthropicConnection,
   disconnectAnthropicConnection,
   discoverAnthropicReportingCredential,
+  getAnthropicDeletionPreview,
   getAnthropicDeploymentReadiness,
   listAnthropicConnections,
   listAnthropicIdentities,
+  permanentlyDeleteAnthropicConnection,
   rotateAnthropicTelemetryToken,
   syncAnthropicNow,
 } from "../controllers/ai-provider-connection.controller";
@@ -37,6 +39,11 @@ router.get("/anthropic/deployment-readiness", requireAdmin, getAnthropicDeployme
 router.post("/anthropic/discover", requireAdmin, discoverAnthropicReportingCredential);
 router.post("/anthropic/connections", requireAdmin, createAnthropicConnection);
 router.get("/anthropic/connections/:id/identities", requireAdmin, listAnthropicIdentities);
+router.get(
+  "/anthropic/connections/:id/deletion-preview",
+  requireAdmin,
+  getAnthropicDeletionPreview,
+);
 router.post(
   "/anthropic/connections/:id/reporting-credential",
   requireAdmin,
@@ -48,6 +55,11 @@ router.post(
   rotateAnthropicTelemetryToken,
 );
 router.post("/anthropic/connections/:id/sync", requireAdmin, syncAnthropicNow);
+router.post(
+  "/anthropic/connections/:id/permanent-delete",
+  requireAdmin,
+  permanentlyDeleteAnthropicConnection,
+);
 router.delete("/anthropic/connections/:id", requireAdmin, disconnectAnthropicConnection);
 
 // Deliberate exception to admin-gating: reached via browser redirect from the

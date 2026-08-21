@@ -47,6 +47,7 @@ model Tenant {
   aiProviderIdentities      AiProviderIdentity[]
   aiProviderRawEvents       AiProviderRawEvent[]
   aiProviderDailyActivities AiProviderDailyActivity[]
+  aiProviderDeletionAudits  AiProviderDeletionAudit[]
 
   @@index([slug])
   @@index([domain])
@@ -69,22 +70,23 @@ model User {
   aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
   passwordHash           String?   @map("password_hash") @db.VarChar(60)
 
-  tenant                       Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenant                       Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   tenantMemberships            TenantMembership[]
-  createdWorkItems             WorkItem[]              @relation("WorkItemCreator")
-  updatedWorkItems             WorkItem[]              @relation("WorkItemUpdater")
-  createdTestCases             TestCase[]              @relation("TestCaseCreator")
-  updatedTestCases             TestCase[]              @relation("TestCaseUpdater")
-  createdDeliverables          ManualDeliverable[]     @relation("DeliverableCreator")
+  createdWorkItems             WorkItem[]                @relation("WorkItemCreator")
+  updatedWorkItems             WorkItem[]                @relation("WorkItemUpdater")
+  createdTestCases             TestCase[]                @relation("TestCaseCreator")
+  updatedTestCases             TestCase[]                @relation("TestCaseUpdater")
+  createdDeliverables          ManualDeliverable[]       @relation("DeliverableCreator")
   refreshTokens                RefreshToken[]
   githubIntegrations           GitHubIntegration[]
   aiUsageEvents                AiUsageEvent[]
   integrations                 Integration[]
-  delegationsGranted           IntegrationDelegation[] @relation("DelegationGrantedBy")
-  delegationsReceived          IntegrationDelegation[] @relation("DelegationGrantee")
+  delegationsGranted           IntegrationDelegation[]   @relation("DelegationGrantedBy")
+  delegationsReceived          IntegrationDelegation[]   @relation("DelegationGrantee")
   aiProviderKeyMappings        AiProviderKeyMapping[]
-  aiProviderConnectionsCreated AiProviderConnection[]  @relation("AiProviderConnectionCreator")
+  aiProviderConnectionsCreated AiProviderConnection[]    @relation("AiProviderConnectionCreator")
   aiProviderIdentities         AiProviderIdentity[]
+  aiProviderDeletionAudits     AiProviderDeletionAudit[] @relation("AiProviderDeletionRequester")
 
   @@index([email])
   @@index([tenantId])
@@ -551,6 +553,31 @@ model AiProviderDailyActivity {
   @@unique([connectionId, identityId, date, product, source])
   @@index([tenantId, date])
   @@map("ai_provider_daily_activities")
+}
+
+// Immutable receipt retained after a provider connection and all of its
+// collected facts are physically deleted. It deliberately stores a one-way
+// connection fingerprint rather than the provider organization ID or employee
+// data that the PM requested us to erase.
+model AiProviderDeletionAudit {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  requestedBy           String?  @map("requested_by") @db.Uuid
+  vendor                String   @db.VarChar(50)
+  product               String   @db.VarChar(50)
+  connectionFingerprint String   @map("connection_fingerprint") @db.VarChar(64)
+  reason                String   @db.VarChar(500)
+  recordCounts          Json     @map("record_counts")
+  status                String   @default("completed") @db.VarChar(30)
+  requestedAt           DateTime @default(now()) @map("requested_at") @db.Timestamptz
+  completedAt           DateTime @default(now()) @map("completed_at") @db.Timestamptz
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester User?  @relation("AiProviderDeletionRequester", fields: [requestedBy], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, completedAt])
+  @@index([connectionFingerprint])
+  @@map("ai_provider_deletion_audits")
 }
 
 model AiModelCatalog {

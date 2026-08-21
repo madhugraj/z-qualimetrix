@@ -36,7 +36,8 @@ No source is presented as more complete or more authoritative than it really is.
 - OTel connection: return the generated managed-settings JSON and secret once. The connection becomes `connected` only after valid telemetry arrives.
 - Hybrid connection: validate the API credential and wait for telemetry. The status exposes which capabilities are active.
 - Reconnect/rotation issues a new credential or telemetry token and immediately revokes the old value.
-- Disconnect is tenant-scoped, stops collection/sync, and preserves already-collected records under retention policy.
+- Disconnect is tenant-scoped, stops collection/sync, invalidates stored credentials, and preserves already-collected records under retention policy. The disconnected record remains visible to the PM.
+- Permanent deletion is a separate, explicit operation. It requires impact preview, a business reason, the exact organization confirmation phrase, and QualiMetrix password re-authentication. Legal hold blocks deletion.
 
 ### Nontechnical PM deployment paths
 
@@ -51,7 +52,7 @@ The deployment credential exists in the browser only for that creation/rotation 
 
 ```mermaid
 flowchart TD
-  PM[QualiMetrix PM] --> B[Enter organization, purchase channel, and plan]
+  PM[QualiMetrix PM] --> B[Enter organization name, purchase channel, and plan]
   B --> G{Monitoring goal}
   G -->|Daily/history| K[Paste provider reporting key]
   G -->|History + live| K
@@ -59,7 +60,7 @@ flowchart TD
   K --> D[QualiMetrix backend calls Anthropic]
   D --> O{Exact organization ID and analytics access?}
   O -->|No| X[Reject; save no credential]
-  O -->|Yes| V[Show verified organization and capabilities]
+  O -->|Yes| V[Discover and show verified organization ID, name, and capabilities]
   V --> R
   R --> E[Encrypt reporting key / hash OTel token]
   E --> S[Start historical synchronization]
@@ -110,7 +111,7 @@ Provider documentation changes over time. Capability validation at connection ti
 The PM supplies:
 
 - display name for the provider organization;
-- provider organization/account ID (not a fabricated QualiMetrix ID);
+- provider organization/account ID for live-monitoring-only connections. For reporting-key paths it is optional: QualiMetrix discovers it from Anthropic, and rejects a different PM-entered ID;
 - optional verified email domain;
 - plan type: Team, Enterprise, Console API, or custom;
 - acquisition channel: Anthropic direct, Anthropic Console, Bedrock, Vertex, Foundry, or gateway;
@@ -128,7 +129,7 @@ The PM does not select technical adapters. QualiMetrix derives `managed_otel`, `
 | Team/subscription usage exposed through the Claude Code Analytics Admin API | Admin API key                                 | Organization admin          | Claude Console → Settings → Admin keys  | Same two Console checks; support is accepted only when Anthropic proves the capability                   |
 | Bedrock, Vertex, Foundry, gateway                                           | Cloud/gateway credential in its own connector | Cloud/gateway administrator | Respective provider                     | Not accepted by this Anthropic reporting-key form                                                        |
 
-An ordinary model API key is not a reporting credential. Analytics and Admin API keys are not interchangeable. The Settings page links the PM to the official Anthropic key location and does not ask the PM or a developer to use a terminal.
+An ordinary model API key is not a reporting credential. Analytics and Admin API keys are not interchangeable. A Team subscription does not by itself guarantee Console Admin API access. The Settings page therefore asks whether the PM can see Admin keys: a verified key enables historical reporting, while the no-key branch continues with centrally managed live telemetry and links to the provider's Team analytics/CSV page for human review. QualiMetrix does not claim that the CSV is automatically imported. The PM is never asked to use a terminal.
 
 QualiMetrix permits multiple Anthropic organizations per tenant. The uniqueness boundary is tenant + vendor + acquisition channel + external account ID.
 
@@ -261,9 +262,32 @@ POST   /api/v1/integrations/anthropic/connections/:id/reporting-credential
 POST   /api/v1/integrations/anthropic/connections/:id/rotate-telemetry-token
 POST   /api/v1/integrations/anthropic/connections/:id/sync
 DELETE /api/v1/integrations/anthropic/connections/:id
+GET    /api/v1/integrations/anthropic/connections/:id/deletion-preview
+POST   /api/v1/integrations/anthropic/connections/:id/permanent-delete
 ```
 
 Machine ingestion uses only the connection-token endpoints documented in section 5.
+
+### Disconnect and permanent deletion
+
+```mermaid
+flowchart TD
+  PM[Authenticated tenant PM] --> M[Manage connection and data]
+  M --> S{Required outcome}
+  S -->|Stop future collection| A[Acknowledge that history is retained]
+  A --> D[Invalidate reporting key and telemetry token; mark disconnected]
+  D --> V[Keep record visible for retention, reconnect, or later deletion]
+  S -->|Erase QualiMetrix data| P[Preview exact record counts and consequences]
+  P --> H{Legal hold?}
+  H -->|Yes| B[Block deletion]
+  H -->|No| R[Enter reason, password, and exact organization phrase]
+  R --> L[Acquire connection operation lock]
+  L --> X[Invalidate credentials and delete connection plus related facts transactionally]
+  X --> I[Retain non-identifying immutable deletion receipt]
+  I --> K[PM separately revokes provider-issued key in Anthropic]
+```
+
+Permanent deletion removes the connection, observed identities, sanitized raw events, daily activity, and normalized usage/cost facts linked to the connection through database cascades. The receipt contains no provider organization ID or employee data; it keeps a one-way connection fingerprint, requester, reason, timestamp, and counts. A provider-issued key cannot be revoked by QualiMetrix and must be revoked in Anthropic separately.
 
 ## 10. Acceptance criteria
 
@@ -275,6 +299,7 @@ Machine ingestion uses only the connection-token endpoints documented in section
 - [ ] The PM chooses a monitoring goal; technical collection-mode names are not exposed as business decisions.
 - [ ] The Settings page links to the correct official key location for the selected organization type.
 - [ ] Key discovery displays only the verified organization ID/name, key type, and capabilities; it never returns the secret.
+- [ ] For reporting-key paths, the PM may omit the organization ID and QualiMetrix populates it from the verified provider response.
 - [ ] An API credential is verified with an official reporting endpoint before the connection is marked connected.
 - [ ] A credential with the wrong provider organization ID fails closed.
 - [ ] An invalid, wrong-family, or insufficient-scope key saves no credential or partial connection.
@@ -282,6 +307,7 @@ Machine ingestion uses only the connection-token endpoints documented in section
 - [ ] A PM can add or replace a verified reporting key on an existing OTel-only organization.
 - [ ] API credentials are encrypted at rest and absent from every read response/log.
 - [ ] OTel secrets are hashed at rest, shown only on create/rotate, and rotation immediately invalidates the old token.
+- [ ] Team onboarding clearly branches between verified Console Admin reporting access and managed live telemetry without claiming every Team organization has an Admin API.
 
 ### Collection truthfulness
 
@@ -306,6 +332,11 @@ Machine ingestion uses only the connection-token endpoints documented in section
 - [ ] Connection status distinguishes waiting for telemetry, connected, error, reauthentication required, and disconnected.
 - [ ] Registration, reporting API verification, and live telemetry verification are displayed independently.
 - [ ] Last validation, last telemetry, last sync, and sanitized last error are visible to the PM.
+- [ ] Disconnect requires acknowledgement, stops both collection paths, clears stored credentials, and retains collected history.
+- [ ] Disconnected organizations remain visible so the PM can reconnect or request later erasure.
+- [ ] Permanent deletion previews exact related-record counts and requires a 10–500 character reason, password re-authentication, and exact organization phrase.
+- [ ] Permanent deletion is tenant-scoped, refuses legal-hold records, cannot overlap a running sync, and transactionally removes all connection-linked facts.
+- [ ] A deletion receipt remains without provider organization ID or employee data, and the UI tells the PM to revoke provider-issued keys separately.
 - [ ] Initial API sync backfills 30 days; later syncs overlap two days and paginate fully.
 - [ ] Partial failures do not advance the cursor.
 - [ ] Raw, normalized, and aggregate retention jobs follow the tenant policy (defaults: 90 days/24 months/7 years).

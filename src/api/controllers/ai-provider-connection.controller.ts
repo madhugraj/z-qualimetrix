@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
+import prisma from "../../lib/prisma";
 import {
   ANTHROPIC_CHANNELS,
   ANTHROPIC_COLLECTION_MODES,
@@ -11,7 +13,11 @@ import {
   aiProviderConnectionService,
   discoverAnthropicCredential,
 } from "../services/ai-provider-connection.service";
-import { requestSyncNow } from "../../lib/scheduler";
+import {
+  releaseIntegrationOperation,
+  requestSyncNow,
+  reserveIntegrationOperation,
+} from "../../lib/scheduler";
 import { syncAnthropicConnection } from "../services/anthropic-usage-sync.service";
 
 function tenantId(req: Request): string | null {
@@ -60,11 +66,19 @@ export async function discoverAnthropicReportingCredential(req: Request, res: Re
   if (typeof apiKey !== "string" || !apiKey.trim()) {
     return res.status(400).json({ success: false, error: "Reporting API key is required" });
   }
-  if (typeof externalAccountId !== "string" || !externalAccountId.trim()) {
-    return res.status(400).json({ success: false, error: "Organization ID is required" });
+  if (
+    externalAccountId !== undefined &&
+    externalAccountId !== null &&
+    typeof externalAccountId !== "string"
+  ) {
+    return res.status(400).json({ success: false, error: "Organization ID must be text" });
   }
   try {
-    const data = await discoverAnthropicCredential(credentialSource, apiKey, externalAccountId);
+    const data = await discoverAnthropicCredential(
+      credentialSource,
+      apiKey,
+      typeof externalAccountId === "string" ? externalAccountId : null,
+    );
     return res.json({ success: true, data });
   } catch (error) {
     return res.status(400).json({
@@ -172,6 +186,67 @@ export async function listAnthropicIdentities(req: Request, res: Response) {
   res.json({ success: true, data });
 }
 
+export async function getAnthropicDeletionPreview(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant)
+    return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const data = await aiProviderConnectionService.getDeletionPreview(tenant, req.params.id);
+  if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
+  return res.json({ success: true, data });
+}
+
+export async function permanentlyDeleteAnthropicConnection(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant)
+    return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const reason = typeof req.body?.reason === "string" ? req.body.reason : "";
+  const confirmation = typeof req.body?.confirmation === "string" ? req.body.confirmation : "";
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  if (!password) {
+    return res.status(400).json({ success: false, error: "Password confirmation is required" });
+  }
+
+  const user = await prisma.user.findFirst({
+    where: { id: req.user!.id, tenantId: tenant, isActive: true },
+    select: { passwordHash: true },
+  });
+  if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
+    return res.status(401).json({ success: false, error: "Password verification failed" });
+  }
+
+  // Resolve ownership before touching the process-wide operation lock. This
+  // prevents a tenant from probing or briefly blocking another tenant's ID.
+  const ownedConnection = await aiProviderConnectionService.getAnyForTenant(tenant, req.params.id);
+  if (!ownedConnection)
+    return res.status(404).json({ success: false, error: "Connection not found" });
+
+  if (!reserveIntegrationOperation(req.params.id)) {
+    return res.status(409).json({
+      success: false,
+      error: "A synchronization is running. Wait for it to finish, then retry deletion.",
+    });
+  }
+
+  try {
+    const data = await aiProviderConnectionService.permanentlyDelete(
+      tenant,
+      req.params.id,
+      req.user!.id,
+      reason,
+      confirmation,
+    );
+    if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
+    return res.json({ success: true, data });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Permanent deletion failed";
+    return res
+      .status(/legal hold/i.test(message) ? 409 : 400)
+      .json({ success: false, error: message });
+  } finally {
+    releaseIntegrationOperation(req.params.id);
+  }
+}
+
 export async function rotateAnthropicTelemetryToken(req: Request, res: Response) {
   try {
     const tenant = tenantId(req);
@@ -216,7 +291,21 @@ export async function disconnectAnthropicConnection(req: Request, res: Response)
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
-  const disconnected = await aiProviderConnectionService.disconnect(tenant, req.params.id);
-  if (!disconnected) return res.status(404).json({ success: false, error: "Connection not found" });
-  res.json({ success: true });
+  const ownedConnection = await aiProviderConnectionService.getForTenant(tenant, req.params.id);
+  if (!ownedConnection)
+    return res.status(404).json({ success: false, error: "Connection not found" });
+  if (!reserveIntegrationOperation(req.params.id)) {
+    return res.status(409).json({
+      success: false,
+      error: "A synchronization is running. Wait for it to finish, then retry.",
+    });
+  }
+  try {
+    const disconnected = await aiProviderConnectionService.disconnect(tenant, req.params.id);
+    if (!disconnected)
+      return res.status(404).json({ success: false, error: "Connection not found" });
+    return res.json({ success: true });
+  } finally {
+    releaseIntegrationOperation(req.params.id);
+  }
 }

@@ -106,11 +106,35 @@ test("Console Admin credential discovery proves the organization and reporting e
   }) as typeof fetch;
 
   try {
-    const discovery = await discoverAnthropicCredential("console_admin", "admin-key", "team-org");
+    const discovery = await discoverAnthropicCredential("console_admin", "admin-key");
+    assert.equal(discovery.organization.id, "team-org");
     assert.equal(discovery.organization.name, "Example Team");
     assert.equal(discovery.capabilities.historicalAnalytics, true);
     assert.equal(discovery.capabilities.realtimeEvents, false);
     assert.deepEqual(paths, ["/v1/organizations/me", "/v1/organizations/usage_report/claude_code"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("credential discovery rejects a PM-entered organization ID that belongs to another organization", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/organizations/me")) {
+      return Response.json({ id: "actual-org", name: "Actual Organization" });
+    }
+    if (url.includes("/usage_report/claude_code")) {
+      return Response.json({ data: [], has_more: false, next_page: null });
+    }
+    return Response.json({ error: "wrong endpoint" }, { status: 500 });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      discoverAnthropicCredential("console_admin", "admin-key", "different-org"),
+      /belongs to Anthropic organization actual-org/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

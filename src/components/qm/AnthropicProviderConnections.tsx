@@ -16,6 +16,15 @@ import { GlassPanel } from "@/components/qm/GlassPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/api-client";
 
 interface AnthropicConnection {
@@ -32,6 +41,7 @@ interface AnthropicConnection {
   lastTelemetryAt: string | null;
   lastSyncedAt: string | null;
   lastSyncError: string | null;
+  isActive: boolean;
   identityCount?: number;
   mappedIdentityCount?: number;
   capabilities: { managedOtel?: boolean; apiAdapter?: string | null; costAuthority?: string };
@@ -76,6 +86,23 @@ interface ManagedTelemetryDeployment extends DeploymentReadiness {
 interface DeploymentArtifact {
   connection: AnthropicConnection;
   deployment: ManagedTelemetryDeployment;
+}
+
+interface DeletionPreview {
+  connectionId: string;
+  organizationName: string;
+  externalAccountId: string;
+  legalHold: boolean;
+  confirmationPhrase: string;
+  recordCounts: {
+    connections: number;
+    identities: number;
+    rawEvents: number;
+    dailyActivities: number;
+    usageEvents: number;
+    totalCollectedRecords: number;
+  };
+  consequences: string[];
 }
 
 const CHANNELS = [
@@ -184,17 +211,28 @@ export function AnthropicProviderConnections() {
   const [handoffCopied, setHandoffCopied] = useState(false);
   const [validatingCredential, setValidatingCredential] = useState(false);
   const [credentialDiscovery, setCredentialDiscovery] = useState<CredentialDiscovery | null>(null);
+  const [credentialValidationError, setCredentialValidationError] = useState<string | null>(null);
   const [credentialEditorId, setCredentialEditorId] = useState<string | null>(null);
   const [existingCredentialSource, setExistingCredentialSource] =
     useState<CredentialSource>("console_admin");
   const [existingApiKey, setExistingApiKey] = useState("");
+  const [dataManagementTarget, setDataManagementTarget] = useState<AnthropicConnection | null>(
+    null,
+  );
+  const [deletionPreview, setDeletionPreview] = useState<DeletionPreview | null>(null);
+  const [loadingDeletionPreview, setLoadingDeletionPreview] = useState(false);
+  const [permanentlyDeleting, setPermanentlyDeleting] = useState(false);
+  const [disconnectAcknowledged, setDisconnectAcknowledged] = useState(false);
+  const [deletionReason, setDeletionReason] = useState("");
+  const [deletionConfirmation, setDeletionConfirmation] = useState("");
+  const [deletionPassword, setDeletionPassword] = useState("");
   const [form, setForm] = useState({
     organizationName: "",
     externalAccountId: "",
     domain: "",
     acquisitionChannel: "anthropic_direct",
     planType: "team",
-    monitoringIntent: "complete" as MonitoringIntent,
+    monitoringIntent: "realtime" as MonitoringIntent,
     credentialSource: "console_admin" as CredentialSource,
     apiKey: "",
   });
@@ -235,16 +273,19 @@ export function AnthropicProviderConnections() {
 
   function updateOrganizationId(value: string) {
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     setForm((current) => ({ ...current, externalAccountId: value }));
   }
 
   function updateApiKey(value: string) {
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     setForm((current) => ({ ...current, apiKey: value }));
   }
 
   function updateCredentialSource(value: CredentialSource) {
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     setForm((current) => ({ ...current, credentialSource: value }));
   }
 
@@ -252,6 +293,7 @@ export function AnthropicProviderConnections() {
     const nextPlan = defaultPlan(value);
     const nextSource = reportingCredentialSource(value, nextPlan);
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     setForm((current) => ({
       ...current,
       acquisitionChannel: value,
@@ -265,6 +307,7 @@ export function AnthropicProviderConnections() {
   function updatePlan(value: string) {
     const nextSource = reportingCredentialSource(form.acquisitionChannel, value);
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     setForm((current) => ({
       ...current,
       planType: value,
@@ -275,8 +318,8 @@ export function AnthropicProviderConnections() {
   }
 
   async function validateReportingCredential() {
-    if (!form.externalAccountId.trim() || !form.apiKey.trim()) {
-      toast.error("Organization ID and reporting API key are required");
+    if (!form.apiKey.trim()) {
+      toast.error("Reporting API key is required");
       return;
     }
     if (!reportingApiSupported || supportedCredentialSource !== form.credentialSource) {
@@ -285,6 +328,7 @@ export function AnthropicProviderConnections() {
     }
     setValidatingCredential(true);
     setCredentialDiscovery(null);
+    setCredentialValidationError(null);
     try {
       const response = await apiFetch("/integrations/anthropic/discover", {
         method: "POST",
@@ -299,12 +343,21 @@ export function AnthropicProviderConnections() {
       if (!response.ok || !body.success)
         throw new Error(body.error ?? "Reporting credential validation failed");
       setCredentialDiscovery(body.data);
+      setCredentialValidationError(null);
+      setForm((current) => ({
+        ...current,
+        externalAccountId: body.data.organization.id,
+        organizationName:
+          current.organizationName || body.data.organization.name || "Claude organization",
+      }));
       toast.success("Anthropic reporting access verified", {
         description: `Key belongs to organization ${body.data.organization.id}.`,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Anthropic validation failed";
+      setCredentialValidationError(message);
       toast.error("Anthropic could not verify this reporting key", {
-        description: error instanceof Error ? error.message : undefined,
+        description: message,
       });
     } finally {
       setValidatingCredential(false);
@@ -356,6 +409,7 @@ export function AnthropicProviderConnections() {
         apiKey: "",
       }));
       setCredentialDiscovery(null);
+      setCredentialValidationError(null);
       toast.success(
         body.data.deployment
           ? "Connection created — choose a deployment path below"
@@ -420,7 +474,82 @@ export function AnthropicProviderConnections() {
     }
   }
 
-  async function connectionAction(id: string, action: "sync" | "rotate" | "delete") {
+  function closeDataManagement() {
+    if (permanentlyDeleting) return;
+    setDataManagementTarget(null);
+    setDeletionPreview(null);
+    setDisconnectAcknowledged(false);
+    setDeletionReason("");
+    setDeletionConfirmation("");
+    setDeletionPassword("");
+  }
+
+  async function openDataManagement(connection: AnthropicConnection) {
+    setDataManagementTarget(connection);
+    setDeletionPreview(null);
+    setDisconnectAcknowledged(false);
+    setDeletionReason("");
+    setDeletionConfirmation("");
+    setDeletionPassword("");
+    setLoadingDeletionPreview(true);
+    try {
+      const response = await apiFetch(
+        `/integrations/anthropic/connections/${connection.id}/deletion-preview`,
+      );
+      const body = await response.json();
+      if (!response.ok || !body.success)
+        throw new Error(body.error ?? "Could not calculate deletion impact");
+      setDeletionPreview(body.data);
+    } catch (error) {
+      toast.error("Could not load data-management options", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      setDataManagementTarget(null);
+    } finally {
+      setLoadingDeletionPreview(false);
+    }
+  }
+
+  async function permanentlyDeleteConnection() {
+    if (!dataManagementTarget || !deletionPreview) return;
+    setPermanentlyDeleting(true);
+    try {
+      const response = await apiFetch(
+        `/integrations/anthropic/connections/${dataManagementTarget.id}/permanent-delete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason: deletionReason,
+            confirmation: deletionConfirmation,
+            password: deletionPassword,
+          }),
+        },
+      );
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.error ?? "Permanent deletion failed");
+      toast.success("Claude organization data permanently deleted", {
+        description: `Deletion receipt ${body.data.deletionReceiptId} · ${body.data.recordCounts.totalCollectedRecords} collected records removed.`,
+      });
+      setDataManagementTarget(null);
+      setDeletionPreview(null);
+      setDeletionReason("");
+      setDeletionConfirmation("");
+      setDeletionPassword("");
+      await load();
+    } catch (error) {
+      toast.error("Permanent deletion failed", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setPermanentlyDeleting(false);
+    }
+  }
+
+  async function connectionAction(
+    id: string,
+    action: "sync" | "rotate" | "delete",
+  ): Promise<boolean> {
     setBusyId(id);
     try {
       const path =
@@ -443,10 +572,12 @@ export function AnthropicProviderConnections() {
             : "Connection disconnected",
       );
       await load();
+      return true;
     } catch (error) {
       toast.error(`Claude ${action} failed`, {
         description: error instanceof Error ? error.message : undefined,
       });
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -549,14 +680,22 @@ export function AnthropicProviderConnections() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="anthropic-org-id">Provider organization/account ID</Label>
+            <Label htmlFor="anthropic-org-id">
+              Provider organization/account ID {needsApiKey ? "(optional)" : ""}
+            </Label>
             <Input
               id="anthropic-org-id"
               value={form.externalAccountId}
               onChange={(e) => updateOrganizationId(e.target.value)}
               placeholder="Anthropic org UUID or cloud account/project ID"
-              required
+              required={!needsApiKey}
             />
+            {needsApiKey && (
+              <p className="text-[11px] text-muted-foreground">
+                Leave this blank if you do not know it. QualiMetrix will discover it from the
+                verified reporting key.
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="anthropic-domain">Employee domain (optional)</Label>
@@ -582,6 +721,61 @@ export function AnthropicProviderConnections() {
               ))}
             </select>
           </div>
+          {form.acquisitionChannel === "anthropic_direct" && form.planType === "team" && (
+            <div className="space-y-3 rounded-xl border border-blue-500/30 bg-blue-500/5 p-3 md:col-span-2">
+              <div>
+                <p className="text-xs font-medium">
+                  Claude Team: choose the access you actually have
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  A Team subscription does not automatically guarantee an Admin API key. If your
+                  organization can create one in Claude Console, QualiMetrix can test it and import
+                  daily aggregated reports. Otherwise, use server-managed live monitoring from
+                  Claude.ai—developers take no action.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={form.monitoringIntent === "complete" ? "default" : "outline"}
+                  onClick={() => {
+                    setCredentialDiscovery(null);
+                    setCredentialValidationError(null);
+                    setForm((current) => ({ ...current, monitoringIntent: "complete" }));
+                  }}
+                >
+                  I can access Admin keys
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={form.monitoringIntent === "realtime" ? "default" : "outline"}
+                  onClick={() => {
+                    setCredentialDiscovery(null);
+                    setCredentialValidationError(null);
+                    setForm((current) => ({
+                      ...current,
+                      monitoringIntent: "realtime",
+                      apiKey: "",
+                    }));
+                  }}
+                >
+                  I do not see Admin keys
+                </Button>
+                <Button type="button" size="sm" variant="ghost" asChild className="gap-1.5">
+                  <a
+                    href="https://claude.ai/analytics/claude-code"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Team analytics / CSV export
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="anthropic-plan">Plan / account type</Label>
             <select
@@ -664,8 +858,8 @@ export function AnthropicProviderConnections() {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 {credentialHelp(form.credentialSource).instruction} The key is sent only to the
-                QualiMetrix backend, validated against the entered organization ID, and encrypted
-                before storage.
+                QualiMetrix backend. QualiMetrix discovers the organization, verifies analytics
+                access, and encrypts the key only when you connect it.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -673,7 +867,7 @@ export function AnthropicProviderConnections() {
                   size="sm"
                   variant="outline"
                   onClick={validateReportingCredential}
-                  disabled={validatingCredential || !form.apiKey || !form.externalAccountId}
+                  disabled={validatingCredential || !form.apiKey}
                   className="gap-1.5"
                 >
                   {validatingCredential ? (
@@ -706,6 +900,31 @@ export function AnthropicProviderConnections() {
                   <p className="mt-1 text-muted-foreground">
                     Access confirmed: daily activity, productivity, token usage, and cost data.
                   </p>
+                </div>
+              )}
+              {credentialValidationError && (
+                <div className="rounded-lg border border-critical/30 bg-critical/5 p-3 text-xs">
+                  <p className="font-medium text-critical">Reporting API access was not verified</p>
+                  <p className="mt-1 text-muted-foreground">{credentialValidationError}</p>
+                  {form.acquisitionChannel === "anthropic_direct" && form.planType === "team" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() => {
+                        setCredentialDiscovery(null);
+                        setCredentialValidationError(null);
+                        setForm((current) => ({
+                          ...current,
+                          monitoringIntent: "realtime",
+                          apiKey: "",
+                        }));
+                      }}
+                    >
+                      Continue with managed live monitoring
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -882,7 +1101,7 @@ export function AnthropicProviderConnections() {
 
       <GlassPanel
         title="Registered organizations"
-        subtitle="Registration, reporting API access, and live telemetry are verified independently"
+        subtitle="Active and disconnected organizations remain visible until an authorized PM permanently deletes them"
       >
         {loading ? (
           <div className="flex justify-center py-6">
@@ -922,19 +1141,27 @@ export function AnthropicProviderConnections() {
                           : "border-amber-500/30 bg-amber-500/5 text-amber-600"
                       }`}
                     >
-                      {verificationLabel(overallVerification)}
+                      {connection.isActive
+                        ? verificationLabel(overallVerification)
+                        : "disconnected · history retained"}
                     </span>
                   </div>
 
                   <div className="mt-3 grid gap-2 text-[11px] text-muted-foreground md:grid-cols-3">
                     <span>
                       Reporting API:{" "}
-                      {verificationLabel(connection.verification?.api ?? "not_configured")}
-                      {connection.credentialLabel ? ` · ${connection.credentialLabel}` : ""}
+                      {connection.isActive
+                        ? verificationLabel(connection.verification?.api ?? "not_configured")
+                        : "disabled · credential removed"}
+                      {connection.isActive && connection.credentialLabel
+                        ? ` · ${connection.credentialLabel}`
+                        : ""}
                     </span>
                     <span>
                       Live telemetry:{" "}
-                      {verificationLabel(connection.verification?.telemetry ?? "not_configured")}
+                      {connection.isActive
+                        ? verificationLabel(connection.verification?.telemetry ?? "not_configured")
+                        : "disabled · token invalidated"}
                     </span>
                     <span>
                       Observed people: {connection.identityCount ?? 0} (
@@ -945,28 +1172,32 @@ export function AnthropicProviderConnections() {
                     <span>API key checked: {formatTime(connection.lastValidatedAt)}</span>
                   </div>
 
-                  {!connection.capabilities.apiAdapter && connectionCredentialSource && (
-                    <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
-                      <p className="font-medium">
-                        Organization registered; provider reports are not connected
+                  {connection.isActive &&
+                    !connection.capabilities.apiAdapter &&
+                    connectionCredentialSource && (
+                      <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                        <p className="font-medium">
+                          Organization registered; provider reports are not connected
+                        </p>
+                        <p className="mt-1 text-muted-foreground">
+                          Add a reporting key to import daily user activity, productivity, token,
+                          and cost records.
+                        </p>
+                      </div>
+                    )}
+                  {connection.isActive &&
+                    connection.capabilities.managedOtel &&
+                    !connection.lastTelemetryAt && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        No live event has arrived. Generate and publish the organization deployment
+                        package to verify live monitoring.
                       </p>
-                      <p className="mt-1 text-muted-foreground">
-                        Add a reporting key to import daily user activity, productivity, token, and
-                        cost records.
-                      </p>
-                    </div>
-                  )}
-                  {connection.capabilities.managedOtel && !connection.lastTelemetryAt && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      No live event has arrived. Generate and publish the organization deployment
-                      package to verify live monitoring.
-                    </p>
-                  )}
+                    )}
                   {connection.lastSyncError && (
                     <p className="mt-2 text-xs text-critical">{connection.lastSyncError}</p>
                   )}
 
-                  {editingCredential && connectionCredentialSource && (
+                  {connection.isActive && editingCredential && connectionCredentialSource && (
                     <div className="mt-3 space-y-3 rounded-xl border border-glass-border p-3">
                       <div className="grid gap-3 md:grid-cols-2">
                         <div className="space-y-1.5">
@@ -1056,7 +1287,7 @@ export function AnthropicProviderConnections() {
                   )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {connectionCredentialSource && (
+                    {connection.isActive && connectionCredentialSource && (
                       <Button
                         type="button"
                         size="sm"
@@ -1071,7 +1302,7 @@ export function AnthropicProviderConnections() {
                           : "Add reporting access"}
                       </Button>
                     )}
-                    {connection.capabilities.apiAdapter && (
+                    {connection.isActive && connection.capabilities.apiAdapter && (
                       <Button
                         type="button"
                         size="sm"
@@ -1083,7 +1314,7 @@ export function AnthropicProviderConnections() {
                         <RefreshCw className="h-3.5 w-3.5" /> Sync now
                       </Button>
                     )}
-                    {connection.capabilities.managedOtel && (
+                    {connection.isActive && connection.capabilities.managedOtel && (
                       <Button
                         type="button"
                         size="sm"
@@ -1103,10 +1334,10 @@ export function AnthropicProviderConnections() {
                       size="sm"
                       variant="ghost"
                       disabled={busyId === connection.id}
-                      onClick={() => connectionAction(connection.id, "delete")}
+                      onClick={() => openDataManagement(connection)}
                       className="gap-1.5 text-critical hover:text-critical"
                     >
-                      <Trash2 className="h-3.5 w-3.5" /> Disconnect
+                      <Trash2 className="h-3.5 w-3.5" /> Manage connection & data
                     </Button>
                   </div>
                 </li>
@@ -1115,6 +1346,185 @@ export function AnthropicProviderConnections() {
           </ul>
         )}
       </GlassPanel>
+
+      <Dialog
+        open={Boolean(dataManagementTarget)}
+        onOpenChange={(open) => {
+          if (!open) closeDataManagement();
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Manage Claude organization data</DialogTitle>
+            <DialogDescription>
+              Choose whether to stop future collection while retaining history, or permanently erase
+              this organization and all collected QualiMetrix records.
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingDeletionPreview || !deletionPreview ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-glass-border p-3">
+                <p className="text-sm font-medium">{deletionPreview.organizationName}</p>
+                <p className="mt-1 break-all text-[11px] text-muted-foreground">
+                  {deletionPreview.externalAccountId}
+                </p>
+              </div>
+
+              {dataManagementTarget?.isActive ? (
+                <section className="space-y-3 rounded-xl border border-glass-border p-4">
+                  <div>
+                    <p className="text-sm font-medium">Stop collection and retain history</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Disables API synchronization and invalidates the QualiMetrix telemetry token.
+                      Existing usage, identity, activity, and cost records remain available under
+                      your retention policy. You can permanently erase them later.
+                    </p>
+                  </div>
+                  <label className="flex items-start gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={disconnectAcknowledged}
+                      onChange={(event) => setDisconnectAcknowledged(event.target.checked)}
+                    />
+                    <span>I understand that disconnecting does not delete collected history.</span>
+                  </label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!disconnectAcknowledged || busyId === dataManagementTarget.id}
+                    onClick={async () => {
+                      if (await connectionAction(dataManagementTarget.id, "delete")) {
+                        closeDataManagement();
+                      }
+                    }}
+                  >
+                    {busyId === dataManagementTarget.id && (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    )}
+                    Stop collection and retain history
+                  </Button>
+                </section>
+              ) : (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs">
+                  Collection is already stopped. The records below are retained until you
+                  permanently delete them.
+                </div>
+              )}
+
+              <section className="space-y-4 rounded-xl border border-critical/30 bg-critical/5 p-4">
+                <div>
+                  <p className="text-sm font-medium text-critical">Permanently delete all data</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This cannot be undone. QualiMetrix keeps only a non-identifying deletion receipt
+                    with the requester, reason, timestamp, and record counts.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                  {[
+                    ["Observed identities", deletionPreview.recordCounts.identities],
+                    ["Raw provider events", deletionPreview.recordCounts.rawEvents],
+                    ["Daily activity rows", deletionPreview.recordCounts.dailyActivities],
+                    ["Normalized usage rows", deletionPreview.recordCounts.usageEvents],
+                    ["Total collected records", deletionPreview.recordCounts.totalCollectedRecords],
+                  ].map(([label, count]) => (
+                    <div key={String(label)} className="rounded-lg border border-glass-border p-2">
+                      <p className="text-[11px] text-muted-foreground">{label}</p>
+                      <p className="mt-1 text-sm font-medium">{count}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {deletionPreview.legalHold ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+                    This organization is under legal hold. Permanent deletion is blocked until the
+                    authorized governance process removes the hold.
+                  </div>
+                ) : (
+                  <>
+                    <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                      {deletionPreview.consequences.map((consequence) => (
+                        <li key={consequence}>{consequence}</li>
+                      ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground">
+                      QualiMetrix cannot revoke a provider-issued Admin or Analytics key. Revoke it
+                      separately in Anthropic after deletion.
+                    </p>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="anthropic-deletion-reason">Business reason</Label>
+                      <Textarea
+                        id="anthropic-deletion-reason"
+                        value={deletionReason}
+                        maxLength={500}
+                        onChange={(event) => setDeletionReason(event.target.value)}
+                        placeholder="Minimum 10 characters. Do not include employee or customer data."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="anthropic-deletion-password">Your QualiMetrix password</Label>
+                      <Input
+                        id="anthropic-deletion-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={deletionPassword}
+                        onChange={(event) => setDeletionPassword(event.target.value)}
+                        placeholder="Required for re-authentication"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="anthropic-deletion-confirmation">
+                        Type <span className="font-mono">{deletionPreview.confirmationPhrase}</span>
+                      </Label>
+                      <Input
+                        id="anthropic-deletion-confirmation"
+                        value={deletionConfirmation}
+                        onChange={(event) => setDeletionConfirmation(event.target.value)}
+                        autoComplete="off"
+                      />
+                    </div>
+                  </>
+                )}
+              </section>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closeDataManagement}
+              disabled={permanentlyDeleting}
+            >
+              Cancel
+            </Button>
+            {deletionPreview && !deletionPreview.legalHold && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={permanentlyDeleteConnection}
+                disabled={
+                  permanentlyDeleting ||
+                  deletionReason.trim().length < 10 ||
+                  !deletionPassword ||
+                  deletionConfirmation !== deletionPreview.confirmationPhrase
+                }
+                className="gap-1.5"
+              >
+                {permanentlyDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
+                Permanently delete organization data
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

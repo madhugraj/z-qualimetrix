@@ -1,7 +1,7 @@
-import cron from 'node-cron';
-import type { AiProviderConnection, Integration } from '@prisma/client';
-import integrationService, { IntegrationProvider } from '../api/services/integration.service';
-import aiProviderConnectionService from '../api/services/ai-provider-connection.service';
+import cron from "node-cron";
+import type { AiProviderConnection, Integration } from "@prisma/client";
+import integrationService, { IntegrationProvider } from "../api/services/integration.service";
+import aiProviderConnectionService from "../api/services/ai-provider-connection.service";
 
 /**
  * node-cron only supports fixed cron expressions, not per-row dynamic
@@ -10,7 +10,7 @@ import aiProviderConnectionService from '../api/services/ai-provider-connection.
  * tick: every minute, ask the DB which integrations are actually due, and
  * only dispatch those.
  */
-const TICK_CRON_EXPRESSION = '* * * * *';
+const TICK_CRON_EXPRESSION = "* * * * *";
 const MAX_CONCURRENT_SYNCS = 8;
 
 type SyncHandler = (integration: Integration) => Promise<void>;
@@ -28,7 +28,10 @@ export function getSyncHandler(provider: IntegrationProvider): SyncHandler | und
   return syncHandlers[provider];
 }
 
-export function registerAiProviderSyncHandler(vendor: string, handler: AiProviderSyncHandler): void {
+export function registerAiProviderSyncHandler(
+  vendor: string,
+  handler: AiProviderSyncHandler,
+): void {
   aiProviderSyncHandlers[vendor] = handler;
 }
 
@@ -39,36 +42,61 @@ export function registerAiProviderSyncHandler(vendor: string, handler: AiProvide
 // cross-process coordination (a v2 concern requiring BullMQ+Redis, not this).
 const runningIntegrationIds = new Set<string>();
 
+/**
+ * Reserves a connection for an operation that must not overlap with sync
+ * (for example credential removal or permanent deletion). The lock is
+ * process-local, matching the scheduler's current single-process contract.
+ */
+export function reserveIntegrationOperation(integrationId: string): boolean {
+  if (runningIntegrationIds.has(integrationId)) return false;
+  runningIntegrationIds.add(integrationId);
+  return true;
+}
+
+export function releaseIntegrationOperation(integrationId: string): void {
+  runningIntegrationIds.delete(integrationId);
+}
+
 async function runSync(integration: Integration): Promise<void> {
   const handler = syncHandlers[integration.provider as IntegrationProvider];
   if (!handler) {
-    console.warn(`[scheduler] No sync handler registered for provider "${integration.provider}" — skipping integration ${integration.id}`);
+    console.warn(
+      `[scheduler] No sync handler registered for provider "${integration.provider}" — skipping integration ${integration.id}`,
+    );
     return;
   }
 
-  runningIntegrationIds.add(integration.id);
+  if (!reserveIntegrationOperation(integration.id)) return;
   try {
     await handler(integration);
   } catch (err) {
-    console.error(`[scheduler] Sync failed for integration ${integration.id} (${integration.provider}):`, err);
+    console.error(
+      `[scheduler] Sync failed for integration ${integration.id} (${integration.provider}):`,
+      err,
+    );
   } finally {
-    runningIntegrationIds.delete(integration.id);
+    releaseIntegrationOperation(integration.id);
   }
 }
 
 async function runAiProviderSync(connection: AiProviderConnection): Promise<void> {
   const handler = aiProviderSyncHandlers[connection.vendor];
   if (!handler) {
-    console.warn(`[scheduler] No AI provider sync handler registered for vendor "${connection.vendor}" — skipping ${connection.id}`);
+    console.warn(
+      `[scheduler] No AI provider sync handler registered for vendor "${connection.vendor}" — skipping ${connection.id}`,
+    );
     return;
   }
-  runningIntegrationIds.add(connection.id);
+  if (!reserveIntegrationOperation(connection.id)) return;
   try {
     await handler(connection);
   } catch (err) {
-    console.error(`[scheduler] AI provider sync failed for ${connection.id} (${connection.vendor}):`, err);
+    console.error(
+      `[scheduler] AI provider sync failed for ${connection.id} (${connection.vendor}):`,
+      err,
+    );
   } finally {
-    runningIntegrationIds.delete(connection.id);
+    releaseIntegrationOperation(connection.id);
   }
 }
 
@@ -78,12 +106,12 @@ async function runAiProviderSync(connection: AiProviderConnection): Promise<void
  * this call, an earlier manual call, or the scheduled tick.
  */
 export function requestSyncNow(integrationId: string, run: () => Promise<void>): boolean {
-  if (runningIntegrationIds.has(integrationId)) return false;
-
-  runningIntegrationIds.add(integrationId);
+  if (!reserveIntegrationOperation(integrationId)) return false;
   run()
-    .catch((err) => console.error(`[scheduler] Manual sync failed for integration ${integrationId}:`, err))
-    .finally(() => runningIntegrationIds.delete(integrationId));
+    .catch((err) =>
+      console.error(`[scheduler] Manual sync failed for integration ${integrationId}:`, err),
+    )
+    .finally(() => releaseIntegrationOperation(integrationId));
   return true;
 }
 
@@ -112,7 +140,9 @@ async function dispatchDueIntegrations(): Promise<void> {
     return now >= lastSyncedAtMs + connection.syncFrequencyMinutes * 60_000;
   });
   for (let i = 0; i < dueAiProviders.length; i += MAX_CONCURRENT_SYNCS) {
-    await Promise.allSettled(dueAiProviders.slice(i, i + MAX_CONCURRENT_SYNCS).map(runAiProviderSync));
+    await Promise.allSettled(
+      dueAiProviders.slice(i, i + MAX_CONCURRENT_SYNCS).map(runAiProviderSync),
+    );
   }
 }
 
@@ -123,8 +153,10 @@ export function startScheduler(): void {
   started = true;
 
   cron.schedule(TICK_CRON_EXPRESSION, () => {
-    dispatchDueIntegrations().catch((err) => console.error('[scheduler] Tick failed:', err));
+    dispatchDueIntegrations().catch((err) => console.error("[scheduler] Tick failed:", err));
   });
 
-  console.log('[scheduler] Started — polling for due integrations every minute (single-process only, see scheduler.ts)');
+  console.log(
+    "[scheduler] Started — polling for due integrations every minute (single-process only, see scheduler.ts)",
+  );
 }

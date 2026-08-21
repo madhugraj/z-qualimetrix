@@ -171,10 +171,11 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 
 export async function validateAnthropicCredential(
   apiKey: string,
-  externalAccountId: string,
+  expectedOrganizationId: string | null,
   adapter: "enterprise" | "console",
 ) {
   const date = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  let organizationId: string | null = null;
   let organizationName: string | null = null;
 
   if (adapter === "console") {
@@ -191,9 +192,10 @@ export async function validateAnthropicCredential(
     }
     if (typeof org.id !== "string")
       throw new Error("Anthropic organization validation returned no organization ID.");
-    if (org.id !== externalAccountId) {
+    organizationId = org.id;
+    if (expectedOrganizationId && org.id !== expectedOrganizationId) {
       throw new Error(
-        `Credential belongs to Anthropic organization ${org.id}, not ${externalAccountId}.`,
+        `Credential belongs to Anthropic organization ${org.id}, not ${expectedOrganizationId}.`,
       );
     }
     organizationName = typeof org.name === "string" ? org.name : null;
@@ -218,9 +220,10 @@ export async function validateAnthropicCredential(
     if (typeof capabilityBody.organization_id !== "string") {
       throw new Error("Enterprise Analytics validation returned no organization ID.");
     }
-    if (capabilityBody.organization_id !== externalAccountId) {
+    organizationId = capabilityBody.organization_id;
+    if (expectedOrganizationId && capabilityBody.organization_id !== expectedOrganizationId) {
       throw new Error(
-        `Credential belongs to Anthropic organization ${capabilityBody.organization_id}, not ${externalAccountId}.`,
+        `Credential belongs to Anthropic organization ${capabilityBody.organization_id}, not ${expectedOrganizationId}.`,
       );
     }
 
@@ -241,7 +244,10 @@ export async function validateAnthropicCredential(
     }
   }
 
-  return { id: externalAccountId, name: organizationName };
+  if (!organizationId) {
+    throw new Error("Anthropic credential validation returned no organization ID.");
+  }
+  return { id: organizationId, name: organizationName };
 }
 
 function adapterForCredentialSource(source: AnthropicCredentialSource): "enterprise" | "console" {
@@ -251,12 +257,12 @@ function adapterForCredentialSource(source: AnthropicCredentialSource): "enterpr
 export async function discoverAnthropicCredential(
   source: AnthropicCredentialSource,
   apiKey: string,
-  expectedOrganizationId: string,
+  expectedOrganizationId?: string | null,
 ) {
   const adapter = adapterForCredentialSource(source);
   const organization = await validateAnthropicCredential(
     apiKey.trim(),
-    expectedOrganizationId.trim(),
+    expectedOrganizationId?.trim() || null,
     adapter,
   );
   return {
@@ -452,6 +458,20 @@ function publicConnection(connection: ConnectionWithCounts) {
   };
 }
 
+function connectionHasLegalHold(connection: AiProviderConnection): boolean {
+  if (
+    !connection.config ||
+    typeof connection.config !== "object" ||
+    Array.isArray(connection.config)
+  )
+    return false;
+  return (connection.config as Prisma.JsonObject).legalHold === true;
+}
+
+function deletionConfirmationPhrase(organizationName: string): string {
+  return `DELETE ${organizationName}`;
+}
+
 class AiProviderConnectionService {
   async createAnthropic(input: CreateAnthropicConnectionInput) {
     const capabilities = resolveAnthropicCapabilities(input);
@@ -629,7 +649,9 @@ class AiProviderConnectionService {
 
   async listAnthropic(tenantId: string) {
     const connections = await prisma.aiProviderConnection.findMany({
-      where: { tenantId, vendor: "anthropic", isActive: true },
+      // Keep disconnected records visible so an authorized PM can reconnect
+      // them or permanently erase the retained history later.
+      where: { tenantId, vendor: "anthropic" },
       include: {
         _count: { select: { identities: true } },
         identities: { where: { userId: { not: null } }, select: { id: true } },
@@ -642,6 +664,125 @@ class AiProviderConnectionService {
   async getForTenant(tenantId: string, id: string) {
     return prisma.aiProviderConnection.findFirst({
       where: { id, tenantId, vendor: "anthropic", isActive: true },
+    });
+  }
+
+  async getAnyForTenant(tenantId: string, id: string) {
+    return prisma.aiProviderConnection.findFirst({
+      where: { id, tenantId, vendor: "anthropic" },
+    });
+  }
+
+  async getDeletionPreview(tenantId: string, connectionId: string) {
+    const connection = await this.getAnyForTenant(tenantId, connectionId);
+    if (!connection) return null;
+    const [identities, rawEvents, dailyActivities, usageEvents] = await Promise.all([
+      prisma.aiProviderIdentity.count({ where: { connectionId } }),
+      prisma.aiProviderRawEvent.count({ where: { connectionId } }),
+      prisma.aiProviderDailyActivity.count({ where: { connectionId } }),
+      prisma.aiUsageEvent.count({ where: { providerConnectionId: connectionId } }),
+    ]);
+    return {
+      connectionId: connection.id,
+      organizationName: connection.organizationName,
+      externalAccountId: connection.externalAccountId,
+      vendor: connection.vendor,
+      product: connection.product,
+      active: connection.isActive,
+      legalHold: connectionHasLegalHold(connection),
+      confirmationPhrase: deletionConfirmationPhrase(connection.organizationName),
+      recordCounts: {
+        connections: 1,
+        identities,
+        rawEvents,
+        dailyActivities,
+        usageEvents,
+        totalCollectedRecords: identities + rawEvents + dailyActivities + usageEvents,
+      },
+      consequences: [
+        "Provider synchronization stops immediately.",
+        "The QualiMetrix telemetry credential is permanently invalidated.",
+        "Observed identities, raw events, daily activity, and normalized usage/cost facts are deleted.",
+        "Anthropic credentials must still be revoked separately in the Anthropic administration console.",
+      ],
+    };
+  }
+
+  async permanentlyDelete(
+    tenantId: string,
+    connectionId: string,
+    requestedBy: string,
+    reason: string,
+    confirmation: string,
+  ) {
+    const normalizedReason = reason.trim();
+    if (normalizedReason.length < 10 || normalizedReason.length > 500) {
+      throw new Error("Deletion reason must be between 10 and 500 characters.");
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const connection = await tx.aiProviderConnection.findFirst({
+        where: { id: connectionId, tenantId, vendor: "anthropic" },
+      });
+      if (!connection) return null;
+      if (connectionHasLegalHold(connection)) {
+        throw new Error(
+          "This organization is under legal hold. Remove the hold through the authorized governance process before deletion.",
+        );
+      }
+      if (confirmation !== deletionConfirmationPhrase(connection.organizationName)) {
+        throw new Error("Deletion confirmation phrase does not match.");
+      }
+
+      // Disable both collection paths before counting/deleting. A concurrent
+      // ingest that already resolved the old token will fail its FK insert
+      // after the connection is deleted by this transaction.
+      await tx.aiProviderConnection.update({
+        where: { id: connection.id },
+        data: {
+          isActive: false,
+          status: "deleting",
+          encryptedCredential: null,
+          telemetryTokenHash: null,
+        },
+      });
+
+      const [identities, rawEvents, dailyActivities, usageEvents] = await Promise.all([
+        tx.aiProviderIdentity.count({ where: { connectionId } }),
+        tx.aiProviderRawEvent.count({ where: { connectionId } }),
+        tx.aiProviderDailyActivity.count({ where: { connectionId } }),
+        tx.aiUsageEvent.count({ where: { providerConnectionId: connectionId } }),
+      ]);
+      const recordCounts = {
+        connections: 1,
+        identities,
+        rawEvents,
+        dailyActivities,
+        usageEvents,
+        totalCollectedRecords: identities + rawEvents + dailyActivities + usageEvents,
+      };
+      const completedAt = new Date();
+      const audit = await tx.aiProviderDeletionAudit.create({
+        data: {
+          tenantId,
+          requestedBy,
+          vendor: connection.vendor,
+          product: connection.product,
+          connectionFingerprint: hashToken(`${tenantId}:${connection.vendor}:${connection.id}`),
+          reason: normalizedReason,
+          recordCounts: recordCounts as unknown as Prisma.InputJsonValue,
+          status: "completed",
+          requestedAt: completedAt,
+          completedAt,
+        },
+      });
+
+      await tx.aiProviderConnection.delete({ where: { id: connection.id } });
+      return {
+        deletionReceiptId: audit.id,
+        completedAt: audit.completedAt,
+        recordCounts,
+      };
     });
   }
 
