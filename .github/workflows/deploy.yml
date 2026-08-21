@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - feature/jira-azure-devops-clean
 
 jobs:
@@ -27,10 +28,14 @@ jobs:
           export VITE_API_URL=https://qubeiq.yavar.ai/api
           npm run build
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
           project_id: yavar-studio
 
       - name: Build and push Docker image
