@@ -1,0 +1,59 @@
+name: Deploy Mixed Content Fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/jira-azure-devops-clean
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Build application
+        run: |
+          cd z-qualimetrix
+          npm install --legacy-peer-deps
+          npx prisma generate
+          export NITRO_PRESET=node-server
+          export VITE_API_URL=https://qubeiq.yavar.ai/api
+          npm run build
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: yavar-studio
+
+      - name: Build and push Docker image
+        run: |
+          cd z-qualimetrix
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          docker build \
+            --build-arg VITE_API_URL=https://qubeiq.yavar.ai/api \
+            -t asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:${COMMIT_SHA} \
+            -t asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:latest \
+            .
+          docker push asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:${COMMIT_SHA}
+          docker push asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:latest
+
+      - name: Deploy to GKE
+        run: |
+          gcloud container clusters get-credentials qualimetrix --region=asia-south1 --project=yavar-studio
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          kubectl set image deployment/qualimetrix qualimetrix=asia-south1-docker.pkg.dev/yavar-studio/yavar-platform/qualimetrix:${COMMIT_SHA} -n z-qualimetrix
+          kubectl annotate deployment qualimetrix build-id=${COMMIT_SHA}-$(date +%s) -n z-qualimetrix --overwrite
+
+      - name: Verify deployment
+        run: |
+          gcloud container clusters get-credentials qualimetrix --region=asia-south1 --project=yavar-studio
+          kubectl rollout status deployment qualimetrix -n z-qualimetrix
+          curl -f https://qubeiq.yavar.ai/api/v1/health || exit 1
