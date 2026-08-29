@@ -262,7 +262,14 @@ function Dashboard() {
             subtitle="Story points against bugs created / resolved"
             className="xl:col-span-2"
           >
-            <VelocityChart data={velocityTrend.data} />
+            <VelocityChart
+              data={velocityTrend.data}
+              emptyMessage={
+                currentProduct
+                  ? `No sprint data synced for ${currentProduct.name} yet.`
+                  : "Select a product to see its velocity trend."
+              }
+            />
           </GlassPanel>
           <GlassPanel
             title="Related / similar bugs"
@@ -342,7 +349,14 @@ function Dashboard() {
             subtitle={currentProduct ? `${currentProduct.name} · velocity vs defect flow` : "Select a product for velocity trend"}
             className="xl:col-span-2"
           >
-            <VelocityChart data={velocityTrend.data} />
+            <VelocityChart
+              data={velocityTrend.data}
+              emptyMessage={
+                currentProduct
+                  ? `No sprint data synced for ${currentProduct.name} yet.`
+                  : "Select a product to see its velocity trend."
+              }
+            />
           </GlassPanel>
           <GlassPanel
             title="Portfolio defect heatmap"

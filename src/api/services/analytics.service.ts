@@ -51,7 +51,16 @@ export class AnalyticsService {
       this.calculateMttrTrend(productId, tenantId, startDate, endDate)
     ]);
 
-    if (resolvedBugs.length === 0) {
+    // A resolvedAt earlier than createdAt is a timestamp anomaly, not a bug
+    // resolved instantly or in negative time — most commonly a backfilled/
+    // historical issue whose createdAt got stamped at sync time rather than
+    // its real Jira creation date. Drop it rather than let it corrupt the
+    // average with a negative resolution time.
+    const validResolvedBugs = resolvedBugs.filter(
+      (bug) => bug.resolvedAt && new Date(bug.resolvedAt).getTime() >= new Date(bug.createdAt).getTime()
+    );
+
+    if (validResolvedBugs.length === 0) {
       return {
         overall: 0,
         byPriority: {},
@@ -62,10 +71,9 @@ export class AnalyticsService {
     }
 
     // Calculate MTTR in hours
-    const resolutionTimes = resolvedBugs.map(bug => {
-      if (!bug.resolvedAt) return 0;
+    const resolutionTimes = validResolvedBugs.map(bug => {
       const created = new Date(bug.createdAt).getTime();
-      const resolved = new Date(bug.resolvedAt).getTime();
+      const resolved = new Date(bug.resolvedAt!).getTime();
       return (resolved - created) / (1000 * 60 * 60); // Convert to hours
     });
 
@@ -75,8 +83,8 @@ export class AnalyticsService {
     const byPriority: Record<string, number> = {};
     const bySprint: Record<string, number> = {};
 
-    for (let i = 0; i < resolvedBugs.length; i++) {
-      const bug = resolvedBugs[i];
+    for (let i = 0; i < validResolvedBugs.length; i++) {
+      const bug = validResolvedBugs[i];
       const resolutionTime = resolutionTimes[i];
 
       // By priority
@@ -132,7 +140,7 @@ export class AnalyticsService {
       });
 
       const times = resolvedBugs
-        .filter((bug) => bug.resolvedAt)
+        .filter((bug) => bug.resolvedAt && new Date(bug.resolvedAt).getTime() >= new Date(bug.createdAt).getTime())
         .map((bug) => (new Date(bug.resolvedAt!).getTime() - new Date(bug.createdAt).getTime()) / (1000 * 60 * 60));
 
       const avg = times.length > 0 ? times.reduce((sum, t) => sum + t, 0) / times.length : 0;

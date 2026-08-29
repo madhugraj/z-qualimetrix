@@ -292,6 +292,11 @@ export async function syncProduct(integration: Integration, product: Product): P
           title: f.summary ?? '(no title)', description: f.description ? JSON.stringify(f.description) : null,
           assigneeId, sprintId, storyPoints,
           createdBy: systemUserId,
+          // Jira's real creation date, not Prisma's now()-on-insert default —
+          // a backfilled/historical issue synced today must keep its actual
+          // creation date, or MTTR (createdAt vs resolvedAt) comes out
+          // negative for anything resolved before this app ever synced it.
+          createdAt: f.created ? new Date(f.created) : undefined,
           resolvedAt: f.resolutiondate ? new Date(f.resolutiondate) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
         },
@@ -299,6 +304,10 @@ export async function syncProduct(integration: Integration, product: Product): P
           type: workItemType, status, priority,
           title: f.summary ?? '(no title)',
           assigneeId, sprintId, storyPoints,
+          // Also corrected on every update (not just create) so the very next
+          // sync cycle repairs rows that were written before this fix existed,
+          // instead of leaving already-synced issues permanently wrong.
+          createdAt: f.created ? new Date(f.created) : undefined,
           resolvedAt: f.resolutiondate ? new Date(f.resolutiondate) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
         },

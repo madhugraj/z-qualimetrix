@@ -64,7 +64,14 @@ function Reports() {
           <MttrChart data={mttr.data?.trend} />
         </GlassPanel>
         <GlassPanel title="Quality velocity" subtitle="Velocity vs defect flow">
-          <VelocityChart data={velocityTrend.data} />
+          <VelocityChart
+            data={velocityTrend.data}
+            emptyMessage={
+              currentProduct
+                ? `No sprint data synced for ${currentProduct.name} yet.`
+                : "Select a product to see its velocity trend."
+            }
+          />
         </GlassPanel>
         <GlassPanel title="Portfolio comparison" subtitle="Health score per active product">
           <ProductHealthList products={tenantAnalytics.data?.products ?? []} />

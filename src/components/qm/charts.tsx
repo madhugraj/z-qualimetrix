@@ -132,10 +132,21 @@ export interface VelocityTrendPoint {
   resolved: number;
 }
 
-/** No mock fallback — see ExecutionTrendChart. */
-export function VelocityChart({ data }: { data?: VelocityTrendPoint[] }) {
+/**
+ * No mock fallback — see ExecutionTrendChart. `emptyMessage` is caller-
+ * supplied rather than hardcoded: an empty result means either "no product
+ * selected" or "this product has no sprints synced" — those are different
+ * facts and the wrong one read as an instruction to do something already done.
+ */
+export function VelocityChart({
+  data,
+  emptyMessage = "Select a product to see its velocity trend.",
+}: {
+  data?: VelocityTrendPoint[];
+  emptyMessage?: string;
+}) {
   if (!data || data.length === 0) {
-    return <EmptyChartState message="Select a product to see its velocity trend." />;
+    return <EmptyChartState message={emptyMessage} />;
   }
 
   return (
