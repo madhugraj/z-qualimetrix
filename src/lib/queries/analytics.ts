@@ -133,7 +133,7 @@ export function useTeamProductivity(tenantId?: string) {
 export interface TenantAnalyticsResult {
   tenant: { id: string; name: string; slug: string };
   teamProductivity: TeamProductivityResult;
-  products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean }>;
+  products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean; totalWorkItems: number }>;
   overallQualityScore: number;
   /** False when not a single active product has any real signal yet. */
   hasData: boolean;

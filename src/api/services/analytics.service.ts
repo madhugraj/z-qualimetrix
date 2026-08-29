@@ -589,7 +589,7 @@ export class AnalyticsService {
   async getTenantAnalytics(tenantId: string, startDate?: Date, endDate?: Date): Promise<{
     tenant: { id: string; name: string; slug: string };
     teamProductivity: Awaited<ReturnType<typeof this.calculateTeamProductivity>>;
-    products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean }>;
+    products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean; totalWorkItems: number }>;
     overallQualityScore: number;
     /** False when not a single active product has any real signal yet. */
     hasData: boolean;
@@ -609,12 +609,19 @@ export class AnalyticsService {
     });
 
     // Get analytics for each product — same "average only what has data"
-    // approach as calculateReleaseReadiness, so a product with no synced
-    // activity reports as no-data rather than a fabricated middle score.
+    // approach as calculateReleaseReadiness, so a product with no bug/test
+    // signal reports as no-score rather than a fabricated middle value.
+    // `totalWorkItems` is tracked separately so a product that's genuinely
+    // synced (real backlog: stories/tasks/features) but has zero bugs/tests
+    // yet reads as "no defects logged" rather than "not synced at all" —
+    // those are very different claims a product owner needs told apart.
     const productAnalytics = await Promise.all(
       products.map(async (product) => {
         try {
-          const analytics = await this.getProductAnalytics(product.id, startDate, endDate);
+          const [analytics, totalWorkItems] = await Promise.all([
+            this.getProductAnalytics(product.id, startDate, endDate),
+            this.prisma.workItem.count({ where: { productId: product.id } })
+          ]);
           const parts: Array<{ value: number; weight: number }> = [];
           if (analytics.defectLeakage.hasData) parts.push({ value: 100 - analytics.defectLeakage.rate, weight: 0.3 });
           if (analytics.testMetrics.hasData) parts.push({ value: analytics.testMetrics.passRate, weight: 0.4 });
@@ -626,9 +633,9 @@ export class AnalyticsService {
             ? Math.round(parts.reduce((sum, p) => sum + p.value * p.weight, 0) / totalWeight)
             : 0;
 
-          return { productId: product.id, productName: product.name, healthScore, hasData };
+          return { productId: product.id, productName: product.name, healthScore, hasData, totalWorkItems };
         } catch (error) {
-          return { productId: product.id, productName: product.name, healthScore: 0, hasData: false };
+          return { productId: product.id, productName: product.name, healthScore: 0, hasData: false, totalWorkItems: 0 };
         }
       })
     );

@@ -3,6 +3,10 @@ export interface ProductHealth {
   productName: string;
   healthScore: number;
   hasData: boolean;
+  /** Real synced work items (stories/tasks/bugs) regardless of type — lets
+   * "no bugs/tests reported yet" (real backlog, no quality signal) read
+   * differently from "nothing synced for this product at all." */
+  totalWorkItems: number;
 }
 
 function scoreTone(score: number): string {
@@ -21,11 +25,13 @@ export function ProductHealthList({ products }: { products: ProductHealth[] }) {
     return <p className="text-sm text-muted-foreground">No active products yet.</p>;
   }
 
-  // Scored products first (highest health first), then products with no
-  // signal at all — grouping "no data" together rather than interleaving it
-  // at a misleading rank.
+  // Scored products first (highest health first), then products with real
+  // backlog but no quality signal, then genuinely unsynced products last.
   const sorted = [...products].sort((a, b) => {
     if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
+    if (!a.hasData && a.totalWorkItems > 0 !== b.totalWorkItems > 0) {
+      return a.totalWorkItems > 0 ? -1 : 1;
+    }
     return b.healthScore - a.healthScore;
   });
 
@@ -49,8 +55,12 @@ export function ProductHealthList({ products }: { products: ProductHealth[] }) {
                 {p.healthScore}
               </span>
             </div>
+          ) : p.totalWorkItems > 0 ? (
+            <span className="text-xs text-muted-foreground">
+              {p.totalWorkItems} items synced · no defects/tests logged yet
+            </span>
           ) : (
-            <span className="text-xs text-muted-foreground">No data yet</span>
+            <span className="text-xs text-muted-foreground">Not synced yet</span>
           )}
         </li>
       ))}
