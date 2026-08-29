@@ -253,6 +253,103 @@ export async function listProjects(req: Request, res: Response) {
   });
 }
 
+export async function listJiraUsers(req: Request, res: Response) {
+  const tenantId = getTenantId(req);
+  const tokens = await integrationService.getDecryptedTokens(tenantId, 'jira');
+  if (!tokens) return res.status(404).json({ success: false, error: 'Jira integration not connected' });
+
+  const cloudId = (tokens.externalMetadata as any)?.cloudId;
+  if (!cloudId) return res.status(409).json({ success: false, error: 'Jira site is not configured' });
+
+  const users: Array<{ accountId: string; displayName: string; emailAddress: string | null; avatarUrl: string | null }> = [];
+  let startAt = 0;
+  const maxResults = 100;
+
+  while (true) {
+    const response = await fetch(
+      `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/users/search?startAt=${startAt}&maxResults=${maxResults}`,
+      { headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' } },
+    );
+    if (!response.ok) {
+      return res.status(502).json({ success: false, error: 'Failed to fetch Jira users' });
+    }
+    const page = await response.json() as any[];
+    users.push(...page
+      .filter((u: any) => u.accountType === 'atlassian' && u.active !== false)
+      .map((u: any) => ({
+        accountId: u.accountId,
+        displayName: u.displayName || 'Unknown user',
+        emailAddress: u.emailAddress || null,
+        avatarUrl: u.avatarUrls?.['48x48'] || null,
+      })));
+    if (page.length < maxResults) break;
+    startAt += page.length;
+  }
+
+  return res.json({ success: true, data: users });
+}
+
+export async function saveJiraSelection(req: Request, res: Response) {
+  const tenantId = getTenantId(req);
+  const { projectIds, userAccountIds } = req.body ?? {};
+  if (!Array.isArray(projectIds) || !projectIds.every((id) => typeof id === 'string')) {
+    return res.status(400).json({ success: false, error: 'projectIds must be an array of strings' });
+  }
+  if (!Array.isArray(userAccountIds) || !userAccountIds.every((id) => typeof id === 'string')) {
+    return res.status(400).json({ success: false, error: 'userAccountIds must be an array of strings' });
+  }
+
+  const integration = await prisma.integration.findUnique({
+    where: { tenantId_provider: { tenantId, provider: 'jira' } },
+  });
+  if (!integration || !integration.isActive) {
+    return res.status(404).json({ success: false, error: 'Jira integration not connected' });
+  }
+
+  const tokens = await integrationService.getDecryptedTokens(tenantId, 'jira');
+  const cloudId = (tokens?.externalMetadata as any)?.cloudId;
+  if (!tokens || !cloudId) {
+    return res.status(409).json({ success: false, error: 'Jira site is not configured' });
+  }
+  const projectsResponse = await fetch(
+    `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/project/search?maxResults=1000`,
+    { headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' } },
+  );
+  if (!projectsResponse.ok) {
+    return res.status(502).json({ success: false, error: 'Failed to validate Jira projects' });
+  }
+  const availableProjects = ((await projectsResponse.json()).values ?? []) as Array<{ id: string; key: string; name: string }>;
+  const selectedProjects = availableProjects.filter((project) => projectIds.includes(String(project.id)));
+  if (selectedProjects.length !== new Set(projectIds).size) {
+    return res.status(400).json({ success: false, error: 'One or more selected Jira projects are not accessible' });
+  }
+
+  // A selected Jira project becomes a QualiMetrix product automatically, so
+  // the next scheduled sync has a concrete destination for its work items.
+  await prisma.$transaction(selectedProjects.map((project) => prisma.product.upsert({
+    where: { tenantId_key: { tenantId, key: project.key } },
+    create: {
+      tenantId,
+      name: project.name,
+      key: project.key,
+      jiraProjectKey: project.key,
+      jiraProjectId: String(project.id),
+    },
+    update: {
+      jiraProjectKey: project.key,
+      jiraProjectId: String(project.id),
+      isActive: true,
+    },
+  })));
+
+  await integrationService.updateExternalMetadata(tenantId, 'jira', {
+    selectedProjectIds: [...new Set(projectIds)],
+    selectedUserAccountIds: [...new Set(userAccountIds)],
+    selectionUpdatedAt: new Date().toISOString(),
+  });
+  return res.json({ success: true });
+}
+
 /**
  * OpenAI/Vertex use a pasted API credential, not an OAuth redirect — no
  * startConnect/handleCallback equivalent needed. requireAdmin-gated at the

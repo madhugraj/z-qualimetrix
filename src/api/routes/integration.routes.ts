@@ -8,6 +8,8 @@ import {
   disconnect,
   triggerSync,
   listProjects,
+  listJiraUsers,
+  saveJiraSelection,
   connectOpenAi,
   listKeyMappings,
   upsertKeyMapping,
@@ -84,6 +86,8 @@ router.delete("/key-mappings/:id", requireAdmin, deleteKeyMapping);
 router.post("/:provider/connect", requireAdmin, startConnect);
 router.get("/:provider/status", requireAuth, getStatus);
 router.get("/:provider/projects", requireAuth, listProjects);
+router.get("/jira/users", requireAdmin, listJiraUsers);
+router.put("/jira/selection", requireAdmin, saveJiraSelection);
 router.put("/:provider/sync-frequency", requireAdmin, updateSyncFrequency);
 router.post("/:provider/sync", requireAdmin, triggerSync);
 router.delete("/:provider", requireAdmin, disconnect);

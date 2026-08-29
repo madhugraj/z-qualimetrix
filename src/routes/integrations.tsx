@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { CheckCircle2, CircleDashed, RefreshCw, Loader2, Star } from "lucide-react";
+import { CheckCircle2, CircleDashed, RefreshCw, Loader2, Star, FolderKanban, Users } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
@@ -41,7 +41,14 @@ interface ProviderStatus {
   isConnected: boolean;
   connectedAccountLabel?: string | null;
   lastSyncedAt?: string | null;
+  externalMetadata?: {
+    selectedProjectIds?: string[];
+    selectedUserAccountIds?: string[];
+  };
 }
+
+interface JiraProject { id: string; key: string; name: string }
+interface JiraUser { accountId: string; displayName: string; emailAddress: string | null; avatarUrl: string | null }
 
 function timeAgo(iso?: string | null): string {
   if (!iso) return '—';
@@ -63,6 +70,12 @@ function Integrations() {
   const [jiraStatus, setJiraStatus] = useState<ProviderStatus>({ isConnected: false });
   const [adoStatus, setAdoStatus] = useState<ProviderStatus>({ isConnected: false });
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
+  const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
+  const [jiraUsers, setJiraUsers] = useState<JiraUser[]>([]);
+  const [selectedJiraProjects, setSelectedJiraProjects] = useState<string[]>([]);
+  const [selectedJiraUsers, setSelectedJiraUsers] = useState<string[]>([]);
+  const [loadingJiraDiscovery, setLoadingJiraDiscovery] = useState(false);
+  const [savingJiraSelection, setSavingJiraSelection] = useState(false);
 
   // Check GitHub connection status from both localStorage and database
   useEffect(() => {
@@ -111,6 +124,67 @@ function Integrations() {
 
     if (tenantId) checkGitHubConnection();
   }, [tenantId]);
+
+  useEffect(() => {
+    if (!jiraStatus.isConnected) {
+      setJiraProjects([]);
+      setJiraUsers([]);
+      return;
+    }
+
+    setSelectedJiraProjects(jiraStatus.externalMetadata?.selectedProjectIds ?? []);
+    setSelectedJiraUsers(jiraStatus.externalMetadata?.selectedUserAccountIds ?? []);
+    setLoadingJiraDiscovery(true);
+    Promise.all([
+      fetch(`${API_V1_URL}/integrations/jira/projects`, { credentials: "include" }).then((r) => r.json()),
+      fetch(`${API_V1_URL}/integrations/jira/users`, { credentials: "include" }).then((r) => r.json()),
+    ])
+      .then(([projectsData, usersData]) => {
+        if (projectsData.success) setJiraProjects(projectsData.data);
+        if (usersData.success) setJiraUsers(usersData.data);
+        if (!projectsData.success || !usersData.success) {
+          toast.error("Some Jira data could not be loaded");
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to discover Jira data:", error);
+        toast.error("Couldn't load Jira projects and users");
+      })
+      .finally(() => setLoadingJiraDiscovery(false));
+  }, [jiraStatus.isConnected, tenantId]);
+
+  function toggleSelection(id: string, selected: string[], setter: (value: string[]) => void) {
+    setter(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+  }
+
+  async function saveJiraConfiguration() {
+    setSavingJiraSelection(true);
+    try {
+      const response = await fetch(`${API_V1_URL}/integrations/jira/selection`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ projectIds: selectedJiraProjects, userAccountIds: selectedJiraUsers }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Failed to save Jira selection");
+      setJiraStatus((current) => ({
+        ...current,
+        externalMetadata: {
+          ...current.externalMetadata,
+          selectedProjectIds: selectedJiraProjects,
+          selectedUserAccountIds: selectedJiraUsers,
+        },
+      }));
+      toast.success("Jira analytics scope saved");
+    } catch (error) {
+      toast.error("Couldn't save Jira analytics scope", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSavingJiraSelection(false);
+    }
+  }
 
   useEffect(() => {
     const fetchProviderStatus = async (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) => {
@@ -326,6 +400,66 @@ function Integrations() {
           );
         })}
       </div>
+
+      {jiraStatus.isConnected && (
+        <GlassPanel
+          title="Choose Jira analytics scope"
+          subtitle="Projects and people are discovered automatically from the connected Jira site. Choose what the PM dashboard should include."
+          className="mt-4"
+        >
+          {loadingJiraDiscovery ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading Jira projects and users…
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold"><FolderKanban className="h-4 w-4 text-primary" /> Projects</div>
+                  <button type="button" className="text-xs text-primary" onClick={() => setSelectedJiraProjects(selectedJiraProjects.length === jiraProjects.length ? [] : jiraProjects.map((p) => p.id))}>
+                    {selectedJiraProjects.length === jiraProjects.length && jiraProjects.length ? "Clear all" : "Select all"}
+                  </button>
+                </div>
+                <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+                  {jiraProjects.map((project) => (
+                    <label key={project.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-glass-border/60 p-3 text-sm">
+                      <input type="checkbox" checked={selectedJiraProjects.includes(project.id)} onChange={() => toggleSelection(project.id, selectedJiraProjects, setSelectedJiraProjects)} className="accent-primary" />
+                      <span><span className="font-medium">{project.name}</span><span className="ml-2 text-xs text-muted-foreground">{project.key}</span></span>
+                    </label>
+                  ))}
+                  {!jiraProjects.length && <p className="text-sm text-muted-foreground">No accessible Jira projects found.</p>}
+                </div>
+              </section>
+
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 text-primary" /> Users</div>
+                  <button type="button" className="text-xs text-primary" onClick={() => setSelectedJiraUsers(selectedJiraUsers.length === jiraUsers.length ? [] : jiraUsers.map((u) => u.accountId))}>
+                    {selectedJiraUsers.length === jiraUsers.length && jiraUsers.length ? "Clear all" : "Select all"}
+                  </button>
+                </div>
+                <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+                  {jiraUsers.map((jiraUser) => (
+                    <label key={jiraUser.accountId} className="flex cursor-pointer items-center gap-3 rounded-xl border border-glass-border/60 p-3 text-sm">
+                      <input type="checkbox" checked={selectedJiraUsers.includes(jiraUser.accountId)} onChange={() => toggleSelection(jiraUser.accountId, selectedJiraUsers, setSelectedJiraUsers)} className="accent-primary" />
+                      {jiraUser.avatarUrl && <img src={jiraUser.avatarUrl} alt="" className="h-8 w-8 rounded-full" />}
+                      <span className="min-w-0"><span className="block truncate font-medium">{jiraUser.displayName}</span><span className="block truncate text-xs text-muted-foreground">{jiraUser.emailAddress ?? "Email hidden by Jira"}</span></span>
+                    </label>
+                  ))}
+                  {!jiraUsers.length && <p className="text-sm text-muted-foreground">No accessible Jira users found.</p>}
+                </div>
+              </section>
+
+              <div className="flex items-center justify-between border-t border-glass-border/60 pt-4">
+                <p className="text-xs text-muted-foreground">{selectedJiraProjects.length} projects · {selectedJiraUsers.length} users selected</p>
+                <button type="button" onClick={saveJiraConfiguration} disabled={savingJiraSelection} className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60">
+                  {savingJiraSelection && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save analytics scope
+                </button>
+              </div>
+            </div>
+          )}
+        </GlassPanel>
+      )}
 
       {/* Connected GitHub Repositories */}
       {isGitHubConnected && githubRepos.length > 0 && (

@@ -9,6 +9,29 @@ type ServerEntry = {
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
+const API_PREFIX = "/api/";
+const INTERNAL_API_ORIGIN = process.env.INTERNAL_API_ORIGIN ?? "http://127.0.0.1:3001";
+
+async function proxyApiRequest(request: Request): Promise<Response> {
+  const incomingUrl = new URL(request.url);
+  const targetUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, INTERNAL_API_ORIGIN);
+  const headers = new Headers(request.headers);
+
+  // Let fetch set the correct upstream Host header while preserving the public
+  // origin for authentication, redirects, and request auditing.
+  headers.delete("host");
+  headers.set("x-forwarded-host", incomingUrl.host);
+  headers.set("x-forwarded-proto", incomingUrl.protocol.slice(0, -1));
+
+  return fetch(targetUrl, {
+    method: request.method,
+    headers,
+    body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+    redirect: "manual",
+    duplex: request.body ? "half" : undefined,
+  } as RequestInit);
+}
+
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
     serverEntryPromise = import("@tanstack/react-start/server-entry").then(
@@ -47,6 +70,10 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      if (new URL(request.url).pathname.startsWith(API_PREFIX)) {
+        return await proxyApiRequest(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

@@ -1,0 +1,12 @@
+.git
+.output
+.wrangler
+node_modules
+y
+z-qualimetrix
+.claude
+.codex
+.env
+.env.*
+!.env.example
+npm-debug.log*

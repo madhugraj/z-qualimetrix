@@ -3,7 +3,9 @@
  * Centralized GitHub API calls to feed real data into existing dashboard components
  */
 
-const API_BASE = "http://localhost:3001/api/v1";
+import { API_V1_URL } from "@/lib/api-config";
+
+const API_BASE = API_V1_URL;
 const TENANT_ID = "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167";
 
 export interface GitHubRepository {

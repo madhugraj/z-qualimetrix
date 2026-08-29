@@ -18,6 +18,7 @@ import {
   type AiVisibility,
 } from "@/lib/qm-ai-usage";
 import { cn } from "@/lib/utils";
+import { API_V1_URL } from "@/lib/api-config";
 
 export const Route = createFileRoute("/ai-usage")({
   head: () => ({
@@ -61,7 +62,7 @@ function AiUsagePage() {
   const { data: analytics, isLoading, error } = useQuery({
     queryKey: ['ai-usage-analytics', level],
     queryFn: async () => {
-      const response = await fetch(`http://localhost:3001/api/v1/ai-usage/analytics?visibility=${level}`, {
+      const response = await fetch(`${API_V1_URL}/ai-usage/analytics?visibility=${level}`, {
         credentials: 'include',
       });
       if (!response.ok) {

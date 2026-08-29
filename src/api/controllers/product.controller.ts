@@ -112,7 +112,7 @@ export class ProductController extends BaseController {
    * Create new product
    */
   createProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId, name, key, description, iconUrl, color, jiraProjectKey, azureDevopsAreaPath, settings } = req.body;
+    const { tenantId, name, key, description, iconUrl, color, jiraProjectKey, jiraProjectId, azureDevopsAreaPath, settings } = req.body;
 
     // Validate required fields
     const error = this.validateRequired(req.body, ['tenantId', 'name', 'key']);
@@ -130,6 +130,7 @@ export class ProductController extends BaseController {
           iconUrl,
           color,
           jiraProjectKey,
+          jiraProjectId,
           azureDevopsAreaPath,
           settings: settings || {}
         },
@@ -169,7 +170,7 @@ export class ProductController extends BaseController {
       return validationErrorResponse(res);
     }
 
-    const { name, description, iconUrl, color, jiraProjectKey, azureDevopsAreaPath, settings, isActive } = req.body;
+    const { name, description, iconUrl, color, jiraProjectKey, jiraProjectId, azureDevopsAreaPath, settings, isActive } = req.body;
 
     try {
       const product = await this.prisma.product.update({
@@ -180,6 +181,7 @@ export class ProductController extends BaseController {
           ...(iconUrl && { iconUrl }),
           ...(color && { color }),
           ...(jiraProjectKey !== undefined && { jiraProjectKey }),
+          ...(jiraProjectId !== undefined && { jiraProjectId }),
           ...(azureDevopsAreaPath !== undefined && { azureDevopsAreaPath }),
           ...(settings && { settings }),
           ...(isActive !== undefined && { isActive })

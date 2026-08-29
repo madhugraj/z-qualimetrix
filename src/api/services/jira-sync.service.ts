@@ -139,7 +139,16 @@ async function getStoryPointsFieldId(client: JiraClient, integration: Integratio
 async function fetchSprintsForProject(client: JiraClient, jiraProjectId: string): Promise<Array<{
   id: number; name: string; state: string; startDate?: string; endDate?: string; goal?: string;
 }>> {
-  const boards = await jiraFetch(client, `/rest/agile/1.0/board?projectKeyOrId=${jiraProjectId}`);
+  let boards: { values?: any[] };
+  try {
+    boards = await jiraFetch(client, `/rest/agile/1.0/board?projectKeyOrId=${jiraProjectId}`);
+  } catch (err) {
+    // Board/sprint data is a bonus on top of issue sync, not a prerequisite —
+    // e.g. the connection is missing the separate Jira Software scope the
+    // Agile API requires. Degrade to "no sprint data" so issue sync still runs.
+    console.error(`Jira board lookup failed for project ${jiraProjectId}, continuing without sprint data:`, err);
+    return [];
+  }
   const sprintsById = new Map<number, any>();
 
   for (const board of boards.values ?? []) {
@@ -263,6 +272,7 @@ export async function syncProduct(integration: Integration, product: Product): P
 
       const externalMetadata = {
         jiraKey: issue.key,
+        assigneeAccountId: f.assignee?.accountId ?? null,
         assigneeName: f.assignee?.displayName ?? null,
         assigneeEmail: f.assignee?.emailAddress ?? null,
         reporterName: f.reporter?.displayName ?? null,
@@ -328,8 +338,18 @@ async function reconcileMissingWorkItems(productId: string, runStartedAt: Date):
 export async function syncAllProductsForIntegration(integration: Integration): Promise<void> {
   await integrationService.recordSyncStart(integration.id);
 
+  const metadata = (integration.externalMetadata as Record<string, unknown>) ?? {};
+  const hasSavedProjectSelection = Array.isArray(metadata.selectedProjectIds);
+  const selectedProjectIds = hasSavedProjectSelection
+    ? (metadata.selectedProjectIds as unknown[]).filter((id): id is string => typeof id === 'string')
+    : undefined;
+
   const products = await prisma.product.findMany({
-    where: { tenantId: integration.tenantId, jiraProjectId: { not: null }, isActive: true },
+    where: {
+      tenantId: integration.tenantId,
+      jiraProjectId: selectedProjectIds ? { in: selectedProjectIds } : { not: null },
+      isActive: true,
+    },
   });
 
   const results = await Promise.allSettled(products.map((p) => syncProduct(integration, p)));

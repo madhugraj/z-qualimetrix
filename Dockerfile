@@ -21,7 +21,7 @@ RUN apk add --no-cache openssl libc6-compat dumb-init
 
 FROM base AS build
 # Accept build-time environment variables
-ARG VITE_API_URL=http://34.47.233.220:3001
+ARG VITE_API_URL=""
 ENV VITE_API_URL=${VITE_API_URL}
 COPY package.json package-lock.json ./
 RUN npm install --legacy-peer-deps
