@@ -54,15 +54,20 @@ export abstract class BaseController {
   }
 
   /**
-   * Parse filter parameters
+   * Parse filter parameters. Query values are always strings — coerce the
+   * literal "true"/"false" so a field like isActive reaches Prisma as a real
+   * boolean instead of failing validation (BoolFilter expects boolean, not
+   * the string "true").
    */
   protected getFilters(req: Request, allowedFields: string[]) {
     const filters: any = {};
 
     for (const field of allowedFields) {
-      if (req.query[field]) {
-        filters[field] = req.query[field];
-      }
+      const raw = req.query[field];
+      if (raw === undefined) continue;
+      if (raw === 'true') filters[field] = true;
+      else if (raw === 'false') filters[field] = false;
+      else filters[field] = raw;
     }
 
     return filters;

@@ -1,6 +1,7 @@
-import { PRODUCTS, SPRINTS } from "@/lib/qm-data";
+import { SPRINTS } from "@/lib/qm-data";
 import { useState, useEffect } from "react";
 import { getGitHubRepositories, type GitHubRepository } from "@/lib/github-data.service";
+import { useCurrentProduct } from "@/lib/product-context";
 
 function Pill({ label, options }: { label: string; options: string[] }) {
   return (
@@ -90,11 +91,55 @@ function GitHubRepoPill() {
   );
 }
 
+function ProductPill() {
+  const { products, currentProduct, setCurrentProductId, isLoading, isPortfolioView } = useCurrentProduct();
+
+  if (isLoading) {
+    return (
+      <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
+        <span className="text-muted-foreground">Product</span>
+        <span className="text-xs text-muted-foreground">Loading…</span>
+      </label>
+    );
+  }
+
+  if (products.length === 0) {
+    return (
+      <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
+        <span className="text-muted-foreground">Product</span>
+        <span className="text-xs text-muted-foreground">No products</span>
+      </label>
+    );
+  }
+
+  return (
+    <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
+      <span className="text-muted-foreground">Product</span>
+      <select
+        value={currentProduct?.id ?? ""}
+        onChange={(e) => setCurrentProductId(e.target.value || null)}
+        className="cursor-pointer bg-transparent text-xs font-medium outline-none"
+      >
+        {isPortfolioView && (
+          <option value="" className="bg-popover text-popover-foreground">
+            All products
+          </option>
+        )}
+        {products.map((p) => (
+          <option key={p.id} value={p.id} className="bg-popover text-popover-foreground">
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function FilterBar() {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <GitHubRepoPill />
-      <Pill label="Product" options={["All products", ...PRODUCTS]} />
+      <ProductPill />
       <Pill label="Sprint" options={SPRINTS} />
       <Pill label="Team" options={["All teams", "Squad Nova", "Squad Kite", "Squad Pulse"]} />
       <Pill label="Range" options={["Last 30 days", "Last 7 days", "This quarter", "YTD"]} />

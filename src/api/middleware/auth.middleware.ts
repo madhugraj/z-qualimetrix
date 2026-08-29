@@ -84,23 +84,37 @@ export const requireRole = (...roles: string[]) => [
 export const requireAdmin = requireRole('pm');
 
 /**
- * Scopes a request to a product a PO/developer/tester was explicitly given
- * access to (TenantMembership.accessibleProducts). `pm` and `executive` are
- * exempt — org-wide by definition. Mount after requireAuth (or requireRole).
+ * True if `user` may read data for `productId`: the product must belong to
+ * their own tenant (checked for every role — `pm`/`executive` are exempt
+ * from the finer per-product membership check below, but never from tenant
+ * ownership, or a pm/executive from tenant A could read tenant B's product
+ * just by knowing its id). Everyone else additionally needs an explicit
+ * TenantMembership.accessibleProducts grant.
+ */
+export async function canAccessProduct(user: AuthenticatedUser, productId: string): Promise<boolean> {
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { tenantId: true } });
+  if (!product || product.tenantId !== user.tenantId) return false;
+  if (user.role === 'pm' || user.role === 'executive') return true;
+
+  const membership = await prisma.tenantMembership.findUnique({
+    where: { tenantId_userId: { tenantId: user.tenantId ?? '', userId: user.id } },
+  });
+  return !!membership?.accessibleProducts.includes(productId);
+}
+
+/**
+ * Route-level wrapper around canAccessProduct. Mount after requireAuth (or
+ * requireRole).
  */
 export const requireProductScope = (getProductId: (req: Request) => string | undefined) =>
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!req.user) return res.status(401).json({ success: false, error: 'Not authenticated' });
-      if (req.user.role === 'pm' || req.user.role === 'executive') return next();
 
       const productId = getProductId(req);
       if (!productId) return res.status(400).json({ success: false, error: 'Product id required' });
 
-      const membership = await prisma.tenantMembership.findUnique({
-        where: { tenantId_userId: { tenantId: req.user.tenantId ?? '', userId: req.user.id } },
-      });
-      if (!membership || !membership.accessibleProducts.includes(productId)) {
+      if (!(await canAccessProduct(req.user, productId))) {
         return res.status(403).json({ success: false, error: 'Not scoped to this product' });
       }
       next();

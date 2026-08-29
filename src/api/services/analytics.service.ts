@@ -15,10 +15,11 @@ export class AnalyticsService {
    * Calculate Mean Time To Resolve (MTTR) for bugs
    * MTTR = Total time to resolve bugs / Number of resolved bugs
    */
-  async calculateMTTR(productId?: string, startDate?: Date, endDate?: Date): Promise<{
+  async calculateMTTR(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
     overall: number;
     byPriority: Record<string, number>;
     bySprint: Record<string, number>;
+    trend: Array<{ period: string; mttr: number }>;
   }> {
     const where: any = {
       type: 'bug',
@@ -27,26 +28,31 @@ export class AnalyticsService {
     };
 
     if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
     if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
     if (endDate) where.createdAt = { ...where.createdAt, lte: endDate };
 
-    const resolvedBugs = await this.prisma.workItem.findMany({
-      where,
-      select: {
-        id: true,
-        priority: true,
-        sprintId: true,
-        createdAt: true,
-        resolvedAt: true,
-        product: { select: { id: true, name: true } }
-      }
-    });
+    const [resolvedBugs, trend] = await Promise.all([
+      this.prisma.workItem.findMany({
+        where,
+        select: {
+          id: true,
+          priority: true,
+          sprintId: true,
+          createdAt: true,
+          resolvedAt: true,
+          product: { select: { id: true, name: true } }
+        }
+      }),
+      this.calculateMttrTrend(productId, tenantId, startDate, endDate)
+    ]);
 
     if (resolvedBugs.length === 0) {
       return {
         overall: 0,
         byPriority: {},
-        bySprint: {}
+        bySprint: {},
+        trend
       };
     }
 
@@ -100,15 +106,41 @@ export class AnalyticsService {
     return {
       overall: Math.round(overall * 10) / 10, // Round to 1 decimal
       byPriority: byPriorityAvg,
-      bySprint: bySprintAvg
+      bySprint: bySprintAvg,
+      trend
     };
+  }
+
+  /**
+   * MTTR trend over the most recent sprints — mirrors calculateDefectLeakageTrend's shape.
+   */
+  private async calculateMttrTrend(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date): Promise<Array<{ period: string; mttr: number }>> {
+    const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate });
+
+    const trend = [];
+
+    for (const sprint of sprints) {
+      const resolvedBugs = await this.prisma.workItem.findMany({
+        where: { sprintId: sprint.id, type: 'bug', status: 'resolved', resolvedAt: { not: null } },
+        select: { createdAt: true, resolvedAt: true }
+      });
+
+      const times = resolvedBugs
+        .filter((bug) => bug.resolvedAt)
+        .map((bug) => (new Date(bug.resolvedAt!).getTime() - new Date(bug.createdAt).getTime()) / (1000 * 60 * 60));
+
+      const avg = times.length > 0 ? times.reduce((sum, t) => sum + t, 0) / times.length : 0;
+      trend.push({ period: sprint.name, mttr: Math.round(avg * 10) / 10 });
+    }
+
+    return trend.reverse(); // Return in chronological order
   }
 
   /**
    * Calculate defect leakage rate
    * Defect Leakage = Bugs found in production / Total bugs
    */
-  async calculateDefectLeakage(productId?: string, startDate?: Date, endDate?: Date): Promise<{
+  async calculateDefectLeakage(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
     rate: number;
     totalBugs: number;
     productionBugs: number;
@@ -117,6 +149,7 @@ export class AnalyticsService {
     const where: any = { type: 'bug' };
 
     if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
     if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
     if (endDate) where.createdAt = { ...where.createdAt, lte: endDate };
 
@@ -137,7 +170,7 @@ export class AnalyticsService {
     const rate = allBugs > 0 ? (productionBugs / allBugs) * 100 : 0;
 
     // Calculate trend over time (last 6 sprints)
-    const trend = await this.calculateDefectLeakageTrend(productId, startDate, endDate);
+    const trend = await this.calculateDefectLeakageTrend(productId, startDate, endDate, tenantId);
 
     return {
       rate: Math.round(rate * 10) / 10,
@@ -148,19 +181,34 @@ export class AnalyticsService {
   }
 
   /**
-   * Calculate defect leakage trend over time
+   * Most recent sprints for a product (or, absent that, a whole tenant) —
+   * shared by every per-sprint trend below so they line up on the same set
+   * of sprints instead of each re-deriving it slightly differently.
    */
-  private async calculateDefectLeakageTrend(productId?: string, startDate?: Date, endDate?: Date): Promise<Array<{ period: string; rate: number }>> {
-    // Get recent sprints
-    const sprints = await this.prisma.sprint.findMany({
+  private async getRecentSprints(params: {
+    productId?: string;
+    tenantId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+  }) {
+    const { productId, tenantId, startDate, endDate, limit = 6 } = params;
+    return this.prisma.sprint.findMany({
       where: {
-        ...(productId && { productId }),
+        ...(productId ? { productId } : tenantId ? { tenantId } : {}),
         ...(startDate && { startDate: { gte: startDate } }),
         ...(endDate && { endDate: { lte: endDate } })
       },
       orderBy: { startDate: 'desc' },
-      take: 6
+      take: limit
     });
+  }
+
+  /**
+   * Calculate defect leakage trend over time
+   */
+  private async calculateDefectLeakageTrend(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<Array<{ period: string; rate: number }>> {
+    const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate });
 
     const trend = [];
 
@@ -194,7 +242,7 @@ export class AnalyticsService {
   /**
    * Calculate test execution metrics
    */
-  async calculateTestExecutionMetrics(productId?: string, startDate?: Date, endDate?: Date): Promise<{
+  async calculateTestExecutionMetrics(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
     total: number;
     passed: number;
     failed: number;
@@ -208,6 +256,8 @@ export class AnalyticsService {
 
     if (productId) {
       where.testCase = { productId };
+    } else if (tenantId) {
+      where.testCase = { tenantId };
     }
 
     if (startDate || endDate) {
@@ -277,6 +327,39 @@ export class AnalyticsService {
       passRate: Math.round(metrics.passRate * 10) / 10,
       automationRate: Math.round(metrics.automationRate * 10) / 10
     };
+  }
+
+  /**
+   * Velocity (completed story points) plus bugs created/resolved, per sprint,
+   * for the most recent sprints — backs the velocity chart, which otherwise
+   * has no trend source (calculateTeamProductivity.teamVelocity is a single
+   * snapshot, not a series).
+   */
+  async calculateVelocityTrend(productId: string, limit: number = 6): Promise<Array<{
+    period: string;
+    velocity: number;
+    created: number;
+    resolved: number;
+  }>> {
+    const sprints = await this.getRecentSprints({ productId, limit });
+
+    const trend = [];
+
+    for (const sprint of sprints) {
+      const [completedItems, created, resolved] = await Promise.all([
+        this.prisma.workItem.findMany({
+          where: { sprintId: sprint.id, status: 'completed', storyPoints: { not: null } },
+          select: { storyPoints: true }
+        }),
+        this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug' } }),
+        this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug', status: 'resolved' } })
+      ]);
+
+      const velocity = completedItems.reduce((sum, item) => sum + (item.storyPoints || 0), 0);
+      trend.push({ period: sprint.name, velocity, created, resolved });
+    }
+
+    return trend.reverse(); // Return in chronological order
   }
 
   /**
@@ -384,11 +467,12 @@ export class AnalyticsService {
     if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
     if (endDate) where.createdAt = { ...where.createdAt, lte: endDate };
 
-    const [workItems, testCases, deliverables] = await Promise.all([
+    const [workItems, totalWorkItemsCount, testCases, deliverables] = await Promise.all([
       this.prisma.workItem.findMany({
         where: { ...where, status: 'completed' },
         include: { creator: { select: { id: true, name: true } } }
       }),
+      this.prisma.workItem.count({ where }),
       this.prisma.testCase.findMany({
         where,
         include: { creator: { select: { id: true, name: true } } }
@@ -427,7 +511,7 @@ export class AnalyticsService {
     const teamVelocity = completedItems.reduce((sum, item) => sum + (item.storyPoints || 0), 0);
 
     return {
-      totalWorkItems: workItems.length,
+      totalWorkItems: totalWorkItemsCount,
       completedWorkItems: workItems.length,
       totalTestCases: testCases.length,
       totalDeliverables: deliverables.length,
@@ -490,7 +574,7 @@ export class AnalyticsService {
     }
 
     const products = await this.prisma.product.findMany({
-      where: { tenantId },
+      where: { tenantId, isActive: true },
       select: { id: true, name: true }
     });
 

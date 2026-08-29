@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
-import { DeliverablesFeed } from "@/components/qm/DeliverablesFeed";
-import { PRODUCTS, type DeliverableType } from "@/lib/qm-data";
+import { DeliverablesFeed, deliverableRecordToItem } from "@/components/qm/DeliverablesFeed";
+import { useCurrentProduct } from "@/lib/product-context";
+import { useProductDeliverables } from "@/lib/queries/analytics";
+import { apiFetch } from "@/lib/api-client";
+import { type DeliverableType } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/manual-log")({
   head: () => ({
@@ -37,6 +41,63 @@ const fieldClass =
 
 function ManualLog() {
   const [type, setType] = useState<DeliverableType>("DEMO");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { products, currentProduct, setCurrentProductId } = useCurrentProduct();
+  const queryClient = useQueryClient();
+  const deliverables = useProductDeliverables(currentProduct?.id);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+
+    if (!currentProduct) {
+      toast.error("Select a product first");
+      return;
+    }
+
+    const data = new FormData(form);
+    const title = String(data.get("title") ?? "").trim();
+    if (!title) return;
+
+    const rating = data.get("rating");
+    const documentLink = String(data.get("documentLink") ?? "").trim();
+    const hours = data.get("hours");
+    const reviewer = String(data.get("reviewer") ?? "").trim();
+    const notes = String(data.get("notes") ?? "").trim();
+
+    const description = [hours ? `${hours} hours logged` : null, reviewer ? `Reviewer: ${reviewer}` : null, notes || null]
+      .filter(Boolean)
+      .join(" · ");
+
+    setIsSubmitting(true);
+    try {
+      const res = await apiFetch(`/products/${currentProduct.id}/deliverables`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type,
+          title,
+          description: description || undefined,
+          rating: type === "DEMO" && rating ? Number(rating) : undefined,
+          links: documentLink ? [documentLink] : [],
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) throw new Error(result.error ?? "Failed to log activity");
+
+      toast.success("Activity logged", {
+        description: "It will appear in the operational deliverables feed.",
+      });
+      form.reset();
+      queryClient.invalidateQueries({ queryKey: ["product-deliverables", currentProduct.id] });
+    } catch (error) {
+      toast.error("Couldn't log activity", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -49,16 +110,7 @@ function ManualLog() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
         <GlassPanel title="Log an activity" subtitle="Fields adapt per type" className="xl:col-span-2">
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              toast.success("Activity logged", {
-                description: "It will appear in the operational deliverables feed.",
-              });
-              (e.target as HTMLFormElement).reset();
-            }}
-          >
+          <form className="space-y-3" onSubmit={handleSubmit}>
             <div className="grid grid-cols-2 gap-2">
               {TYPES.map((t) => (
                 <button
@@ -78,16 +130,21 @@ function ManualLog() {
 
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">Title</label>
-              <input className={fieldClass} placeholder="Sprint 12 stakeholder demo" required />
+              <input name="title" className={fieldClass} placeholder="Sprint 12 stakeholder demo" required />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Product</label>
-                <select className={fieldClass}>
-                  {PRODUCTS.map((p) => (
-                    <option key={p} className="bg-popover text-popover-foreground">
-                      {p}
+                <select
+                  className={fieldClass}
+                  value={currentProduct?.id ?? ""}
+                  onChange={(e) => setCurrentProductId(e.target.value || null)}
+                >
+                  {products.length === 0 && <option value="">No products</option>}
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id} className="bg-popover text-popover-foreground">
+                      {p.name}
                     </option>
                   ))}
                 </select>
@@ -101,39 +158,40 @@ function ManualLog() {
             {type === "DEMO" && (
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Demo rating (1–5)</label>
-                <input type="number" min={1} max={5} step={0.1} className={fieldClass} placeholder="4.5" />
+                <input name="rating" type="number" min={1} max={5} step={0.1} className={fieldClass} placeholder="4.5" />
               </div>
             )}
 
             {(type === "DOC" || type === "RCA") && (
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Document link</label>
-                <input type="url" className={fieldClass} placeholder="https://wiki/..." />
+                <input name="documentLink" type="url" className={fieldClass} placeholder="https://wiki/..." />
               </div>
             )}
 
             {type === "TEST" && (
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Hours logged</label>
-                <input type="number" min={0} step={0.25} className={fieldClass} placeholder="3.5" />
+                <input name="hours" type="number" min={0} step={0.25} className={fieldClass} placeholder="3.5" />
               </div>
             )}
 
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">Reviewer / approver</label>
-              <input className={fieldClass} placeholder="Optional" />
+              <input name="reviewer" className={fieldClass} placeholder="Optional" />
             </div>
 
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">Notes</label>
-              <textarea className={fieldClass} rows={3} placeholder="Context, outcomes, follow-ups" />
+              <textarea name="notes" className={fieldClass} rows={3} placeholder="Context, outcomes, follow-ups" />
             </div>
 
             <button
               type="submit"
-              className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] transition-opacity hover:opacity-90"
+              disabled={isSubmitting}
+              className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_0_24px_-8px_var(--primary)] transition-opacity hover:opacity-90 disabled:opacity-60"
             >
-              Log activity
+              {isSubmitting ? "Logging…" : "Log activity"}
             </button>
           </form>
         </GlassPanel>
@@ -143,7 +201,7 @@ function ManualLog() {
           subtitle="Demos, docs, RCAs and manual testing"
           className="xl:col-span-3"
         >
-          <DeliverablesFeed />
+          <DeliverablesFeed data={deliverables.data?.map(deliverableRecordToItem)} />
         </GlassPanel>
       </div>
     </AppShell>

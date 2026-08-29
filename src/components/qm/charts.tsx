@@ -38,54 +38,75 @@ const tooltipStyle = {
   labelStyle: { color: "var(--muted-foreground)" },
 } as const;
 
-export function ExecutionTrendChart() {
+const DEFAULT_EXECUTION_TREND = EXECUTION_TREND.map((d) => ({
+  period: d.sprint,
+  passRate: (d.passed / (d.passed + d.failed + d.blocked)) * 100,
+}));
+
+export interface ExecutionTrendPoint {
+  period: string;
+  passRate: number;
+}
+
+/**
+ * Pass-rate line over time — matches calculateTestExecutionMetrics().
+ * executionTrend from the API (no per-period pass/fail/blocked breakdown
+ * exists server-side, only aggregate totals + a daily pass rate).
+ */
+export function ExecutionTrendChart({ data = DEFAULT_EXECUTION_TREND }: { data?: ExecutionTrendPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={EXECUTION_TREND}>
+      <AreaChart data={data}>
+        <defs>
+          <linearGradient id="passRateFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--good)" stopOpacity={0.45} />
+            <stop offset="100%" stopColor="var(--good)" stopOpacity={0} />
+          </linearGradient>
+        </defs>
         <CartesianGrid vertical={false} stroke="var(--border)" />
-        <XAxis dataKey="sprint" {...axis} />
-        <YAxis {...axis} width={32} />
+        <XAxis dataKey="period" {...axis} />
+        <YAxis {...axis} width={32} domain={[0, 100]} />
         <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="passed" stackId="a" fill="var(--good)" isAnimationActive={false} />
-        <Bar dataKey="failed" stackId="a" fill="var(--critical)" isAnimationActive={false} />
-        <Bar
-          dataKey="blocked"
-          stackId="a"
-          fill="var(--warning)"
-          radius={[6, 6, 0, 0]}
+        <Area
+          type="monotone"
+          dataKey="passRate"
+          name="Pass rate %"
+          stroke="var(--good)"
+          strokeWidth={2.2}
+          fill="url(#passRateFill)"
           isAnimationActive={false}
         />
-      </BarChart>
+      </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-export function MttrChart() {
+const DEFAULT_MTTR_TREND = MTTR_TREND.map((d) => ({ period: d.sprint, mttr: d.mttr }));
+
+export interface MttrTrendPoint {
+  period: string;
+  mttr: number;
+}
+
+/**
+ * MTTR only — matches calculateMTTR().trend. The mock's "first-time fix %"
+ * line has no backend source and is dropped rather than faked.
+ */
+export function MttrChart({ data = DEFAULT_MTTR_TREND }: { data?: MttrTrendPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <LineChart data={MTTR_TREND}>
+      <LineChart data={data}>
         <CartesianGrid vertical={false} stroke="var(--border)" />
-        <XAxis dataKey="sprint" {...axis} />
-        <YAxis yAxisId="left" {...axis} width={32} />
-        <YAxis yAxisId="right" orientation="right" {...axis} width={36} domain={[60, 100]} />
+        <XAxis dataKey="period" {...axis} />
+        <YAxis {...axis} width={32} />
         <Tooltip {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Line
-          yAxisId="left"
           type="monotone"
           dataKey="mttr"
           name="MTTR (hrs)"
           stroke="var(--primary)"
-          strokeWidth={2.2}
-          dot={false}
-        />
-        <Line
-          yAxisId="right"
-          type="monotone"
-          dataKey="fix"
-          name="First-time fix %"
-          stroke="var(--ops)"
           strokeWidth={2.2}
           dot={false}
         />
@@ -94,10 +115,24 @@ export function MttrChart() {
   );
 }
 
-export function VelocityChart() {
+const DEFAULT_VELOCITY_TREND = VELOCITY_TREND.map((d) => ({
+  period: d.sprint,
+  velocity: d.velocity,
+  created: d.created,
+  resolved: d.resolved,
+}));
+
+export interface VelocityTrendPoint {
+  period: string;
+  velocity: number;
+  created: number;
+  resolved: number;
+}
+
+export function VelocityChart({ data = DEFAULT_VELOCITY_TREND }: { data?: VelocityTrendPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <ComposedChart data={VELOCITY_TREND}>
+      <ComposedChart data={data}>
         <defs>
           <linearGradient id="velFill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.5} />
@@ -105,7 +140,7 @@ export function VelocityChart() {
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} stroke="var(--border)" />
-        <XAxis dataKey="sprint" {...axis} />
+        <XAxis dataKey="period" {...axis} />
         <YAxis {...axis} width={32} />
         <Tooltip {...tooltipStyle} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -141,6 +176,10 @@ export function VelocityChart() {
   );
 }
 
+// PortfolioRadar stays mock-only for now — it hardcodes 3 literal product
+// names as JSX Radar dataKeys and needs a generic N-product redesign before
+// it can plot real per-product data (see ProductHealthList for the interim
+// real-data stand-in used on the PM/Executive dashboard).
 export function PortfolioRadar() {
   return (
     <ResponsiveContainer width="100%" height={300}>

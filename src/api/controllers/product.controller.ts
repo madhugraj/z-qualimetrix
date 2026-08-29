@@ -347,6 +347,68 @@ export class ProductController extends BaseController {
 
     return this.success(res, { products, count: products.length });
   });
+
+  /**
+   * List recent manual deliverables for a product (demos, docs, RCAs, manual
+   * testing hours) — backs the operational deliverables feed. Route-level
+   * requireProductScope already confirms access before this runs.
+   */
+  getProductDeliverables = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.params;
+
+    if (!isValidUUID(productId)) {
+      return validationErrorResponse(res);
+    }
+
+    const deliverables = await this.prisma.manualDeliverable.findMany({
+      where: { productId },
+      include: { creator: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 20
+    });
+
+    return this.success(res, { deliverables });
+  });
+
+  /**
+   * Log a manual deliverable — the write side of the feed above; captures
+   * activity Jira/Azure DevOps sync can't (demos, docs, RCAs, manual testing
+   * hours).
+   */
+  createDeliverable = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.params;
+
+    if (!isValidUUID(productId)) {
+      return validationErrorResponse(res);
+    }
+
+    if (!req.user?.tenantId) {
+      return this.error(res, 'No tenant associated with this account', 403);
+    }
+
+    const error = this.validateRequired(req.body, ['type', 'title']);
+    if (error) {
+      return this.error(res, error, 400);
+    }
+
+    const { type, title, description, rating, links } = req.body;
+
+    const deliverable = await this.prisma.manualDeliverable.create({
+      data: {
+        tenantId: req.user.tenantId,
+        productId,
+        type,
+        title,
+        description,
+        rating: rating !== undefined && rating !== null ? Number(rating) : undefined,
+        links: Array.isArray(links) ? links : [],
+        createdBy: req.user.id
+      },
+      include: { creator: { select: { name: true } } }
+    });
+
+    return this.success(res, deliverable, 'Deliverable logged', 201);
+  });
 }
 
 // Export singleton instance

@@ -32,7 +32,7 @@ import {
   updateModelCatalogEntry,
   deactivateModelCatalogEntry
 } from '../controllers/ai-model-catalog.controller';
-import { requireAuth, requireAdmin, requireProductWriteAccess } from '../middleware/auth.middleware';
+import { requireAuth, requireAdmin, requireProductWriteAccess, requireProductScope } from '../middleware/auth.middleware';
 import { requireIngestToken } from '../middleware/ingest-token.middleware';
 import { requireProviderConnectionToken } from '../middleware/provider-connection-token.middleware';
 import adminRoutes from './admin.routes';
@@ -64,6 +64,8 @@ router.put('/products/:id', requireAuth, requireProductWriteAccess, productContr
 router.delete('/products/:id', requireAdmin, productController.deleteProduct);
 router.get('/products/:id/stats', requireAuth, productController.getProductStats);
 router.get('/tenants/:tenantId/products', requireAuth, productController.getProductsByTenant);
+router.get('/products/:productId/deliverables', requireAuth, requireProductScope((req) => req.params.productId), productController.getProductDeliverables);
+router.post('/products/:productId/deliverables', requireAuth, requireProductScope((req) => req.params.productId), productController.createDeliverable);
 
 // Work Item routes
 router.get('/work-items', requireAuth, workItemController.getAllWorkItems);
@@ -104,8 +106,9 @@ router.get('/analytics/test-metrics', requireAuth, analyticsController.getTestEx
 router.get('/analytics/team-productivity', requireAuth, analyticsController.getTeamProductivity);
 router.get('/analytics/dashboard', requireAuth, analyticsController.getQualityDashboard);
 router.get('/analytics/trends', requireAuth, analyticsController.getQualityTrends);
-router.get('/products/:productId/analytics', requireAuth, analyticsController.getProductAnalytics);
-router.get('/products/:productId/release-readiness', requireAuth, analyticsController.getReleaseReadiness);
+router.get('/products/:productId/analytics', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getProductAnalytics);
+router.get('/products/:productId/release-readiness', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getReleaseReadiness);
+router.get('/products/:productId/velocity-trend', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getVelocityTrend);
 router.get('/tenants/:tenantId/analytics', requireAuth, analyticsController.getTenantAnalytics);
 
 // GitHub integration routes

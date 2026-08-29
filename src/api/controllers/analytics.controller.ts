@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { BaseController } from './base.controller';
 import analyticsService from '../services/analytics.service';
+import { canAccessProduct } from '../middleware/auth.middleware';
 
 /**
  * Analytics Controller
@@ -8,20 +9,85 @@ import analyticsService from '../services/analytics.service';
  */
 export class AnalyticsController extends BaseController {
 
+  private isPortfolioRole(role?: string): boolean {
+    return role === 'pm' || role === 'executive';
+  }
+
+  /**
+   * Checks the caller may read `productId` (own tenant, plus membership for
+   * non-pm/executive roles). Writes the 403 itself on failure so call sites
+   * just need `if (!(await this.requireProductAccess(req, res, id))) return;`.
+   */
+  private async requireProductAccess(req: Request, res: Response, productId: string): Promise<boolean> {
+    if (!req.user || !(await canAccessProduct(req.user, productId))) {
+      this.error(res, 'Not scoped to this product', 403);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Resolves the tenant to scope a tenant-wide query to. Always the caller's
+   * own tenant — a client-supplied `provided` value (path or query param) is
+   * only ever compared against it, never substituted in its place, so
+   * requesting another tenant's id 403s instead of silently running against
+   * the caller's own tenant.
+   */
+  private resolveScopedTenantId(req: Request, res: Response, provided?: string): string | null {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      this.error(res, 'No tenant associated with this account', 403);
+      return null;
+    }
+    if (provided && provided !== tenantId) {
+      this.error(res, 'Not scoped to this tenant', 403);
+      return null;
+    }
+    return tenantId;
+  }
+
+  /**
+   * Resolves scope for endpoints that accept an optional productId and fall
+   * back to a tenant-wide aggregate when it's absent. The fallback is only
+   * available to pm/executive (org-wide by design) — a po/developer/tester
+   * omitting productId would otherwise get an aggregate spanning products
+   * outside their TenantMembership.accessibleProducts grant, defeating the
+   * per-product membership check entirely. Writes the error response itself
+   * and returns null on any failure.
+   */
+  private async resolveProductOrTenantScope(
+    req: Request,
+    res: Response,
+    productId?: string
+  ): Promise<{ productId?: string; tenantId?: string } | null> {
+    if (productId) {
+      if (!(await this.requireProductAccess(req, res, productId))) return null;
+      return { productId };
+    }
+
+    if (!this.isPortfolioRole(req.user?.role)) {
+      this.error(res, 'productId is required for this role', 400);
+      return null;
+    }
+
+    const tenantId = this.resolveScopedTenantId(req, res);
+    if (!tenantId) return null;
+    return { tenantId };
+  }
+
   /**
    * Get MTTR (Mean Time To Resolve) metrics
    */
   getMTTR = this.asyncHandler(async (req: Request, res: Response) => {
     const { productId, startDate, endDate } = req.query;
 
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
 
-    const mttr = await analyticsService.calculateMTTR(
-      productId as string,
-      startDateObj,
-      endDateObj
-    );
+    const mttr = await analyticsService.calculateMTTR(scope.productId, startDateObj, endDateObj, scope.tenantId);
 
     return this.success(res, mttr);
   });
@@ -32,13 +98,17 @@ export class AnalyticsController extends BaseController {
   getDefectLeakage = this.asyncHandler(async (req: Request, res: Response) => {
     const { productId, startDate, endDate } = req.query;
 
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
 
     const defectLeakage = await analyticsService.calculateDefectLeakage(
-      productId as string,
+      scope.productId,
       startDateObj,
-      endDateObj
+      endDateObj,
+      scope.tenantId
     );
 
     return this.success(res, defectLeakage);
@@ -50,16 +120,40 @@ export class AnalyticsController extends BaseController {
   getTestExecutionMetrics = this.asyncHandler(async (req: Request, res: Response) => {
     const { productId, startDate, endDate } = req.query;
 
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
 
     const testMetrics = await analyticsService.calculateTestExecutionMetrics(
-      productId as string,
+      scope.productId,
       startDateObj,
-      endDateObj
+      endDateObj,
+      scope.tenantId
     );
 
     return this.success(res, testMetrics);
+  });
+
+  /**
+   * Get per-sprint velocity trend (story points + bugs created/resolved)
+   */
+  getVelocityTrend = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.params;
+    const { limit } = req.query;
+
+    const error = this.validateRequired(req.params, ['productId']);
+    if (error) {
+      return this.error(res, error, 400);
+    }
+
+    const velocityTrend = await analyticsService.calculateVelocityTrend(
+      productId,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, velocityTrend);
   });
 
   /**
@@ -82,18 +176,16 @@ export class AnalyticsController extends BaseController {
    * Get team productivity metrics
    */
   getTeamProductivity = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId, startDate, endDate } = req.query;
+    const { tenantId: providedTenantId, startDate, endDate } = req.query;
 
-    const error = this.validateRequired(req.query, ['tenantId']);
-    if (error) {
-      return this.error(res, error, 400);
-    }
+    const tenantId = this.resolveScopedTenantId(req, res, providedTenantId as string | undefined);
+    if (!tenantId) return;
 
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
 
     const teamProductivity = await analyticsService.calculateTeamProductivity(
-      tenantId as string,
+      tenantId,
       startDateObj,
       endDateObj
     );
@@ -129,13 +221,10 @@ export class AnalyticsController extends BaseController {
    * Get comprehensive tenant analytics
    */
   getTenantAnalytics = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId } = req.params;
     const { startDate, endDate } = req.query;
 
-    const error = this.validateRequired(req.params, ['tenantId']);
-    if (error) {
-      return this.error(res, error, 400);
-    }
+    const tenantId = this.resolveScopedTenantId(req, res, req.params.tenantId);
+    if (!tenantId) return;
 
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
@@ -154,9 +243,9 @@ export class AnalyticsController extends BaseController {
    * Combines multiple metrics for a comprehensive view
    */
   getQualityDashboard = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId, productId } = req.query;
+    const { tenantId: providedTenantId, productId } = req.query;
 
-    if (!tenantId && !productId) {
+    if (!providedTenantId && !productId) {
       return this.error(res, 'Either tenantId or productId is required', 400);
     }
 
@@ -166,6 +255,8 @@ export class AnalyticsController extends BaseController {
       let dashboardData: any = {};
 
       if (productId) {
+        if (!(await this.requireProductAccess(req, res, productId as string))) return;
+
         // Product-level dashboard
         const [mttr, defectLeakage, testMetrics, releaseReadiness] = await Promise.all([
           analyticsService.calculateMTTR(productId as string, startDate),
@@ -188,8 +279,15 @@ export class AnalyticsController extends BaseController {
           lastUpdated: new Date().toISOString()
         };
       } else {
-        // Tenant-level dashboard
-        const tenantAnalytics = await analyticsService.getTenantAnalytics(tenantId as string, startDate);
+        // Tenant-level dashboard — pm/executive only, same reasoning as
+        // resolveProductOrTenantScope.
+        if (!this.isPortfolioRole(req.user?.role)) {
+          return this.error(res, 'tenantId view requires pm or executive', 403);
+        }
+        const tenantId = this.resolveScopedTenantId(req, res, providedTenantId as string | undefined);
+        if (!tenantId) return;
+
+        const tenantAnalytics = await analyticsService.getTenantAnalytics(tenantId, startDate);
 
         dashboardData = {
           level: 'tenant',
@@ -228,11 +326,14 @@ export class AnalyticsController extends BaseController {
     const days = daysMap[timePeriod] || 30;
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
     try {
       const [mttr, defectLeakage, testMetrics] = await Promise.all([
-        analyticsService.calculateMTTR(productId as string, startDate),
-        analyticsService.calculateDefectLeakage(productId as string, startDate),
-        analyticsService.calculateTestExecutionMetrics(productId as string, startDate)
+        analyticsService.calculateMTTR(scope.productId, startDate, undefined, scope.tenantId),
+        analyticsService.calculateDefectLeakage(scope.productId, startDate, undefined, scope.tenantId),
+        analyticsService.calculateTestExecutionMetrics(scope.productId, startDate, undefined, scope.tenantId)
       ]);
 
       const trends = {
