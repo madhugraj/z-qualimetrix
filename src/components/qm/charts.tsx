@@ -2,8 +2,6 @@ import {
   Area,
   AreaChart,
   ComposedChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -17,7 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { EXECUTION_TREND, MTTR_TREND, RADAR_DATA, VELOCITY_TREND } from "@/lib/qm-data";
+import { RADAR_DATA } from "@/lib/qm-data";
 
 const axis = {
   stroke: "var(--muted-foreground)",
@@ -38,10 +36,13 @@ const tooltipStyle = {
   labelStyle: { color: "var(--muted-foreground)" },
 } as const;
 
-const DEFAULT_EXECUTION_TREND = EXECUTION_TREND.map((d) => ({
-  period: d.sprint,
-  passRate: (d.passed / (d.passed + d.failed + d.blocked)) * 100,
-}));
+function EmptyChartState({ message }: { message: string }) {
+  return (
+    <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+      {message}
+    </div>
+  );
+}
 
 export interface ExecutionTrendPoint {
   period: string;
@@ -51,9 +52,15 @@ export interface ExecutionTrendPoint {
 /**
  * Pass-rate line over time — matches calculateTestExecutionMetrics().
  * executionTrend from the API (no per-period pass/fail/blocked breakdown
- * exists server-side, only aggregate totals + a daily pass rate).
+ * exists server-side, only aggregate totals + a daily pass rate). No mock
+ * fallback: showing an empty state when there's genuinely no data is more
+ * honest than silently rendering an old illustrative trend as if it were live.
  */
-export function ExecutionTrendChart({ data = DEFAULT_EXECUTION_TREND }: { data?: ExecutionTrendPoint[] }) {
+export function ExecutionTrendChart({ data }: { data?: ExecutionTrendPoint[] }) {
+  if (!data || data.length === 0) {
+    return <EmptyChartState message="No test execution data yet for this scope." />;
+  }
+
   return (
     <ResponsiveContainer width="100%" height={240}>
       <AreaChart data={data}>
@@ -82,8 +89,6 @@ export function ExecutionTrendChart({ data = DEFAULT_EXECUTION_TREND }: { data?:
   );
 }
 
-const DEFAULT_MTTR_TREND = MTTR_TREND.map((d) => ({ period: d.sprint, mttr: d.mttr }));
-
 export interface MttrTrendPoint {
   period: string;
   mttr: number;
@@ -91,9 +96,14 @@ export interface MttrTrendPoint {
 
 /**
  * MTTR only — matches calculateMTTR().trend. The mock's "first-time fix %"
- * line has no backend source and is dropped rather than faked.
+ * line has no backend source and is dropped rather than faked. No mock
+ * fallback — see ExecutionTrendChart.
  */
-export function MttrChart({ data = DEFAULT_MTTR_TREND }: { data?: MttrTrendPoint[] }) {
+export function MttrChart({ data }: { data?: MttrTrendPoint[] }) {
+  if (!data || data.length === 0) {
+    return <EmptyChartState message="No resolved bugs yet for this scope." />;
+  }
+
   return (
     <ResponsiveContainer width="100%" height={240}>
       <LineChart data={data}>
@@ -115,13 +125,6 @@ export function MttrChart({ data = DEFAULT_MTTR_TREND }: { data?: MttrTrendPoint
   );
 }
 
-const DEFAULT_VELOCITY_TREND = VELOCITY_TREND.map((d) => ({
-  period: d.sprint,
-  velocity: d.velocity,
-  created: d.created,
-  resolved: d.resolved,
-}));
-
 export interface VelocityTrendPoint {
   period: string;
   velocity: number;
@@ -129,7 +132,12 @@ export interface VelocityTrendPoint {
   resolved: number;
 }
 
-export function VelocityChart({ data = DEFAULT_VELOCITY_TREND }: { data?: VelocityTrendPoint[] }) {
+/** No mock fallback — see ExecutionTrendChart. */
+export function VelocityChart({ data }: { data?: VelocityTrendPoint[] }) {
+  if (!data || data.length === 0) {
+    return <EmptyChartState message="Select a product to see its velocity trend." />;
+  }
+
   return (
     <ResponsiveContainer width="100%" height={260}>
       <ComposedChart data={data}>
@@ -179,7 +187,8 @@ export function VelocityChart({ data = DEFAULT_VELOCITY_TREND }: { data?: Veloci
 // PortfolioRadar stays mock-only for now — it hardcodes 3 literal product
 // names as JSX Radar dataKeys and needs a generic N-product redesign before
 // it can plot real per-product data (see ProductHealthList for the interim
-// real-data stand-in used on the PM/Executive dashboard).
+// real-data stand-in used on the PM/Executive dashboard). Always render it
+// with a DemoDataBadge at the call site — this component has no live mode.
 export function PortfolioRadar() {
   return (
     <ResponsiveContainer width="100%" height={300}>

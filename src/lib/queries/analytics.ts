@@ -19,6 +19,8 @@ export interface MttrResult {
   byPriority: Record<string, number>;
   bySprint: Record<string, number>;
   trend: Array<{ period: string; mttr: number }>;
+  /** False means "never measured" — treat `overall`/`trend` as not-yet-available, not zero. */
+  hasData: boolean;
 }
 
 /**
@@ -41,6 +43,8 @@ export interface DefectLeakageResult {
   totalBugs: number;
   productionBugs: number;
   trend: Array<{ period: string; rate: number }>;
+  /** False means zero bugs are tracked — `rate: 0` in that case is not "zero leakage." */
+  hasData: boolean;
 }
 
 export function useDefectLeakage(productId?: string, enabled: boolean = true) {
@@ -60,6 +64,8 @@ export interface TestExecutionMetricsResult {
   passRate: number;
   automationRate: number;
   executionTrend: Array<{ period: string; passRate: number }>;
+  /** False means zero test executions are recorded — rates are "never run," not "failing." */
+  hasData: boolean;
 }
 
 export function useTestExecutionMetrics(productId?: string, enabled: boolean = true) {
@@ -88,13 +94,15 @@ export function useVelocityTrend(productId?: string) {
 export interface ReleaseReadinessResult {
   overallScore: number;
   components: {
-    testCoverage: number;
-    bugHealth: number;
-    recentTestResults: number;
-    automationCoverage: number;
+    testCoverage: number | null;
+    bugHealth: number | null;
+    recentTestResults: number | null;
+    automationCoverage: number | null;
   };
   recommendation: string;
   risks: string[];
+  /** False means none of the four components have any real signal yet. */
+  hasData: boolean;
 }
 
 export function useReleaseReadiness(productId?: string) {
@@ -125,8 +133,10 @@ export function useTeamProductivity(tenantId?: string) {
 export interface TenantAnalyticsResult {
   tenant: { id: string; name: string; slug: string };
   teamProductivity: TeamProductivityResult;
-  products: Array<{ productId: string; productName: string; healthScore: number }>;
+  products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean }>;
   overallQualityScore: number;
+  /** False when not a single active product has any real signal yet. */
+  hasData: boolean;
 }
 
 export function useTenantAnalytics(tenantId?: string) {

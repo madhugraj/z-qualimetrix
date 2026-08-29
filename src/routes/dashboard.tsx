@@ -13,6 +13,7 @@ import { ExecutionTrendChart, MttrChart, VelocityChart } from "@/components/qm/c
 import { ProductHealthList } from "@/components/qm/ProductHealthList";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
+import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Kpi } from "@/lib/qm-data";
 import { liveKpi } from "@/lib/kpi-utils";
@@ -48,6 +49,13 @@ export const Route = createFileRoute("/dashboard")({
 
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const hrs = (n: number) => `${n.toFixed(1)} hrs`;
+
+interface KpiTile {
+  kpi: Kpi;
+  isDemo: boolean;
+}
+const live = (kpi: Kpi): KpiTile => ({ kpi, isDemo: false });
+const demo = (kpi: Kpi): KpiTile => ({ kpi, isDemo: true });
 
 function Dashboard() {
   const { user, isLoading } = useAuth();
@@ -95,45 +103,53 @@ function Dashboard() {
 
   const role = current.id;
 
-  const testerKpis: Kpi[] = [
-    testMetrics.data
-      ? liveKpi("Test Execution", testMetrics.data.passRate, pct, testMetrics.data.executionTrend.map((t) => t.passRate))
-      : KPIS.tester[0],
-    defectLeakage.data
-      ? liveKpi("Defect Leakage Rate", defectLeakage.data.rate, pct, defectLeakage.data.trend.map((t) => t.rate), true)
-      : KPIS.tester[1],
-    KPIS.tester[2], // Bug Reopen Rate — no backend source (no reopen-history table)
-    testMetrics.data
-      ? liveKpi("Automation Ratio", testMetrics.data.automationRate, pct)
-      : KPIS.tester[3],
+  // `hasData` (not just "the query resolved") gates every live KPI below —
+  // the backend returns a real object even for a product with zero synced
+  // activity, so checking `.data` truthiness alone would render fabricated
+  // zeros as if they were measured. `isDemo` tracks the fallback so the tile
+  // can visibly say so, instead of a mock number sitting unmarked next to
+  // real ones.
+  const testerKpis: KpiTile[] = [
+    testMetrics.data?.hasData
+      ? live(liveKpi("Test Execution", testMetrics.data.passRate, pct, testMetrics.data.executionTrend.map((t) => t.passRate)))
+      : demo(KPIS.tester[0]),
+    defectLeakage.data?.hasData
+      ? live(liveKpi("Defect Leakage Rate", defectLeakage.data.rate, pct, defectLeakage.data.trend.map((t) => t.rate), true))
+      : demo(KPIS.tester[1]),
+    demo(KPIS.tester[2]), // Bug Reopen Rate — no backend source (no reopen-history table)
+    testMetrics.data?.hasData
+      ? live(liveKpi("Automation Ratio", testMetrics.data.automationRate, pct))
+      : demo(KPIS.tester[3]),
   ];
 
-  const developerKpis: Kpi[] = [
-    mttr.data ? liveKpi("Bug MTTR", mttr.data.overall, hrs, mttr.data.trend.map((t) => t.mttr), true) : KPIS.developer[0],
-    KPIS.developer[1], // First-time fix rate — no backend source
-    KPIS.developer[2], // Defect density — needs LOC, not tracked
-    KPIS.developer[3], // QA rejections — no backend source
+  const developerKpis: KpiTile[] = [
+    mttr.data?.hasData
+      ? live(liveKpi("Bug MTTR", mttr.data.overall, hrs, mttr.data.trend.map((t) => t.mttr), true))
+      : demo(KPIS.developer[0]),
+    demo(KPIS.developer[1]), // First-time fix rate — no backend source
+    demo(KPIS.developer[2]), // Defect density — needs LOC, not tracked
+    demo(KPIS.developer[3]), // QA rejections — no backend source
   ];
 
-  const poKpis: Kpi[] = [
-    releaseReadiness.data
-      ? liveKpi("Release Readiness", releaseReadiness.data.overallScore, (n) => `${n.toFixed(0)}%`)
-      : KPIS.po[0],
-    KPIS.po[1], // RTM coverage — testCoverage is hardcoded server-side, not real
-    KPIS.po[2], // Open P0/P1 — not returned as a standalone figure today
-    KPIS.po[3], // Regression pass rate — no backend source
+  const poKpis: KpiTile[] = [
+    releaseReadiness.data?.hasData
+      ? live(liveKpi("Release Readiness", releaseReadiness.data.overallScore, (n) => `${n.toFixed(0)}%`))
+      : demo(KPIS.po[0]),
+    demo(KPIS.po[1]), // RTM coverage — testCoverage has no data source (see components.testCoverage)
+    demo(KPIS.po[2]), // Open P0/P1 — not returned as a standalone figure today
+    demo(KPIS.po[3]), // Regression pass rate — no backend source
   ];
 
-  const executiveKpis: Kpi[] = [
-    tenantAnalytics.data
-      ? liveKpi("Quality Health Index", tenantAnalytics.data.overallQualityScore / 10, (n) => `${n.toFixed(1)} /10`)
-      : KPIS.executive[0],
-    KPIS.executive[1], // Cost of Quality — no financial data modeled
-    KPIS.executive[2], // Automation ROI — no financial data modeled
-    KPIS.executive[3], // Escaped defects — no clean single-figure match
+  const executiveKpis: KpiTile[] = [
+    tenantAnalytics.data?.hasData
+      ? live(liveKpi("Quality Health Index", tenantAnalytics.data.overallQualityScore / 10, (n) => `${n.toFixed(1)} /10`))
+      : demo(KPIS.executive[0]),
+    demo(KPIS.executive[1]), // Cost of Quality — no financial data modeled
+    demo(KPIS.executive[2]), // Automation ROI — no financial data modeled
+    demo(KPIS.executive[3]), // Escaped defects — no clean single-figure match
   ];
 
-  const kpisByRole: Record<string, Kpi[]> = {
+  const kpisByRole: Record<string, KpiTile[]> = {
     tester: testerKpis,
     developer: developerKpis,
     po: poKpis,
@@ -162,8 +178,8 @@ function Dashboard() {
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {kpisByRole[role].map((kpi) => (
-          <KpiMetricCard key={kpi.label} kpi={kpi} />
+        {kpisByRole[role].map(({ kpi, isDemo }) => (
+          <KpiMetricCard key={kpi.label} kpi={kpi} isDemo={isDemo} />
         ))}
       </div>
 
@@ -179,12 +195,14 @@ function Dashboard() {
           <GlassPanel title="Execution progress" subtitle={currentProduct?.name ?? "All products"}>
             <div className="flex flex-wrap items-center justify-around gap-4 py-2">
               <CircularProgress
-                value={testMetrics.data ? Math.round(testMetrics.data.passRate) : 94}
+                value={testMetrics.data ? Math.round(testMetrics.data.passRate) : 0}
+                unavailable={!testMetrics.data?.hasData}
                 label="Pass rate"
-                caption={testMetrics.data ? `${testMetrics.data.total} cases` : "412 cases"}
+                caption={testMetrics.data ? `${testMetrics.data.total} cases` : undefined}
               />
               <CircularProgress
-                value={testMetrics.data ? Math.round(testMetrics.data.automationRate) : 68}
+                value={testMetrics.data ? Math.round(testMetrics.data.automationRate) : 0}
+                unavailable={!testMetrics.data?.hasData}
                 label="Automated"
                 caption="of suite"
                 tone="ops"
@@ -198,17 +216,22 @@ function Dashboard() {
           >
             <DeliverablesFeed data={deliverableItems} />
           </GlassPanel>
-          <GlassPanel title="Defect density heatmap" subtitle="Open defects per module">
+          <GlassPanel
+            title="Defect density heatmap"
+            subtitle="Open defects per module"
+            action={<DemoDataBadge />}
+          >
             <DefectHeatmap />
           </GlassPanel>
           <GlassPanel
             title="Related / similar bugs"
             subtitle="Duplicate screening on the newest report"
             className="xl:col-span-2"
+            action={<DemoDataBadge />}
           >
             <SimilarBugs bug={BUGS[0]} />
           </GlassPanel>
-          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers">
+          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers" action={<DemoDataBadge />}>
             <BugDomainDonut />
           </GlassPanel>
 
@@ -224,10 +247,14 @@ function Dashboard() {
           >
             <MttrChart data={mttr.data?.trend} />
           </GlassPanel>
-          <GlassPanel title="QA bottleneck alerts" subtitle="Items waiting on QA or rework">
+          <GlassPanel title="QA bottleneck alerts" subtitle="Items waiting on QA or rework" action={<DemoDataBadge />}>
             <BottleneckList />
           </GlassPanel>
-          <GlassPanel title="Defect density heatmap" subtitle="Modules you touched this sprint">
+          <GlassPanel
+            title="Defect density heatmap"
+            subtitle="Modules you touched this sprint"
+            action={<DemoDataBadge />}
+          >
             <DefectHeatmap />
           </GlassPanel>
           <GlassPanel
@@ -240,6 +267,7 @@ function Dashboard() {
           <GlassPanel
             title="Related / similar bugs"
             subtitle="Check before you start: this may already be fixed"
+            action={<DemoDataBadge />}
           >
             <SimilarBugs bug={BUGS[2]} />
           </GlassPanel>
@@ -247,6 +275,7 @@ function Dashboard() {
             title="Bug domain distribution"
             subtitle="Where defects concentrate across layers"
             className="xl:col-span-2"
+            action={<DemoDataBadge />}
           >
             <BugDomainDonut />
           </GlassPanel>
@@ -259,11 +288,12 @@ function Dashboard() {
           <GlassPanel title="Release readiness" subtitle={currentProduct?.name ?? "Select a product"}>
             <div className="flex flex-wrap items-center justify-around gap-4 py-2">
               <CircularProgress
-                value={releaseReadiness.data?.overallScore ?? 91}
+                value={releaseReadiness.data?.overallScore ?? 0}
+                unavailable={!releaseReadiness.data?.hasData}
                 label="Release ready"
                 caption="score"
               />
-              <CircularProgress value={87} label="RTM coverage" caption="requirements" tone="ops" />
+              <CircularProgress value={0} unavailable label="RTM coverage" caption="no traceability data source" tone="ops" />
             </div>
             <ul className="mt-4 space-y-1.5 text-xs text-muted-foreground">
               {risks.length > 0 ? (
@@ -273,7 +303,7 @@ function Dashboard() {
                   </li>
                 ))
               ) : (
-                <li>{releaseReadiness.data?.recommendation ?? "No risks flagged yet"}</li>
+                <li>{releaseReadiness.data?.recommendation ?? "Loading…"}</li>
               )}
             </ul>
           </GlassPanel>
@@ -281,6 +311,7 @@ function Dashboard() {
             title="Requirements traceability matrix"
             subtitle="Story → test cases → bug status"
             className="xl:col-span-2"
+            action={<DemoDataBadge />}
           >
             <RtmTable />
           </GlassPanel>
@@ -288,6 +319,7 @@ function Dashboard() {
             title="Feature defect heatmap"
             subtitle="Unstable modules across the release"
             className="xl:col-span-2"
+            action={<DemoDataBadge />}
           >
             <DefectHeatmap />
           </GlassPanel>
@@ -316,10 +348,15 @@ function Dashboard() {
             title="Portfolio defect heatmap"
             subtitle="Aggregate open defects per module"
             className="xl:col-span-2"
+            action={<DemoDataBadge />}
           >
             <DefectHeatmap />
           </GlassPanel>
-          <GlassPanel title="Automation ROI" subtitle="Coverage vs manual effort saved">
+          <GlassPanel
+            title="Automation ROI"
+            subtitle="Coverage vs manual effort saved"
+            action={<DemoDataBadge />}
+          >
             <div className="flex flex-wrap items-center justify-around gap-4 py-2">
               <CircularProgress value={68} label="Automation coverage" tone="ops" />
               <CircularProgress value={82} label="Manual effort saved" />

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
+import { DemoDataBanner } from "@/components/qm/DemoDataNotice";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BUGS, BUG_DOMAINS, DOMAIN_COLOR, type BugDomain } from "@/lib/qm-bugs";
@@ -41,6 +42,10 @@ function BugsPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Every incoming defect is auto-tagged by domain and screened against history for duplicates.
         </p>
+        <DemoDataBanner>
+          This entire page is illustrative sample data — domain classification and duplicate
+          screening aren't wired to your synced bugs yet.
+        </DemoDataBanner>
       </header>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

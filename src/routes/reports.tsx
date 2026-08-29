@@ -6,6 +6,7 @@ import { GlassPanel } from "@/components/qm/GlassPanel";
 import { ExecutionTrendChart, MttrChart, VelocityChart } from "@/components/qm/charts";
 import { RtmTable } from "@/components/qm/tables";
 import { ProductHealthList } from "@/components/qm/ProductHealthList";
+import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { useAuth } from "@/lib/auth-context";
 import { useCurrentProduct } from "@/lib/product-context";
 import { useMttr, useTestExecutionMetrics, useVelocityTrend, useTenantAnalytics } from "@/lib/queries/analytics";
@@ -72,6 +73,7 @@ function Reports() {
           title="Requirements traceability matrix"
           subtitle="Story → test cases → bug status"
           className="xl:col-span-2"
+          action={<DemoDataBadge />}
         >
           <RtmTable />
         </GlassPanel>

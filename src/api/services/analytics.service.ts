@@ -20,6 +20,10 @@ export class AnalyticsService {
     byPriority: Record<string, number>;
     bySprint: Record<string, number>;
     trend: Array<{ period: string; mttr: number }>;
+    /** False when zero bugs have ever been resolved for this scope — `overall: 0` in
+     * that case means "never measured," not "instant resolution." Callers must check
+     * this before treating the number as real. */
+    hasData: boolean;
   }> {
     const where: any = {
       type: 'bug',
@@ -52,7 +56,8 @@ export class AnalyticsService {
         overall: 0,
         byPriority: {},
         bySprint: {},
-        trend
+        trend,
+        hasData: false
       };
     }
 
@@ -107,7 +112,8 @@ export class AnalyticsService {
       overall: Math.round(overall * 10) / 10, // Round to 1 decimal
       byPriority: byPriorityAvg,
       bySprint: bySprintAvg,
-      trend
+      trend,
+      hasData: true
     };
   }
 
@@ -145,6 +151,9 @@ export class AnalyticsService {
     totalBugs: number;
     productionBugs: number;
     trend: Array<{ period: string; rate: number }>;
+    /** False when zero bugs are tracked for this scope — `rate: 0` in that case
+     * means "never measured," not "zero leakage." */
+    hasData: boolean;
   }> {
     const where: any = { type: 'bug' };
 
@@ -176,7 +185,8 @@ export class AnalyticsService {
       rate: Math.round(rate * 10) / 10,
       totalBugs: allBugs,
       productionBugs,
-      trend
+      trend,
+      hasData: allBugs > 0
     };
   }
 
@@ -251,6 +261,9 @@ export class AnalyticsService {
     passRate: number;
     automationRate: number;
     executionTrend: Array<{ period: string; passRate: number }>;
+    /** False when zero test executions are recorded for this scope — the rates
+     * default to 0 mathematically but mean "never run," not "always failing." */
+    hasData: boolean;
   }> {
     const where: any = {};
 
@@ -325,7 +338,8 @@ export class AnalyticsService {
     return {
       ...metrics,
       passRate: Math.round(metrics.passRate * 10) / 10,
-      automationRate: Math.round(metrics.automationRate * 10) / 10
+      automationRate: Math.round(metrics.automationRate * 10) / 10,
+      hasData: metrics.total > 0
     };
   }
 
@@ -369,13 +383,16 @@ export class AnalyticsService {
   async calculateReleaseReadiness(productId: string): Promise<{
     overallScore: number;
     components: {
-      testCoverage: number;
-      bugHealth: number;
-      recentTestResults: number;
-      automationCoverage: number;
+      testCoverage: number | null;
+      bugHealth: number | null;
+      recentTestResults: number | null;
+      automationCoverage: number | null;
     };
     recommendation: string;
     risks: string[];
+    /** False when none of the four components below have any real signal —
+     * `overallScore: 0` in that case is a placeholder, not an actual score. */
+    hasData: boolean;
   }> {
     // Get product work items and test cases
     const [openBugs, totalBugs, testCases, recentExecutions] = await Promise.all([
@@ -402,29 +419,39 @@ export class AnalyticsService {
       })
     ]);
 
-    // Calculate components
-    const testCoverage = 100; // Would be calculated based on requirements coverage
-    const bugHealth = totalBugs > 0 ? ((totalBugs - openBugs) / totalBugs) * 100 : 100;
-    const recentTestResults = recentExecutions.length > 0
+    // No requirements↔test-case traceability model exists in this schema (see
+    // the RTM deferral) — this component has no data source at all, ever.
+    const testCoverage: number | null = null;
+    // `null` (not 100) when totalBugs is 0 — "no bugs tracked yet" is not the
+    // same claim as "measured and found perfectly healthy."
+    const bugHealth: number | null = totalBugs > 0 ? ((totalBugs - openBugs) / totalBugs) * 100 : null;
+    const recentTestResults: number | null = recentExecutions.length > 0
       ? (recentExecutions.filter(e => e.status === 'passed').length / recentExecutions.length) * 100
-      : 0;
-    const automationCoverage = testCases > 0
+      : null;
+    const automationCoverage: number | null = testCases > 0
       ? (recentExecutions.filter(e => e.testCase.automationStatus === 'automated').length / testCases) * 100
-      : 0;
+      : null;
 
-    // Calculate overall score (weighted average)
-    const overallScore = (
-      testCoverage * 0.25 +
-      bugHealth * 0.35 +
-      recentTestResults * 0.25 +
-      automationCoverage * 0.15
-    );
+    // Weighted average over only the components that actually have data —
+    // re-normalizing the weights rather than defaulting a missing component
+    // to a fixed value, which previously made an empty product score the
+    // same as a genuinely healthy one.
+    const weights = { testCoverage: 0.25, bugHealth: 0.35, recentTestResults: 0.25, automationCoverage: 0.15 };
+    const raw = { testCoverage, bugHealth, recentTestResults, automationCoverage };
+    const available = (Object.keys(raw) as Array<keyof typeof raw>).filter((k) => raw[k] !== null);
+    const totalWeight = available.reduce((sum, k) => sum + weights[k], 0);
+    const hasData = totalWeight > 0;
+    const overallScore = hasData
+      ? available.reduce((sum, k) => sum + (raw[k] as number) * weights[k], 0) / totalWeight
+      : 0;
 
     // Determine recommendation and risks
     const risks: string[] = [];
     let recommendation = '';
 
-    if (overallScore >= 80) {
+    if (!hasData) {
+      recommendation = 'Not enough data yet — connect Jira/test tooling and sync activity for this product';
+    } else if (overallScore >= 80) {
       recommendation = 'Ready for release';
     } else if (overallScore >= 60) {
       recommendation = 'Proceed with caution';
@@ -432,22 +459,23 @@ export class AnalyticsService {
     } else {
       recommendation = 'Not ready for release';
       if (openBugs > 0) risks.push(`${openBugs} high-priority bugs still open`);
-      if (recentTestResults < 70) risks.push('Recent test pass rate below 70%');
-      if (automationCoverage < 30) risks.push('Low automation coverage');
+      if (recentTestResults !== null && recentTestResults < 70) risks.push('Recent test pass rate below 70%');
+      if (automationCoverage !== null && automationCoverage < 30) risks.push('Low automation coverage');
     }
 
-    if (testCases < 10) risks.push('Limited test coverage');
+    if (testCases > 0 && testCases < 10) risks.push('Limited test coverage');
 
     return {
       overallScore: Math.round(overallScore),
       components: {
-        testCoverage: Math.round(testCoverage),
-        bugHealth: Math.round(bugHealth),
-        recentTestResults: Math.round(recentTestResults),
-        automationCoverage: Math.round(automationCoverage)
+        testCoverage,
+        bugHealth: bugHealth !== null ? Math.round(bugHealth) : null,
+        recentTestResults: recentTestResults !== null ? Math.round(recentTestResults) : null,
+        automationCoverage: automationCoverage !== null ? Math.round(automationCoverage) : null
       },
       recommendation,
-      risks
+      risks,
+      hasData
     };
   }
 
@@ -561,8 +589,10 @@ export class AnalyticsService {
   async getTenantAnalytics(tenantId: string, startDate?: Date, endDate?: Date): Promise<{
     tenant: { id: string; name: string; slug: string };
     teamProductivity: Awaited<ReturnType<typeof this.calculateTeamProductivity>>;
-    products: Array<{ productId: string; productName: string; healthScore: number }>;
+    products: Array<{ productId: string; productName: string; healthScore: number; hasData: boolean }>;
     overallQualityScore: number;
+    /** False when not a single active product has any real signal yet. */
+    hasData: boolean;
   }> {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -578,34 +608,34 @@ export class AnalyticsService {
       select: { id: true, name: true }
     });
 
-    // Get analytics for each product
+    // Get analytics for each product — same "average only what has data"
+    // approach as calculateReleaseReadiness, so a product with no synced
+    // activity reports as no-data rather than a fabricated middle score.
     const productAnalytics = await Promise.all(
       products.map(async (product) => {
         try {
           const analytics = await this.getProductAnalytics(product.id, startDate, endDate);
-          const healthScore = (
-            (100 - analytics.defectLeakage.rate) * 0.3 +
-            analytics.testMetrics.passRate * 0.4 +
-            analytics.releaseReadiness.overallScore * 0.3
-          );
+          const parts: Array<{ value: number; weight: number }> = [];
+          if (analytics.defectLeakage.hasData) parts.push({ value: 100 - analytics.defectLeakage.rate, weight: 0.3 });
+          if (analytics.testMetrics.hasData) parts.push({ value: analytics.testMetrics.passRate, weight: 0.4 });
+          if (analytics.releaseReadiness.hasData) parts.push({ value: analytics.releaseReadiness.overallScore, weight: 0.3 });
 
-          return {
-            productId: product.id,
-            productName: product.name,
-            healthScore: Math.round(healthScore)
-          };
+          const totalWeight = parts.reduce((sum, p) => sum + p.weight, 0);
+          const hasData = totalWeight > 0;
+          const healthScore = hasData
+            ? Math.round(parts.reduce((sum, p) => sum + p.value * p.weight, 0) / totalWeight)
+            : 0;
+
+          return { productId: product.id, productName: product.name, healthScore, hasData };
         } catch (error) {
-          return {
-            productId: product.id,
-            productName: product.name,
-            healthScore: 0
-          };
+          return { productId: product.id, productName: product.name, healthScore: 0, hasData: false };
         }
       })
     );
 
-    const overallQualityScore = productAnalytics.length > 0
-      ? productAnalytics.reduce((sum, p) => sum + p.healthScore, 0) / productAnalytics.length
+    const scoredProducts = productAnalytics.filter((p) => p.hasData);
+    const overallQualityScore = scoredProducts.length > 0
+      ? scoredProducts.reduce((sum, p) => sum + p.healthScore, 0) / scoredProducts.length
       : 0;
 
     const teamProductivity = await this.calculateTeamProductivity(tenantId, startDate, endDate);
@@ -614,7 +644,8 @@ export class AnalyticsService {
       tenant,
       teamProductivity,
       products: productAnalytics,
-      overallQualityScore: Math.round(overallQualityScore)
+      overallQualityScore: Math.round(overallQualityScore),
+      hasData: scoredProducts.length > 0
     };
   }
 }

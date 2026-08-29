@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Lock, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
+import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
 import { FilterBar } from "@/components/qm/FilterBar";
 import {
@@ -145,6 +146,7 @@ function AiUsagePage() {
                 title="Spend by model per sprint"
                 subtitle="Stacked vendor cost against the sprint cap"
                 className="xl:col-span-2"
+                action={<DemoDataBadge />}
               >
                 <AiSpendChart />
               </GlassPanel>
@@ -192,11 +194,16 @@ function AiUsagePage() {
               title="Token consumption trend"
               subtitle="Input vs output volume with prompt-cache ratio"
               className="xl:col-span-2"
+              action={<DemoDataBadge />}
             >
               <AiTokenChart />
             </GlassPanel>
 
-            <GlassPanel title="Where tokens go" subtitle="Activity mix across code, tests and docs">
+            <GlassPanel
+              title="Where tokens go"
+              subtitle="Activity mix across code, tests and docs"
+              action={<DemoDataBadge />}
+            >
               <AiActivityDonut />
             </GlassPanel>
 
@@ -204,6 +211,7 @@ function AiUsagePage() {
               title="Model efficiency"
               subtitle="Suggestion acceptance against unit cost"
               className="xl:col-span-2"
+              action={<DemoDataBadge />}
             >
               <AiModelEfficiencyChart />
             </GlassPanel>

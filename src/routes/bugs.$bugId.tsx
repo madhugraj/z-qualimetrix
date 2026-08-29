@@ -2,6 +2,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft, Download, GitBranch, Layers, User } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
+import { DemoDataBanner } from "@/components/qm/DemoDataNotice";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BUGS, DOMAIN_COLOR, type Bug, type BugDomain } from "@/lib/qm-bugs";
 import { exportJson } from "@/lib/qm-export";
@@ -107,6 +108,9 @@ function BugDetail() {
             <Download className="h-3.5 w-3.5" /> Export bug
           </button>
         </div>
+        <DemoDataBanner>
+          This bug record is illustrative sample data, not a synced defect.
+        </DemoDataBanner>
       </header>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

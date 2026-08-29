@@ -2,6 +2,7 @@ export interface ProductHealth {
   productId: string;
   productName: string;
   healthScore: number;
+  hasData: boolean;
 }
 
 function scoreTone(score: number): string {
@@ -20,7 +21,13 @@ export function ProductHealthList({ products }: { products: ProductHealth[] }) {
     return <p className="text-sm text-muted-foreground">No active products yet.</p>;
   }
 
-  const sorted = [...products].sort((a, b) => b.healthScore - a.healthScore);
+  // Scored products first (highest health first), then products with no
+  // signal at all — grouping "no data" together rather than interleaving it
+  // at a misleading rank.
+  const sorted = [...products].sort((a, b) => {
+    if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
+    return b.healthScore - a.healthScore;
+  });
 
   return (
     <ul className="space-y-2">
@@ -30,17 +37,21 @@ export function ProductHealthList({ products }: { products: ProductHealth[] }) {
           className="flex items-center justify-between gap-3 rounded-xl border border-glass-border/60 px-3 py-2.5"
         >
           <span className="truncate text-sm font-medium">{p.productName}</span>
-          <div className="flex items-center gap-2">
-            <span className="h-1.5 w-28 overflow-hidden rounded-full bg-border">
-              <span
-                className="block h-full rounded-full bg-primary"
-                style={{ width: `${Math.max(0, Math.min(100, p.healthScore))}%` }}
-              />
-            </span>
-            <span className={`w-10 text-right text-xs font-semibold ${scoreTone(p.healthScore)}`}>
-              {p.healthScore}
-            </span>
-          </div>
+          {p.hasData ? (
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-28 overflow-hidden rounded-full bg-border">
+                <span
+                  className="block h-full rounded-full bg-primary"
+                  style={{ width: `${Math.max(0, Math.min(100, p.healthScore))}%` }}
+                />
+              </span>
+              <span className={`w-10 text-right text-xs font-semibold ${scoreTone(p.healthScore)}`}>
+                {p.healthScore}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">No data yet</span>
+          )}
         </li>
       ))}
     </ul>

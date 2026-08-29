@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
+import { DemoDataBanner } from "@/components/qm/DemoDataNotice";
 import { DeveloperProfileCard } from "@/components/qm/DeveloperProfileCard";
 import { AllocationChart, ConsistencyChart } from "@/components/qm/people-charts";
 import { SiloAlerts, TrainingList } from "@/components/qm/people-panels";
@@ -42,6 +43,10 @@ function EngineeringHealth() {
           Restricted to Managers, Leads and HR partners. Metrics are aggregated to guide support and
           resourcing decisions — never used for individual performance ranking.
         </p>
+        <DemoDataBanner>
+          This entire page is illustrative sample data — burnout/allocation/silo signals have no
+          backing data source yet (no schema fields for after-hours activity, feature/fix split, etc.).
+        </DemoDataBanner>
       </header>
 
       <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

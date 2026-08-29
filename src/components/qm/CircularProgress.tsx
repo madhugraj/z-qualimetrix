@@ -1,4 +1,5 @@
 import type { Tone } from "@/lib/qm-data";
+import { cn } from "@/lib/utils";
 
 const toneVar: Record<Tone, string> = {
   good: "var(--good)",
@@ -14,6 +15,9 @@ interface CircularProgressProps {
   caption?: string;
   tone?: Tone;
   size?: number;
+  /** No real data yet — shows "N/A" and an empty ring instead of a fabricated
+   * percentage (e.g. a product with zero synced bugs isn't "0% unhealthy"). */
+  unavailable?: boolean;
 }
 
 export function CircularProgress({
@@ -22,6 +26,7 @@ export function CircularProgress({
   caption,
   tone = "good",
   size = 148,
+  unavailable = false,
 }: CircularProgressProps) {
   const stroke = 10;
   const radius = (size - stroke) / 2;
@@ -40,21 +45,25 @@ export function CircularProgress({
             stroke="var(--border)"
             strokeWidth={stroke}
           />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
-            stroke={toneVar[tone]}
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            style={{ transition: "stroke-dashoffset 700ms ease" }}
-          />
+          {!unavailable && (
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={toneVar[tone]}
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              style={{ transition: "stroke-dashoffset 700ms ease" }}
+            />
+          )}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-2xl font-semibold tracking-tight">{value}%</span>
+          <span className={cn("text-2xl font-semibold tracking-tight", unavailable && "text-muted-foreground")}>
+            {unavailable ? "N/A" : `${value}%`}
+          </span>
           {caption && <span className="text-[11px] text-muted-foreground">{caption}</span>}
         </div>
       </div>

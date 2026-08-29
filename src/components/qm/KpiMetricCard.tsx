@@ -2,6 +2,7 @@ import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Area, AreaChart, ResponsiveContainer } from "recharts";
 import type { Kpi, Tone } from "@/lib/qm-data";
 import { cn } from "@/lib/utils";
+import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 
 const toneText: Record<Tone, string> = {
   good: "text-good",
@@ -19,16 +20,19 @@ const toneVar: Record<Tone, string> = {
   neutral: "var(--muted-foreground)",
 };
 
-export function KpiMetricCard({ kpi }: { kpi: Kpi }) {
+export function KpiMetricCard({ kpi, isDemo = false }: { kpi: Kpi; isDemo?: boolean }) {
   const Icon = kpi.trend === "up" ? ArrowUpRight : kpi.trend === "down" ? ArrowDownRight : Minus;
   const data = kpi.spark.map((v, i) => ({ i, v }));
   const gradientId = `spark-${kpi.label.replace(/\W/g, "")}`;
 
   return (
     <article className="glass glass-hover relative overflow-hidden rounded-2xl p-4">
-      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-        {kpi.label}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          {kpi.label}
+        </p>
+        {isDemo && <DemoDataBadge />}
+      </div>
       <div className="mt-2 flex items-end justify-between gap-2">
         <span className="text-2xl font-semibold tracking-tight">{kpi.value}</span>
         <span className={cn("flex items-center gap-0.5 text-xs font-medium", toneText[kpi.tone])}>
