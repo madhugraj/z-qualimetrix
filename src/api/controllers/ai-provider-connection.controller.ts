@@ -19,6 +19,7 @@ import {
   reserveIntegrationOperation,
 } from "../../lib/scheduler";
 import { syncAnthropicConnection } from "../services/anthropic-usage-sync.service";
+import { paramString } from "../utils/http-params";
 
 function tenantId(req: Request): string | null {
   return req.user?.tenantId ?? null;
@@ -92,6 +93,7 @@ export async function attachAnthropicReportingCredential(req: Request, res: Resp
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const id = paramString(req.params.id);
   const { credentialSource, apiKey } = req.body ?? {};
   if (!isOneOf(credentialSource, ANTHROPIC_CREDENTIAL_SOURCES)) {
     return res.status(400).json({ success: false, error: "Unsupported credential source" });
@@ -102,13 +104,13 @@ export async function attachAnthropicReportingCredential(req: Request, res: Resp
   try {
     const data = await aiProviderConnectionService.attachAnthropicReportingCredential(
       tenant,
-      req.params.id,
+      id,
       credentialSource as AnthropicCredentialSource,
       apiKey,
     );
     if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
 
-    const connection = await aiProviderConnectionService.getForTenant(tenant, req.params.id);
+    const connection = await aiProviderConnectionService.getForTenant(tenant, id);
     if (connection) requestSyncNow(connection.id, () => syncAnthropicConnection(connection));
     return res.json({ success: true, data });
   } catch (error) {
@@ -181,7 +183,8 @@ export async function listAnthropicIdentities(req: Request, res: Response) {
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
-  const data = await aiProviderConnectionService.listIdentities(tenant, req.params.id);
+  const id = paramString(req.params.id);
+  const data = await aiProviderConnectionService.listIdentities(tenant, id);
   if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
   res.json({ success: true, data });
 }
@@ -190,7 +193,8 @@ export async function getAnthropicDeletionPreview(req: Request, res: Response) {
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
-  const data = await aiProviderConnectionService.getDeletionPreview(tenant, req.params.id);
+  const id = paramString(req.params.id);
+  const data = await aiProviderConnectionService.getDeletionPreview(tenant, id);
   if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
   return res.json({ success: true, data });
 }
@@ -216,11 +220,12 @@ export async function permanentlyDeleteAnthropicConnection(req: Request, res: Re
 
   // Resolve ownership before touching the process-wide operation lock. This
   // prevents a tenant from probing or briefly blocking another tenant's ID.
-  const ownedConnection = await aiProviderConnectionService.getAnyForTenant(tenant, req.params.id);
+  const id = paramString(req.params.id);
+  const ownedConnection = await aiProviderConnectionService.getAnyForTenant(tenant, id);
   if (!ownedConnection)
     return res.status(404).json({ success: false, error: "Connection not found" });
 
-  if (!reserveIntegrationOperation(req.params.id)) {
+  if (!reserveIntegrationOperation(id)) {
     return res.status(409).json({
       success: false,
       error: "A synchronization is running. Wait for it to finish, then retry deletion.",
@@ -230,7 +235,7 @@ export async function permanentlyDeleteAnthropicConnection(req: Request, res: Re
   try {
     const data = await aiProviderConnectionService.permanentlyDelete(
       tenant,
-      req.params.id,
+      id,
       req.user!.id,
       reason,
       confirmation,
@@ -243,7 +248,7 @@ export async function permanentlyDeleteAnthropicConnection(req: Request, res: Re
       .status(/legal hold/i.test(message) ? 409 : 400)
       .json({ success: false, error: message });
   } finally {
-    releaseIntegrationOperation(req.params.id);
+    releaseIntegrationOperation(id);
   }
 }
 
@@ -252,9 +257,10 @@ export async function rotateAnthropicTelemetryToken(req: Request, res: Response)
     const tenant = tenantId(req);
     if (!tenant)
       return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+    const id = paramString(req.params.id);
     const data = await aiProviderConnectionService.rotateTelemetryToken(
       tenant,
-      req.params.id,
+      id,
       baseUrl(req),
     );
     if (!data) return res.status(404).json({ success: false, error: "Connection not found" });
@@ -271,7 +277,7 @@ export async function syncAnthropicNow(req: Request, res: Response) {
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
-  const connection = await aiProviderConnectionService.getForTenant(tenant, req.params.id);
+  const connection = await aiProviderConnectionService.getForTenant(tenant, paramString(req.params.id));
   if (!connection) return res.status(404).json({ success: false, error: "Connection not found" });
   if (!connection.encryptedCredential) {
     return res.status(409).json({
@@ -291,21 +297,22 @@ export async function disconnectAnthropicConnection(req: Request, res: Response)
   const tenant = tenantId(req);
   if (!tenant)
     return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
-  const ownedConnection = await aiProviderConnectionService.getForTenant(tenant, req.params.id);
+  const id = paramString(req.params.id);
+  const ownedConnection = await aiProviderConnectionService.getForTenant(tenant, id);
   if (!ownedConnection)
     return res.status(404).json({ success: false, error: "Connection not found" });
-  if (!reserveIntegrationOperation(req.params.id)) {
+  if (!reserveIntegrationOperation(id)) {
     return res.status(409).json({
       success: false,
       error: "A synchronization is running. Wait for it to finish, then retry.",
     });
   }
   try {
-    const disconnected = await aiProviderConnectionService.disconnect(tenant, req.params.id);
+    const disconnected = await aiProviderConnectionService.disconnect(tenant, id);
     if (!disconnected)
       return res.status(404).json({ success: false, error: "Connection not found" });
     return res.json({ success: true });
   } finally {
-    releaseIntegrationOperation(req.params.id);
+    releaseIntegrationOperation(id);
   }
 }

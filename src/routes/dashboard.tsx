@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
 import { GlassPanel } from "@/components/qm/GlassPanel";
@@ -6,6 +7,9 @@ import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
 import { CircularProgress } from "@/components/qm/CircularProgress";
 import { useAuth } from "@/lib/auth-context";
 import { useCurrentProduct } from "@/lib/product-context";
+import { useDateRange } from "@/lib/date-range-context";
+import { getWorkflowRuns } from "@/lib/github-data.service";
+import { useProductRepositories, primaryRepo } from "@/lib/queries/product-repositories";
 import { DefectHeatmap } from "@/components/qm/DefectHeatmap";
 import { DeliverablesFeed, deliverableRecordToItem } from "@/components/qm/DeliverablesFeed";
 import { BottleneckList, RtmTable } from "@/components/qm/tables";
@@ -25,6 +29,13 @@ import {
   useReleaseReadiness,
   useTenantAnalytics,
   useProductDeliverables,
+  useBugLabelDistribution,
+  useOpenP0P1Count,
+  useReopenMetrics,
+  useQaBottlenecks,
+  useMostRecentBugId,
+  useSimilarBugs,
+  useRequirementTraceability,
 } from "@/lib/queries/analytics";
 
 export const Route = createFileRoute("/dashboard")({
@@ -71,14 +82,38 @@ function Dashboard() {
   // confirmed portfolio-scoped (pm/executive with none selected) — the
   // backend rejects an omitted productId for any other role.
   const queryEnabled = !productsLoading && (!!productId || isPortfolioView);
+  const { startDate, endDate } = useDateRange();
 
-  const mttr = useMttr(productId, queryEnabled);
-  const defectLeakage = useDefectLeakage(productId, queryEnabled);
-  const testMetrics = useTestExecutionMetrics(productId, queryEnabled);
-  const velocityTrend = useVelocityTrend(productId);
+  const mttr = useMttr(productId, queryEnabled, startDate, endDate);
+  const defectLeakage = useDefectLeakage(productId, queryEnabled, startDate, endDate);
+  const testMetrics = useTestExecutionMetrics(productId, queryEnabled, startDate, endDate);
+  const velocityTrend = useVelocityTrend(productId, queryEnabled, startDate, endDate);
   const releaseReadiness = useReleaseReadiness(productId);
   const deliverables = useProductDeliverables(productId);
   const tenantAnalytics = useTenantAnalytics(user?.tenantId ?? undefined);
+  const bugLabelDistribution = useBugLabelDistribution(productId, queryEnabled, startDate, endDate);
+  const openP0P1 = useOpenP0P1Count(productId, queryEnabled);
+  const reopenMetrics = useReopenMetrics(productId, queryEnabled, startDate, endDate);
+  const qaBottlenecks = useQaBottlenecks(productId, queryEnabled);
+  const mostRecentBugId = useMostRecentBugId(productId);
+  const similarBugs = useSimilarBugs(productId, mostRecentBugId.data);
+  const requirementTraceability = useRequirementTraceability(productId, queryEnabled);
+
+  // Same source FilterBar's GitHubRepoPill reads — the current product's
+  // mapped ProductRepository row(s) — instead of the old localStorage
+  // key + window event, which had no relationship to what's actually
+  // mapped and let the CI panel query repos the backend now 403s on.
+  const productRepos = useProductRepositories(productId);
+  const selectedRepo = primaryRepo(productRepos.data);
+  const [repoOwner, repoName] = selectedRepo?.split("/") ?? [undefined, undefined];
+  const workflowRuns = useQuery({
+    queryKey: ["github-workflow-runs", repoOwner, repoName],
+    queryFn: () => getWorkflowRuns(repoOwner!, repoName!, 30),
+    enabled: !!repoOwner && !!repoName,
+  });
+  const completedRuns = (workflowRuns.data ?? []).filter((r) => r.status === "completed");
+  const passedRuns = completedRuns.filter((r) => r.conclusion === "success");
+  const ciPassRate = completedRuns.length > 0 ? Math.round((passedRuns.length / completedRuns.length) * 100) : null;
 
   if (isLoading) {
     return (
@@ -116,7 +151,9 @@ function Dashboard() {
     defectLeakage.data?.hasData
       ? live(liveKpi("Defect Leakage Rate", defectLeakage.data.rate, pct, defectLeakage.data.trend.map((t) => t.rate), true))
       : demo(KPIS.tester[1]),
-    demo(KPIS.tester[2]), // Bug Reopen Rate — no backend source (no reopen-history table)
+    reopenMetrics.data?.hasData
+      ? live(liveKpi("Bug Reopen Rate", reopenMetrics.data.reopenRate, pct, undefined, true))
+      : demo(KPIS.tester[2]),
     testMetrics.data?.hasData
       ? live(liveKpi("Automation Ratio", testMetrics.data.automationRate, pct))
       : demo(KPIS.tester[3]),
@@ -126,7 +163,9 @@ function Dashboard() {
     mttr.data?.hasData
       ? live(liveKpi("Bug MTTR", mttr.data.overall, hrs, mttr.data.trend.map((t) => t.mttr), true))
       : demo(KPIS.developer[0]),
-    demo(KPIS.developer[1]), // First-time fix rate — no backend source
+    reopenMetrics.data?.hasData
+      ? live(liveKpi("First-Time Fix Rate", reopenMetrics.data.firstTimeFixRate, pct))
+      : demo(KPIS.developer[1]),
     demo(KPIS.developer[2]), // Defect density — needs LOC, not tracked
     demo(KPIS.developer[3]), // QA rejections — no backend source
   ];
@@ -136,7 +175,9 @@ function Dashboard() {
       ? live(liveKpi("Release Readiness", releaseReadiness.data.overallScore, (n) => `${n.toFixed(0)}%`))
       : demo(KPIS.po[0]),
     demo(KPIS.po[1]), // RTM coverage — testCoverage has no data source (see components.testCoverage)
-    demo(KPIS.po[2]), // Open P0/P1 — not returned as a standalone figure today
+    openP0P1.data?.hasData
+      ? live(liveKpi("Open P0/P1", openP0P1.data.count, (n) => `${n}`, undefined, true))
+      : demo(KPIS.po[2]),
     demo(KPIS.po[3]), // Regression pass rate — no backend source
   ];
 
@@ -174,7 +215,7 @@ function Dashboard() {
       </header>
 
       <div className="mb-5">
-        <FilterBar />
+        <FilterBar showRepository />
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -217,22 +258,22 @@ function Dashboard() {
             <DeliverablesFeed data={deliverableItems} />
           </GlassPanel>
           <GlassPanel
-            title="Defect density heatmap"
-            subtitle="Open defects per module"
-            action={<DemoDataBadge />}
+            title="Defect distribution heatmap"
+            subtitle="Open defects per Jira label"
+            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <DefectHeatmap />
+            <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
           <GlassPanel
             title="Related / similar bugs"
             subtitle="Duplicate screening on the newest report"
             className="xl:col-span-2"
-            action={<DemoDataBadge />}
+            action={!similarBugs.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <SimilarBugs bug={BUGS[0]} />
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[0]} />
           </GlassPanel>
-          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers" action={<DemoDataBadge />}>
-            <BugDomainDonut />
+          <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers" action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}>
+            <BugDomainDonut distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
 
         </div>
@@ -242,31 +283,35 @@ function Dashboard() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
           <GlassPanel
             title="MTTR trend"
-            subtitle={currentProduct ? `${currentProduct.name} · last sprints` : "Last sprints"}
+            subtitle={currentProduct ? `${currentProduct.name} · recent sprints or weeks` : "Recent sprints or weeks"}
             className="xl:col-span-2"
           >
             <MttrChart data={mttr.data?.trend} />
           </GlassPanel>
-          <GlassPanel title="QA bottleneck alerts" subtitle="Items waiting on QA or rework" action={<DemoDataBadge />}>
-            <BottleneckList />
+          <GlassPanel
+            title="QA bottleneck alerts"
+            subtitle="Items waiting on QA or rework"
+            action={!qaBottlenecks.data?.hasData ? <DemoDataBadge /> : undefined}
+          >
+            <BottleneckList bottlenecks={qaBottlenecks.data?.bottlenecks} hasData={qaBottlenecks.data?.hasData} />
           </GlassPanel>
           <GlassPanel
-            title="Defect density heatmap"
-            subtitle="Modules you touched this sprint"
-            action={<DemoDataBadge />}
+            title="Defect distribution heatmap"
+            subtitle="Open defects by Jira label"
+            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <DefectHeatmap />
+            <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
           <GlassPanel
             title="Velocity vs defect flow"
-            subtitle="Story points against bugs created / resolved"
+            subtitle="Issues completed against bugs created / resolved"
             className="xl:col-span-2"
           >
             <VelocityChart
               data={velocityTrend.data}
               emptyMessage={
                 currentProduct
-                  ? `No sprint data synced for ${currentProduct.name} yet.`
+                  ? `No completed work yet for ${currentProduct.name}.`
                   : "Select a product to see its velocity trend."
               }
             />
@@ -274,17 +319,17 @@ function Dashboard() {
           <GlassPanel
             title="Related / similar bugs"
             subtitle="Check before you start: this may already be fixed"
-            action={<DemoDataBadge />}
+            action={!similarBugs.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <SimilarBugs bug={BUGS[2]} />
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[2]} />
           </GlassPanel>
           <GlassPanel
             title="Bug domain distribution"
             subtitle="Where defects concentrate across layers"
             className="xl:col-span-2"
-            action={<DemoDataBadge />}
+            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <BugDomainDonut />
+            <BugDomainDonut distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
 
         </div>
@@ -316,19 +361,19 @@ function Dashboard() {
           </GlassPanel>
           <GlassPanel
             title="Requirements traceability matrix"
-            subtitle="Story → test cases → bug status"
+            subtitle="Requirement → linked defects → status, from real Jira/ADO issue links"
             className="xl:col-span-2"
-            action={<DemoDataBadge />}
+            action={!requirementTraceability.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <RtmTable />
+            <RtmTable requirements={requirementTraceability.data?.requirements} hasData={requirementTraceability.data?.hasData} />
           </GlassPanel>
           <GlassPanel
             title="Feature defect heatmap"
-            subtitle="Unstable modules across the release"
+            subtitle="Unstable Jira labels across the release"
             className="xl:col-span-2"
-            action={<DemoDataBadge />}
+            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <DefectHeatmap />
+            <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
           <GlassPanel title="Recent deliverables" subtitle="Demos, docs & RCAs">
             <DeliverablesFeed data={deliverableItems} />
@@ -346,35 +391,52 @@ function Dashboard() {
           </GlassPanel>
           <GlassPanel
             title="Quality velocity trend"
-            subtitle={currentProduct ? `${currentProduct.name} · velocity vs defect flow` : "Select a product for velocity trend"}
+            subtitle={currentProduct ? `${currentProduct.name} · issues completed vs defect flow` : "Portfolio · issues completed vs defect flow"}
             className="xl:col-span-2"
           >
             <VelocityChart
               data={velocityTrend.data}
               emptyMessage={
                 currentProduct
-                  ? `No sprint data synced for ${currentProduct.name} yet.`
-                  : "Select a product to see its velocity trend."
+                  ? `No completed work yet for ${currentProduct.name}.`
+                  : "No completed work yet across your portfolio."
               }
             />
           </GlassPanel>
           <GlassPanel
             title="Portfolio defect heatmap"
-            subtitle="Aggregate open defects per module"
+            subtitle="Aggregate open defects per Jira label"
             className="xl:col-span-2"
-            action={<DemoDataBadge />}
+            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <DefectHeatmap />
+            <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
           </GlassPanel>
           <GlassPanel
-            title="Automation ROI"
-            subtitle="Coverage vs manual effort saved"
-            action={<DemoDataBadge />}
+            title="CI test automation"
+            subtitle={selectedRepo ? `GitHub Actions · ${selectedRepo}` : "Select a repository to see CI activity"}
+            action={ciPassRate === null ? <DemoDataBadge /> : undefined}
           >
-            <div className="flex flex-wrap items-center justify-around gap-4 py-2">
-              <CircularProgress value={68} label="Automation coverage" tone="ops" />
-              <CircularProgress value={82} label="Manual effort saved" />
-            </div>
+            {!selectedRepo ? (
+              <p className="text-sm text-muted-foreground">
+                Pick a repository from the Repository filter above to see its automated test-run history.
+              </p>
+            ) : workflowRuns.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : ciPassRate === null ? (
+              <p className="text-sm text-muted-foreground">
+                No completed GitHub Actions runs yet for {selectedRepo}. This reflects real CI activity, not a
+                test-management tool — there's no connected Xray/Zephyr/TestRail integration, so "% of test cases
+                automated" isn't something this app can measure yet.
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center justify-around gap-4 py-2">
+                <CircularProgress value={ciPassRate} label="CI pass rate" caption={`last ${completedRuns.length} runs`} tone="ops" />
+                <div className="text-center">
+                  <p className="text-3xl font-semibold">{completedRuns.length}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Automated runs (recent)</p>
+                </div>
+              </div>
+            )}
           </GlassPanel>
         </div>
       )}

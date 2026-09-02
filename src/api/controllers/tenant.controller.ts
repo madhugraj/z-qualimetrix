@@ -57,7 +57,7 @@ export class TenantController extends BaseController {
    * Get tenant by ID
    */
   getTenantById = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -106,7 +106,7 @@ export class TenantController extends BaseController {
    * Get tenant by slug
    */
   getTenantBySlug = this.asyncHandler(async (req: Request, res: Response) => {
-    const { slug } = req.params;
+    const slug = this.paramString(req, 'slug');
 
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
@@ -187,7 +187,7 @@ export class TenantController extends BaseController {
    * Update tenant
    */
   updateTenant = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
     const { name, domain, logoUrl, subscriptionTier, maxUsers, maxProducts, settings } = req.body;
 
     try {
@@ -228,7 +228,7 @@ export class TenantController extends BaseController {
    * Delete tenant
    */
   deleteTenant = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     try {
       // First check what will be deleted
@@ -271,7 +271,7 @@ export class TenantController extends BaseController {
    * Get tenant statistics
    */
   getTenantStats = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {

@@ -10,6 +10,7 @@
 
 import { Request, Response } from 'express';
 import prisma from '../../lib/prisma';
+import { paramString } from '../utils/http-params';
 
 /**
  * Deliberately NOT getModelCatalog() — that function collapses a tenant
@@ -82,7 +83,7 @@ export async function updateModelCatalogEntry(req: Request, res: Response) {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
 
-  const { id } = req.params;
+  const id = paramString(req.params.id);
   const existing = await prisma.aiModelCatalog.findUnique({ where: { id } });
   if (!existing || existing.tenantId !== tenantId) {
     return res.status(404).json({ success: false, error: 'Catalog entry not found' });
@@ -113,7 +114,7 @@ export async function deactivateModelCatalogEntry(req: Request, res: Response) {
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
 
-  const { id } = req.params;
+  const id = paramString(req.params.id);
   const existing = await prisma.aiModelCatalog.findUnique({ where: { id } });
   if (!existing || existing.tenantId !== tenantId) {
     return res.status(404).json({ success: false, error: 'Catalog entry not found' });

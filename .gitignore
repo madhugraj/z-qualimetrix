@@ -35,3 +35,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Krutrim recon output — screenshots/HTML/network dumps of a real logged-in
+# account, never safe to commit
+krutrim-recon-output/

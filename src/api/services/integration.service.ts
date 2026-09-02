@@ -2,7 +2,11 @@ import { Prisma } from '@prisma/client';
 import prisma from '../../lib/prisma';
 import { encrypt, decrypt } from '../../lib/encryption';
 
-export type IntegrationProvider = 'jira' | 'azure_devops' | 'openai' | 'vertex_ai';
+// 'vertex_ai' was a stub here (never had a sync service or scheduler handler
+// wired up) — Vertex AI/Gemini now goes through the generic
+// provider-connection.service.ts path instead, alongside GPU-compute
+// providers, not this OAuth-token-pair-shaped Integration model.
+export type IntegrationProvider = 'jira' | 'azure_devops' | 'openai';
 export type IntegrationStatus = 'connected' | 'error' | 'reauth_required' | 'disconnected';
 
 export const MIN_SYNC_FREQUENCY_MINUTES = 5;

@@ -6,7 +6,6 @@ import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
-import { FilterBar } from "@/components/qm/FilterBar";
 import {
   AiActivityDonut,
   AiModelEfficiencyChart,
@@ -115,10 +114,6 @@ function AiUsagePage() {
         <span>{AI_VISIBILITY_NOTE[level]}</span>
       </div>
 
-      <div className="mb-5">
-        <FilterBar />
-      </div>
-
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[400px]">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -146,9 +141,9 @@ function AiUsagePage() {
                 title="Spend by model per sprint"
                 subtitle="Stacked vendor cost against the sprint cap"
                 className="xl:col-span-2"
-                action={<DemoDataBadge />}
+                action={analytics.models.length === 0 ? <DemoDataBadge /> : undefined}
               >
-                <AiSpendChart />
+                <AiSpendChart data={analytics.spendTrend} models={analytics.models} />
               </GlassPanel>
             )}
 
@@ -194,26 +189,26 @@ function AiUsagePage() {
               title="Token consumption trend"
               subtitle="Input vs output volume with prompt-cache ratio"
               className="xl:col-span-2"
-              action={<DemoDataBadge />}
+              action={analytics.totals.tokens === 0 ? <DemoDataBadge /> : undefined}
             >
-              <AiTokenChart />
+              <AiTokenChart data={analytics.tokenTrend} />
             </GlassPanel>
 
             <GlassPanel
               title="Where tokens go"
               subtitle="Activity mix across code, tests and docs"
-              action={<DemoDataBadge />}
+              action={analytics.totals.tokens === 0 ? <DemoDataBadge /> : undefined}
             >
-              <AiActivityDonut />
+              <AiActivityDonut data={analytics.activityMix} />
             </GlassPanel>
 
             <GlassPanel
               title="Model efficiency"
               subtitle="Suggestion acceptance against unit cost"
               className="xl:col-span-2"
-              action={<DemoDataBadge />}
+              action={analytics.models.length === 0 ? <DemoDataBadge /> : undefined}
             >
-              <AiModelEfficiencyChart />
+              <AiModelEfficiencyChart models={analytics.models} />
             </GlassPanel>
 
             <GlassPanel title="Efficiency insights" subtitle="Rule-driven cost & quality signals">

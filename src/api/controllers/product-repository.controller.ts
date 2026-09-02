@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import productRepositoryService from '../services/product-repository.service';
+import { paramString } from '../utils/http-params';
 
 /**
  * Product Repository Controller
@@ -8,7 +9,12 @@ import productRepositoryService from '../services/product-repository.service';
 
 export async function addRepositoryToProduct(req: Request, res: Response): Promise<void> {
   try {
-    const { productId, githubRepo, isPrimary } = req.body;
+    // productId comes from the URL param (already verified by
+    // requireProductScope), not the body — a body value could otherwise
+    // disagree with the scoped :productId and add the repo to a different,
+    // unchecked product.
+    const productId = paramString(req.params.productId);
+    const { githubRepo, isPrimary } = req.body;
 
     if (!productId || !githubRepo) {
       res.status(400).json({
@@ -49,7 +55,7 @@ export async function addRepositoryToProduct(req: Request, res: Response): Promi
 
 export async function getProductRepositories(req: Request, res: Response): Promise<void> {
   try {
-    const { productId } = req.params;
+    const productId = paramString(req.params.productId);
 
     if (!productId) {
       res.status(400).json({
@@ -86,7 +92,8 @@ export async function getProductRepositories(req: Request, res: Response): Promi
 
 export async function removeRepositoryFromProduct(req: Request, res: Response): Promise<void> {
   try {
-    const { productId, githubRepo } = req.params;
+    const productId = paramString(req.params.productId);
+    const githubRepo = paramString(req.params.githubRepo);
 
     if (!productId || !githubRepo) {
       res.status(400).json({
@@ -122,7 +129,8 @@ export async function removeRepositoryFromProduct(req: Request, res: Response): 
 
 export async function setPrimaryRepository(req: Request, res: Response): Promise<void> {
   try {
-    const { productId, githubRepo } = req.params;
+    const productId = paramString(req.params.productId);
+    const githubRepo = paramString(req.params.githubRepo);
 
     if (!productId || !githubRepo) {
       res.status(400).json({
@@ -158,14 +166,18 @@ export async function setPrimaryRepository(req: Request, res: Response): Promise
 
 export async function getProductGitHubMetrics(req: Request, res: Response): Promise<void> {
   try {
-    const { productId } = req.params;
-    const tenantId = (req.query.tenantId as string) || '11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167';
+    const productId = paramString(req.params.productId);
+    const tenantId = req.user?.tenantId;
 
     if (!productId) {
       res.status(400).json({
         error: 'Bad Request',
         message: 'ProductId is required'
       });
+      return;
+    }
+    if (!tenantId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
       return;
     }
 
@@ -195,7 +207,11 @@ export async function getProductGitHubMetrics(req: Request, res: Response): Prom
 
 export async function getProductsWithRepositories(req: Request, res: Response): Promise<void> {
   try {
-    const tenantId = (req.query.tenantId as string) || '11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167';
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
+      return;
+    }
 
     console.log(`📋 Fetching products with repositories for tenant ${tenantId}`);
 

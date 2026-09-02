@@ -62,7 +62,7 @@ export function ProductRepositories() {
 
   const loadProducts = async () => {
     try {
-      const response = await fetch(`${API_V1_URL}/products`, { credentials: 'include' });
+      const response = await fetch(`${API_V1_URL}/products?limit=100`, { credentials: 'include' });
       const data = await response.json();
       if (data.success) {
         setProducts(data.data.products);

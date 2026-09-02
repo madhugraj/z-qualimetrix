@@ -137,19 +137,23 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
-   * Get per-sprint velocity trend (story points + bugs created/resolved)
+   * Get velocity trend (completed-item count + bugs created/resolved),
+   * per sprint or per calendar week when no Sprint data is synced yet.
    */
   getVelocityTrend = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
-    const { limit } = req.query;
+    const { productId, startDate, endDate, limit } = req.query;
 
-    const error = this.validateRequired(req.params, ['productId']);
-    if (error) {
-      return this.error(res, error, 400);
-    }
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
 
     const velocityTrend = await analyticsService.calculateVelocityTrend(
-      productId,
+      scope.productId,
+      scope.tenantId,
+      startDateObj,
+      endDateObj,
       limit ? Number(limit) : undefined
     );
 
@@ -157,10 +161,114 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
+   * Get backlog summary (open + in-progress work items, by priority/type).
+   * Optional `type` narrows to one item type — reused by Bug Intelligence
+   * for an open-bugs-only priority breakdown.
+   */
+  getBacklogSummary = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, type } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const backlog = await analyticsService.getBacklogSummary(scope.productId, scope.tenantId, type as string | undefined);
+
+    return this.success(res, backlog);
+  });
+
+  /**
+   * Get age distribution of currently-open items (optionally one type)
+   */
+  getAgeDistribution = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, type } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const distribution = await analyticsService.getAgeDistribution(scope.productId, scope.tenantId, type as string | undefined);
+
+    return this.success(res, distribution);
+  });
+
+  /**
+   * Get requirements traceability (requirements -> linked bugs -> status)
+   */
+  getRequirementTraceability = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, limit } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const rtm = await analyticsService.getRequirementTraceability(
+      scope.productId,
+      scope.tenantId,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, rtm);
+  });
+
+  /**
+   * Get backlog flow (items created vs. completed per period)
+   */
+  getBacklogFlow = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, startDate, endDate, limit } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
+
+    const flow = await analyticsService.calculateBacklogFlow(
+      scope.productId,
+      scope.tenantId,
+      startDateObj,
+      endDateObj,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, flow);
+  });
+
+  /**
+   * Get high-priority bugs resolved in the most recent sprint (or last 7
+   * days, if no Sprint data is synced for this scope)
+   */
+  getRecentHighPriorityFixes = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, limit } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const fixes = await analyticsService.getRecentHighPriorityFixes(
+      scope.productId,
+      scope.tenantId,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, fixes);
+  });
+
+  /**
+   * Get quarter-over-quarter completed-item velocity comparison
+   */
+  getQuarterOverQuarterVelocity = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const comparison = await analyticsService.getQuarterOverQuarterVelocity(scope.productId, scope.tenantId);
+
+    return this.success(res, comparison);
+  });
+
+  /**
    * Get release readiness score
    */
   getReleaseReadiness = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
 
     const error = this.validateRequired(req.params, ['productId']);
     if (error) {
@@ -197,7 +305,7 @@ export class AnalyticsController extends BaseController {
    * Get comprehensive product analytics
    */
   getProductAnalytics = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
     const { startDate, endDate } = req.query;
 
     const error = this.validateRequired(req.params, ['productId']);
@@ -223,7 +331,7 @@ export class AnalyticsController extends BaseController {
   getTenantAnalytics = this.asyncHandler(async (req: Request, res: Response) => {
     const { startDate, endDate } = req.query;
 
-    const tenantId = this.resolveScopedTenantId(req, res, req.params.tenantId);
+    const tenantId = this.resolveScopedTenantId(req, res, this.paramString(req, 'tenantId'));
     if (!tenantId) return;
 
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
@@ -367,6 +475,118 @@ export class AnalyticsController extends BaseController {
     } catch (error: any) {
       return this.error(res, error.message, 500);
     }
+  });
+
+  /**
+   * Get real bug distribution by Jira label
+   */
+  getBugLabelDistribution = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, startDate, endDate } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
+
+    const distribution = await analyticsService.calculateBugLabelDistribution(
+      scope.productId,
+      startDateObj,
+      endDateObj,
+      scope.tenantId
+    );
+
+    return this.success(res, distribution);
+  });
+
+  /**
+   * Get count of currently-open critical/high priority bugs
+   */
+  getOpenP0P1Count = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const result = await analyticsService.calculateOpenP0P1Count(scope.productId, scope.tenantId);
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Get Bug Reopen Rate + First-Time Fix Rate
+   */
+  getReopenMetrics = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, startDate, endDate } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
+
+    const result = await analyticsService.calculateReopenMetrics(
+      scope.productId,
+      startDateObj,
+      endDateObj,
+      scope.tenantId
+    );
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Get items sitting in a QA/review/blocked-like raw Jira status too long
+   */
+  getQaBottlenecks = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, thresholdDays } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const result = await analyticsService.getQaBottlenecks(
+      scope.productId,
+      scope.tenantId,
+      thresholdDays ? Number(thresholdDays) : undefined
+    );
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Get real related/similar bugs for one bug (product access already
+   * enforced by requireProductScope at the route level)
+   */
+  getSimilarBugs = this.asyncHandler(async (req: Request, res: Response) => {
+    const workItemId = this.paramString(req, 'workItemId');
+    const { limit } = req.query;
+
+    const error = this.validateRequired(req.params, ['workItemId']);
+    if (error) {
+      return this.error(res, error, 400);
+    }
+
+    const result = await analyticsService.getSimilarBugs(workItemId, limit ? Number(limit) : undefined);
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Get a holistic per-project status table for the whole tenant —
+   * portfolio-wide by nature, so restricted to pm/executive like every
+   * other tenant-wide view.
+   */
+  getProjectsOverview = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to view all projects', 403);
+    }
+
+    const tenantId = this.resolveScopedTenantId(req, res);
+    if (!tenantId) return;
+
+    const result = await analyticsService.getProjectsOverview(tenantId);
+
+    return this.success(res, result);
   });
 }
 

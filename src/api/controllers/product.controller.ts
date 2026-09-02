@@ -15,13 +15,13 @@ export class ProductController extends BaseController {
   getAllProducts = this.asyncHandler(async (req: Request, res: Response) => {
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'name', 'asc');
-    const tenantId = this.getTenantId(req) || req.user?.tenantId || '';
+    const tenantId = this.getTenantId(req);
+    if (!tenantId) {
+      return this.error(res, 'No tenant associated with this account', 403);
+    }
 
     // Build where clause
-    const where: Prisma.ProductWhereInput = {};
-    if (tenantId) {
-      where.tenantId = tenantId;
-    }
+    const where: Prisma.ProductWhereInput = { tenantId };
 
     // po/developer/tester only see the products their TenantMembership scopes
     // them to; pm/executive see everything in the tenant (org-wide by design).
@@ -73,7 +73,7 @@ export class ProductController extends BaseController {
    * Get product by ID
    */
   getProductById = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -163,7 +163,7 @@ export class ProductController extends BaseController {
    * Update product
    */
   updateProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -212,7 +212,7 @@ export class ProductController extends BaseController {
    * Delete product
    */
   deleteProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -252,7 +252,7 @@ export class ProductController extends BaseController {
    * Get product statistics
    */
   getProductStats = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -321,7 +321,7 @@ export class ProductController extends BaseController {
    * Get products by tenant
    */
   getProductsByTenant = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId } = req.params;
+    const tenantId = this.paramString(req, 'tenantId');
 
     const where: Prisma.ProductWhereInput = { tenantId };
     if (req.user && req.user.role !== 'pm' && req.user.role !== 'executive') {
@@ -354,7 +354,7 @@ export class ProductController extends BaseController {
    * requireProductScope already confirms access before this runs.
    */
   getProductDeliverables = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
 
     if (!isValidUUID(productId)) {
       return validationErrorResponse(res);
@@ -376,7 +376,7 @@ export class ProductController extends BaseController {
    * hours).
    */
   createDeliverable = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
 
     if (!isValidUUID(productId)) {
       return validationErrorResponse(res);

@@ -1,17 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
-  GitBranch,
   GitPullRequest,
   Loader2,
   RefreshCw,
 } from "lucide-react";
 import { GlassPanel } from "@/components/qm/GlassPanel";
-import { Input } from "@/components/ui/input";
-import { getGitHubRepositories, getGitHubMetrics, getCommitData, getPullRequestData, getIssueData, type GitHubMetrics, type GitHubCommit, type GitHubPullRequest, type GitHubIssue } from "@/lib/github-data.service";
+import { getGitHubMetrics, getCommitData, getPullRequestData, getIssueData, getCommitAttribution } from "@/lib/github-data.service";
+import { useCurrentProduct } from "@/lib/product-context";
+import { useProductRepositories, primaryRepo } from "@/lib/queries/product-repositories";
 import { cn } from "@/lib/utils";
 
 type Provider = "github" | "gitlab";
@@ -20,73 +20,19 @@ const num = (v: number | null | undefined, suffix = "") =>
   v === null || v === undefined || Number.isNaN(v) ? "—" : `${Math.round(v)}${suffix}`;
 
 /**
- * Live GitHub / GitLab code-quality signals.
- * Polls every 30s through server functions (GitHub via the Lovable connector
- * gateway, GitLab via a project access token).
+ * Live GitHub / GitLab code-quality signals for the current product's
+ * mapped repo(s) — reads the same ProductRepository source as FilterBar's
+ * GitHubRepoPill and dashboard.tsx's CI panel, instead of its own
+ * account-wide repo picker fed by localStorage keys the Settings-page PAT
+ * form used to write. Polls every 30s through the backend proxy.
  */
 export function GitInsights() {
   const [provider, setProvider] = useState<Provider>("github");
-  const [availableRepos, setAvailableRepos] = useState<Array<{ full_name: string; name: string; description?: string }>>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-
-  // Get the stored GitHub repos or use a default
-  const getInitialRepos = (): string[] => {
-    if (typeof window !== 'undefined') {
-      const isMultiSelect = localStorage.getItem('github_multi_select');
-      if (isMultiSelect === "true") {
-        const storedRepos = localStorage.getItem('github_repos');
-        if (storedRepos) {
-          try {
-            return JSON.parse(storedRepos);
-          } catch (e) {
-            console.error('Failed to parse stored repos');
-          }
-        }
-      } else {
-        // Legacy single repo format
-        const storedRepo = localStorage.getItem('github_repo');
-        if (storedRepo) return [storedRepo];
-        const storedUsername = localStorage.getItem('github_username');
-        if (storedUsername) return [`${storedUsername}/Abstractive-summarizor`];
-      }
-    }
-    return ["facebook/react"]; // ultimate fallback
-  };
-  const initialRepos = getInitialRepos();
-  const [repos, setRepos] = useState(initialRepos);
-  const [isMultiRepo, setIsMultiRepo] = useState(initialRepos.length > 1);
-  const repo = repos[0] ?? "";
-  const setRepo = (value: string) => setRepos([value]);
-
-  // Fetch GitHub repositories using our new service
-  const { data: repositories, isLoading: reposLoading } = useQuery({
-    queryKey: ['github-repositories-insights'],
-    queryFn: getGitHubRepositories,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-  });
-
-  // Update available repos when data loads
-  useEffect(() => {
-    if (repositories && repositories.length > 0) {
-      setAvailableRepos(repositories);
-      console.log(`✅ Loaded ${repositories.length} repositories from GitHub`);
-    }
-  }, [repositories]);
-
-  // Parse owner and repo from selected repo
-  const [repoOwner, setRepoOwner] = useState<string>("");
-  const [repoName, setRepoName] = useState<string>("");
-
-  useEffect(() => {
-    if (repo && repo.includes("/")) {
-      const [owner, ...rest] = repo.split("/");
-      setRepoOwner(owner);
-      setRepoName(rest.join("/"));
-    } else {
-      setRepoOwner("");
-      setRepoName("");
-    }
-  }, [repo]);
+  const { currentProduct } = useCurrentProduct();
+  const { data: productRepos, isLoading: reposLoading } = useProductRepositories(currentProduct?.id);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const repo = selectedRepo ?? primaryRepo(productRepos) ?? "";
+  const [repoOwner, repoName] = repo.includes("/") ? repo.split("/") : ["", ""];
 
   // Fetch GitHub metrics for selected repository
   const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
@@ -119,16 +65,14 @@ export function GitInsights() {
     refetchInterval: 30_000,
   });
 
-  // Debug logging
-  console.log('GitInsights GitHub Integration state:', {
-    repos,
-    repoOwner,
-    repoName,
-    metricsLoading,
-    metrics,
-    commits: commits?.length,
-    pullRequests: pullRequests?.length,
-    issues: issues?.length
+  // Real, persisted AI-vs-human commit attribution (github-commit-sync.service.ts
+  // + the Claude Code hook) — separate query since it's backed by our own DB,
+  // not a live GitHub API passthrough like the queries above.
+  const { data: attribution } = useQuery({
+    queryKey: ['commit-attribution', repoOwner, repoName],
+    queryFn: () => repoOwner && repoName ? getCommitAttribution(repoOwner, repoName) : null,
+    enabled: !!repoOwner && !!repoName,
+    refetchInterval: 30_000,
   });
 
   const connected = !!repoOwner && !!repoName && !!metrics;
@@ -166,8 +110,12 @@ export function GitInsights() {
     commits: {
       last30d: metrics.commits, // Use actual metrics
       authors: metrics.contributors, // Use actual metrics
-      additions: metrics.commits * 15, // Estimate additions based on commit count
-      deletions: metrics.commits * 8, // Estimate deletions based on commit count
+      // Real diff stats once github-commit-sync.service.ts has backfilled
+      // them (attribution.churn.commitsWithStats > 0); otherwise an explicit,
+      // visibly-labeled estimate — never presented as measured.
+      additions: attribution && attribution.churn.commitsWithStats > 0 ? attribution.churn.additions : metrics.commits * 15,
+      deletions: attribution && attribution.churn.commitsWithStats > 0 ? attribution.churn.deletions : metrics.commits * 8,
+      churnIsEstimate: !(attribution && attribution.churn.commitsWithStats > 0),
       churnSeries: Array.from({ length: 8 }, (_, i) => {
         const weekStart = new Date(Date.now() - (7 - i) * 7 * 24 * 60 * 60 * 1000);
         const weekEnd = new Date(Date.now() - (6 - i) * 7 * 24 * 60 * 60 * 1000);
@@ -258,67 +206,42 @@ export function GitInsights() {
       </div>
 
       <div className="mt-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="text-xs text-muted-foreground">Select repository:</label>
-          <select
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            className="rounded-md border border-glass-border bg-transparent px-3 py-2 text-xs min-w-[16rem] flex-1"
-          >
-            <option value="">Choose a repository...</option>
-            {availableRepos
-              .filter(availableRepo =>
-                availableRepo.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                availableRepo.name.toLowerCase().includes(searchTerm.toLowerCase())
-              )
-              .slice(0, 50) // Show max 50 repos for performance
-              .map((availableRepo) => (
-                <option key={availableRepo.full_name} value={availableRepo.full_name}>
-                  {availableRepo.full_name} {availableRepo.description ? `- ${availableRepo.description}` : ''}
-                </option>
-              ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => {
-              // Refetch all GitHub data
-              [metrics, commits, pullRequests, issues].forEach(query => {
-                if (query) query.refetch();
-              });
-            }}
-            disabled={!repo || isLoading}
-            className="rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {isLoading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              "Track repository"
-            )}
-          </button>
-        </div>
-
-        {/* Search filter for repositories */}
-        {availableRepos.length > 10 && (
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search repositories..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-md border border-glass-border bg-transparent px-3 py-1.5 text-xs pr-8"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+        {!currentProduct ? (
+          <p className="text-xs text-muted-foreground">Select a product to see its repository.</p>
+        ) : !productRepos || productRepos.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No GitHub repository mapped to this product yet — add one below under Product Repositories.
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-xs text-muted-foreground">Repository:</label>
+            {productRepos.length > 1 ? (
+              <select
+                value={repo}
+                onChange={(e) => setSelectedRepo(e.target.value)}
+                className="rounded-md border border-glass-border bg-transparent px-3 py-2 text-xs min-w-[16rem]"
               >
-                ×
-              </button>
+                {productRepos.map((r) => (
+                  <option key={r.githubRepo} value={r.githubRepo}>
+                    {r.githubRepo}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs font-medium">{repo}</span>
             )}
-            <p className="text-[10px] text-muted-foreground mt-1">
-              Showing {availableRepos.length} repositories • Use search to find specific repos
-            </p>
+            <button
+              type="button"
+              onClick={() => {
+                [metrics, commits, pullRequests, issues].forEach(query => {
+                  if (query) query.refetch();
+                });
+              }}
+              disabled={!repo || isLoading}
+              className="rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
+            >
+              {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Refresh"}
+            </button>
           </div>
         )}
       </div>
@@ -360,6 +283,7 @@ export function GitInsights() {
               <p className="text-xs font-semibold">Code churn</p>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 +{d.commits.additions.toLocaleString()} / -{d.commits.deletions.toLocaleString()} lines
+                {d.commits.churnIsEstimate && " (estimated — real diff stats not synced yet)"}
               </p>
               <div className="mt-3 flex h-20 items-end gap-1">
                 {d.commits.churnSeries.map((w) => {
@@ -412,6 +336,49 @@ export function GitInsights() {
               </ul>
             </div>
           </div>
+
+          {attribution && attribution.totalCommits > 0 && (
+            <div className="mt-3 rounded-2xl border border-glass-border/60 p-3">
+              <p className="text-xs font-semibold">AI vs human commit attribution (30d)</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {attribution.totalCommits} commits · exact and detected counts shown separately — never combined into one "AI %".
+              </p>
+              <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-muted">
+                {(["exact", "heuristic", "unattributed"] as const).map((tier) => {
+                  const width = (attribution[tier] / attribution.totalCommits) * 100;
+                  if (width <= 0) return null;
+                  return (
+                    <div
+                      key={tier}
+                      className={cn(
+                        tier === "exact" && "bg-good",
+                        tier === "heuristic" && "bg-primary/60",
+                        tier === "unattributed" && "bg-muted-foreground/30",
+                      )}
+                      style={{ width: `${width}%` }}
+                      title={`${tier}: ${attribution[tier]}`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px]">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-good" /> Exact (hook-verified): {attribution.exact}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-primary/60" /> Detected (trailer): {attribution.heuristic}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/30" /> Unattributed: {attribution.unattributed}
+                </span>
+              </div>
+              {Object.keys(attribution.byTool).length > 0 && (
+                <p className="mt-2 text-[10px] text-muted-foreground">
+                  By tool: {Object.entries(attribution.byTool).map(([tool, count]) => `${tool} (${count})`).join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="rounded-2xl border border-glass-border/60 p-3">

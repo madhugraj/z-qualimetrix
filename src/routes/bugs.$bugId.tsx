@@ -1,40 +1,34 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, Download, GitBranch, Layers, User } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowLeft, Download, ExternalLink, Tag, User } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
-import { DemoDataBanner } from "@/components/qm/DemoDataNotice";
+import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
-import { BUGS, DOMAIN_COLOR, type Bug, type BugDomain } from "@/lib/qm-bugs";
+import { BUGS } from "@/lib/qm-bugs";
 import { exportJson } from "@/lib/qm-export";
+import { useBugDetail } from "@/lib/queries/bugs";
+import { useSimilarBugs } from "@/lib/queries/analytics";
 
 export const Route = createFileRoute("/bugs/$bugId")({
-  loader: ({ params }) => {
-    const bug = BUGS.find((b) => b.id.toLowerCase() === params.bugId.toLowerCase());
-    if (!bug) throw notFound();
-    return { bug };
-  },
-  head: ({ loaderData }) => {
-    if (!loaderData) {
-      return {
-        meta: [{ title: "Bug not found — QualiMetrix" }, { name: "robots", content: "noindex" }],
-      };
-    }
-    const { bug } = loaderData;
-    const title = `${bug.id} · ${bug.title} — QualiMetrix`;
-    return {
-      meta: [
-        { title },
-        { name: "description", content: bug.description },
-        { property: "og:title", content: title },
-        { property: "og:description", content: bug.description },
-        { property: "og:type", content: "article" },
-        { name: "twitter:card", content: "summary_large_image" },
-      ],
-    };
-  },
-  notFoundComponent: BugNotFound,
+  head: () => ({
+    meta: [{ title: "Bug detail — QualiMetrix" }],
+  }),
   component: BugDetail,
 });
+
+const STATUS_LABEL: Record<string, string> = {
+  open: "Open",
+  in_progress: "In Progress",
+  resolved: "Resolved",
+  completed: "Completed",
+};
+
+const STATUS_TONE: Record<string, string> = {
+  open: "text-muted-foreground",
+  in_progress: "text-warning",
+  resolved: "text-good",
+  completed: "text-good",
+};
 
 function BugNotFound() {
   return (
@@ -42,7 +36,7 @@ function BugNotFound() {
       <div className="glass rounded-3xl p-8 text-center">
         <h1 className="text-xl font-semibold">Bug not found</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          That defect ID isn&apos;t in the current workspace.
+          That defect ID isn&apos;t in your workspace, or you don&apos;t have access to it.
         </p>
         <Link to="/bugs" className="mt-4 inline-block text-sm text-primary underline">
           Back to Bug Intelligence
@@ -61,14 +55,36 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 function BugDetail() {
-  const { bug } = Route.useLoaderData() as { bug: Bug };
-  const domain = bug.domain as BugDomain;
-  const timeline = [
-    { when: bug.reported, what: `Reported and auto-tagged as ${bug.domain}` },
-    { when: bug.reported, what: `Duplicate screening run against ${BUGS.length - 1} historic defects` },
-    { when: "Latest", what: `Assigned to ${bug.assignee} · status ${bug.status}` },
-  ];
+  const { bugId } = Route.useParams();
+  const bugQuery = useBugDetail(bugId);
+  const bug = bugQuery.data;
+
+  const similarBugs = useSimilarBugs(bug?.productId, bugId, 4);
+
+  if (bugQuery.isLoading) {
+    return (
+      <AppShell>
+        <p className="text-sm text-muted-foreground">Loading bug…</p>
+      </AppShell>
+    );
+  }
+
+  if (bugQuery.isError || !bug) {
+    return <BugNotFound />;
+  }
+
+  const daysInStatus = Math.round(
+    (Date.now() - new Date(bug.statusChangedAt ?? bug.updatedAt).getTime()) / 86_400_000
+  );
+  const jiraKey = bug.externalMetadata?.jiraKey;
+  const jiraUrl = bug.jiraSiteUrl && jiraKey ? `${bug.jiraSiteUrl}/browse/${jiraKey}` : null;
+  const assignee = bug.externalMetadata?.assigneeName ?? bug.externalMetadata?.assigneeEmail ?? "Unassigned";
 
   return (
     <AppShell>
@@ -82,79 +98,119 @@ function BugDetail() {
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-gradient text-2xl font-semibold md:text-3xl">
-              {bug.id} · {bug.title}
+              {bug.externalId ?? bug.id} · {bug.title}
             </h1>
-            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-glass-border px-2 py-0.5 text-[11px]"
-                style={{ color: DOMAIN_COLOR[domain] }}
-              >
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ background: DOMAIN_COLOR[domain] }}
-                />
-                {bug.domain} · {Math.round((bug.confidence ?? 0) * 100)}% confidence
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Priority: {bug.priority ?? "unset"}</span>
+              <span className="text-muted-foreground">·</span>
+              <span className={STATUS_TONE[bug.status]}>
+                {bug.externalStatusName ?? STATUS_LABEL[bug.status]}
               </span>
-              <span>{bug.severity}</span>
-              <span>·</span>
-              <span>{bug.status}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => exportJson(`bug-${bug.id}`, bug)}
-            className="glass flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium transition-colors hover:text-primary"
-          >
-            <Download className="h-3.5 w-3.5" /> Export bug
-          </button>
+          <div className="flex gap-2">
+            {jiraUrl && (
+              <a
+                href={jiraUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="glass flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium transition-colors hover:text-primary"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> View in Jira
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => exportJson(`bug-${bug.externalId ?? bug.id}`, bug)}
+              className="glass flex items-center gap-2 rounded-full px-3 py-2 text-xs font-medium transition-colors hover:text-primary"
+            >
+              <Download className="h-3.5 w-3.5" /> Export bug
+            </button>
+          </div>
         </div>
-        <DemoDataBanner>
-          This bug record is illustrative sample data, not a synced defect.
-        </DemoDataBanner>
       </header>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <GlassPanel title="Defect summary" className="xl:col-span-2">
-          <p className="text-sm leading-relaxed text-muted-foreground">{bug.description}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-line text-muted-foreground">
+            {bug.descriptionText || "No description."}
+          </p>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Field label="Module" value={bug.module} />
-            <Field label="Assignee" value={bug.assignee} />
-            <Field label="Severity" value={bug.severity} />
-            <Field label="Reported" value={bug.reported} />
+            <Field label="Priority" value={bug.priority ?? "unset"} />
+            <Field label="Assignee" value={assignee} />
+            <Field label="Status" value={bug.externalStatusName ?? STATUS_LABEL[bug.status]} />
+            <Field label="Reported" value={formatDate(bug.createdAt)} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
-              <GitBranch className="h-3.5 w-3.5" /> {bug.path}
+              <Tag className="h-3.5 w-3.5" /> {bug.labels.length > 0 ? bug.labels.join(", ") : "No labels"}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5" /> {bug.domain}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5" /> {bug.assignee}
+              <User className="h-3.5 w-3.5" /> {assignee}
             </span>
           </div>
         </GlassPanel>
 
-        <GlassPanel title="Activity" subtitle="Classification & triage trail">
+        <GlassPanel title="Activity" subtitle="Real sync history">
           <ol className="space-y-3">
-            {timeline.map((item, i) => (
-              <li key={i} className="flex gap-3">
-                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+            <li className="flex gap-3">
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+              <div>
+                <p className="text-xs font-medium">Created</p>
+                <p className="text-[11px] text-muted-foreground">{formatDate(bug.createdAt)}</p>
+              </div>
+            </li>
+            <li className="flex gap-3">
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+              <div>
+                <p className="text-xs font-medium">
+                  Currently {bug.externalStatusName ?? STATUS_LABEL[bug.status]}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {daysInStatus <= 0 ? "Changed today" : `${daysInStatus} day(s) in this status`}
+                </p>
+              </div>
+            </li>
+            {bug.reopenCount > 0 && (
+              <li className="flex gap-3">
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
                 <div>
-                  <p className="text-xs font-medium">{item.what}</p>
-                  <p className="text-[11px] text-muted-foreground">{item.when}</p>
+                  <p className="text-xs font-medium">Reopened {bug.reopenCount} time(s)</p>
                 </div>
               </li>
-            ))}
+            )}
+            {bug.resolvedAt && (
+              <li className="flex gap-3">
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-good" />
+                <div>
+                  <p className="text-xs font-medium">Resolved</p>
+                  <p className="text-[11px] text-muted-foreground">{formatDate(bug.resolvedAt)}</p>
+                </div>
+              </li>
+            )}
+            <li className="flex gap-3">
+              <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-muted-foreground" />
+              <div>
+                <p className="text-xs font-medium">Last synced</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {formatDate(bug.lastSeenAtSourceAt ?? bug.updatedAt)}
+                </p>
+              </div>
+            </li>
           </ol>
         </GlassPanel>
 
         <GlassPanel
           title="Related / similar bugs"
-          subtitle="tf-idf duplicate screening"
+          subtitle="Duplicate screening for this defect"
           className="xl:col-span-3"
+          action={!similarBugs.isLoading && !similarBugs.data?.hasData ? <DemoDataBadge /> : undefined}
         >
-          <SimilarBugs bug={bug} limit={4} />
+          {similarBugs.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[0]} limit={4} />
+          )}
         </GlassPanel>
       </div>
     </AppShell>

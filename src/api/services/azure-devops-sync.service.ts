@@ -1,7 +1,16 @@
 import prisma from '../../lib/prisma';
 import integrationService from './integration.service';
 import azureDevOpsOAuthService from './azure-devops-oauth.service';
+import { generateEmbeddings } from './local-embeddings.service';
 import type { Integration, Product } from '@prisma/client';
+
+// ADO's System.Description is HTML, unlike Jira's ADF-JSON — a quick tag
+// strip is enough for embedding input text (display-only concerns like
+// jira-sync.service.ts's adf-to-text.ts don't apply here since this repo
+// doesn't render ADO descriptions anywhere yet).
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
 
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 const RECONCILE_MISS_THRESHOLD = 2;
@@ -179,7 +188,7 @@ async function fetchWorkItemIds(client: AdoClient, project: string, areaPath: st
 
 async function* fetchWorkItemBatches(client: AdoClient, ids: number[], stateCategoryCache: Map<string, Record<string, string>>, project: string): AsyncGenerator<any[]> {
   const fields = [
-    'System.Title', 'System.WorkItemType', 'System.State', 'System.AssignedTo', 'System.CreatedBy',
+    'System.Title', 'System.Description', 'System.WorkItemType', 'System.State', 'System.AssignedTo', 'System.CreatedBy',
     'System.IterationId', 'System.IterationPath', 'Microsoft.VSTS.Common.Priority',
     'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Scheduling.Effort',
     'Microsoft.VSTS.Common.ResolvedDate',
@@ -214,15 +223,50 @@ export async function syncProduct(integration: Integration, product: Product): P
   const ids = await fetchWorkItemIds(client, project, product.azureDevopsAreaPath);
 
   for await (const items of fetchWorkItemBatches(client, ids, stateCategoryCache, project)) {
-    for (const item of items) {
+    const batchExternalIds = items.map((item: any) => String(item.id));
+    const existingRows = await prisma.workItem.findMany({
+      where: { productId: product.id, externalSystem: 'azure_devops', externalId: { in: batchExternalIds } },
+      select: { externalId: true, title: true, description: true, embedding: true },
+    });
+    const existingByExternalId = new Map(existingRows.map((r) => [r.externalId, r]));
+
+    // Same batched-embedding shape as jira-sync.service.ts: detect new/
+    // changed bugs across the whole batch, one OpenAI call, not one per item.
+    const mapped = items.map((item: any) => {
       const f = item.fields;
       const workItemType = mapIssueType(f['System.WorkItemType']);
+      const title = f['System.Title'] ?? '(no title)';
+      const description = f['System.Description'] ? String(f['System.Description']) : null;
+      const existing = existingByExternalId.get(String(item.id));
+      // Also re-embed a bug whose text hasn't changed but was never embedded
+      // — same backfill reasoning as jira-sync.service.ts.
+      const contentChanged = workItemType === 'bug'
+        && (!existing || existing.title !== title || existing.description !== description || existing.embedding.length === 0);
+      return { item, f, workItemType, title, description, existing, contentChanged };
+    });
+
+    const toEmbed = mapped.filter((m) => m.contentChanged);
+    const embeddingsByExternalId = new Map<string, number[]>();
+    if (toEmbed.length > 0) {
+      try {
+        const vectors = await generateEmbeddings(
+          toEmbed.map((m) => `${m.title} ${m.description ? stripHtml(m.description) : ''}`)
+        );
+        toEmbed.forEach((m, i) => embeddingsByExternalId.set(String(m.item.id), vectors[i]));
+      } catch (err) {
+        console.error(`Embedding generation failed for product ${product.id}, continuing without it:`, err);
+      }
+    }
+
+    for (const m of mapped) {
+      const { item, f, workItemType, title, description, existing } = m;
       const stateCategoryMap = await getStateCategoryMap(client, project, f['System.WorkItemType'], stateCategoryCache);
       const status = mapStateCategory(stateCategoryMap[f['System.State']], workItemType);
       const priority = mapPriority(f['Microsoft.VSTS.Common.Priority']);
       const assigneeId = await resolveAssigneeId(f['System.AssignedTo']?.uniqueName);
       const storyPoints = f['Microsoft.VSTS.Scheduling.StoryPoints'] ?? f['Microsoft.VSTS.Scheduling.Effort'] ?? null;
       const sprintId = f['System.IterationId'] ? iterationIdMap.get(String(f['System.IterationId'])) ?? null : null;
+      const embedding = embeddingsByExternalId.get(String(item.id)) ?? existing?.embedding ?? [];
 
       const externalMetadata = {
         assigneeName: f['System.AssignedTo']?.displayName ?? null,
@@ -241,7 +285,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           tenantId: integration.tenantId, productId: product.id,
           externalSystem: 'azure_devops', externalId: String(item.id),
           type: workItemType, status, priority,
-          title: f['System.Title'] ?? '(no title)',
+          title, description, embedding,
           assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
           createdBy: systemUserId,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
@@ -249,7 +293,7 @@ export async function syncProduct(integration: Integration, product: Product): P
         },
         update: {
           type: workItemType, status, priority,
-          title: f['System.Title'] ?? '(no title)',
+          title, description, embedding,
           assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,

@@ -1,7 +1,9 @@
 import cron from "node-cron";
-import type { AiProviderConnection, Integration } from "@prisma/client";
+import type { AiProviderConnection, GitHubIntegration, Integration } from "@prisma/client";
 import integrationService, { IntegrationProvider } from "../api/services/integration.service";
 import aiProviderConnectionService from "../api/services/ai-provider-connection.service";
+import providerConnectionService from "../api/services/provider-connection.service";
+import { listGithubIntegrationsForSync } from "../api/services/github-commit-sync.service";
 
 /**
  * node-cron only supports fixed cron expressions, not per-row dynamic
@@ -15,9 +17,15 @@ const MAX_CONCURRENT_SYNCS = 8;
 
 type SyncHandler = (integration: Integration) => Promise<void>;
 type AiProviderSyncHandler = (connection: AiProviderConnection) => Promise<void>;
+type GithubCommitSyncHandler = (integration: GitHubIntegration) => Promise<void>;
 
 const syncHandlers: Partial<Record<IntegrationProvider, SyncHandler>> = {};
 const aiProviderSyncHandlers: Record<string, AiProviderSyncHandler> = {};
+// GitHubIntegration is its own model (not Integration or AiProviderConnection
+// — see integration.service.ts's IntegrationProvider union, which doesn't
+// include "github"), so it gets its own single-slot registration rather than
+// reusing either map above.
+let githubCommitSyncHandler: GithubCommitSyncHandler | null = null;
 
 export function registerSyncHandler(provider: IntegrationProvider, handler: SyncHandler): void {
   syncHandlers[provider] = handler;
@@ -33,6 +41,10 @@ export function registerAiProviderSyncHandler(
   handler: AiProviderSyncHandler,
 ): void {
   aiProviderSyncHandlers[vendor] = handler;
+}
+
+export function registerGithubCommitSyncHandler(handler: GithubCommitSyncHandler): void {
+  githubCommitSyncHandler = handler;
 }
 
 // In-memory overlap lock — shared between the scheduled tick and manual
@@ -100,6 +112,18 @@ async function runAiProviderSync(connection: AiProviderConnection): Promise<void
   }
 }
 
+async function runGithubCommitSync(integration: GitHubIntegration): Promise<void> {
+  if (!githubCommitSyncHandler) return;
+  if (!reserveIntegrationOperation(integration.id)) return;
+  try {
+    await githubCommitSyncHandler(integration);
+  } catch (err) {
+    console.error(`[scheduler] GitHub commit sync failed for ${integration.id}:`, err);
+  } finally {
+    releaseIntegrationOperation(integration.id);
+  }
+}
+
 /**
  * Used by the manual "Sync now" endpoint. Returns false (caller should 409)
  * if a sync for this integration is already running, whether kicked off by
@@ -116,10 +140,17 @@ export function requestSyncNow(integrationId: string, run: () => Promise<void>):
 }
 
 async function dispatchDueIntegrations(): Promise<void> {
-  const [candidates, aiProviderCandidates] = await Promise.all([
+  // Anthropic and every other AI/GPU-compute vendor (GCP, later AWS/Azure)
+  // are two separate listDueForSync-style calls — different services,
+  // different required fields — but both feed the same runAiProviderSync
+  // dispatcher below, which looks up a handler by connection.vendor either way.
+  const [candidates, anthropicCandidates, otherProviderCandidates, githubCandidates] = await Promise.all([
     integrationService.listDueForSync(),
     aiProviderConnectionService.listDueAnthropicApiConnections(),
+    providerConnectionService.listDueForSync(),
+    listGithubIntegrationsForSync(),
   ]);
+  const aiProviderCandidates = [...anthropicCandidates, ...otherProviderCandidates];
   const now = Date.now();
 
   const due = candidates.filter((integration) => {
@@ -142,6 +173,17 @@ async function dispatchDueIntegrations(): Promise<void> {
   for (let i = 0; i < dueAiProviders.length; i += MAX_CONCURRENT_SYNCS) {
     await Promise.allSettled(
       dueAiProviders.slice(i, i + MAX_CONCURRENT_SYNCS).map(runAiProviderSync),
+    );
+  }
+
+  const dueGithubIntegrations = githubCandidates.filter((integration) => {
+    if (runningIntegrationIds.has(integration.id)) return false;
+    const lastSyncedAtMs = integration.lastSyncedAt?.getTime() ?? 0;
+    return now >= lastSyncedAtMs + integration.syncFrequencyMinutes * 60_000;
+  });
+  for (let i = 0; i < dueGithubIntegrations.length; i += MAX_CONCURRENT_SYNCS) {
+    await Promise.allSettled(
+      dueGithubIntegrations.slice(i, i + MAX_CONCURRENT_SYNCS).map(runGithubCommitSync),
     );
   }
 }

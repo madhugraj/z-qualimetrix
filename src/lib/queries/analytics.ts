@@ -14,6 +14,15 @@ function withProduct(path: string, productId?: string): string {
   return productId ? `${path}?productId=${productId}` : path;
 }
 
+function withParams(path: string, params: Record<string, string | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) query.set(key, value);
+  }
+  const qs = query.toString();
+  return qs ? `${path}?${qs}` : path;
+}
+
 export interface MttrResult {
   overall: number;
   byPriority: Record<string, number>;
@@ -30,10 +39,13 @@ export interface MttrResult {
  * this before src/lib/product-context.tsx resolves would surface a spurious
  * 400 for po/developer/tester during the initial load.
  */
-export function useMttr(productId?: string, enabled: boolean = true) {
+export function useMttr(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
   return useQuery({
-    queryKey: ["analytics-mttr", productId],
-    queryFn: () => fetchAnalytics<MttrResult>(withProduct("/analytics/mttr", productId)),
+    queryKey: ["analytics-mttr", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<MttrResult>(
+        withParams("/analytics/mttr", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
     enabled,
   });
 }
@@ -47,10 +59,13 @@ export interface DefectLeakageResult {
   hasData: boolean;
 }
 
-export function useDefectLeakage(productId?: string, enabled: boolean = true) {
+export function useDefectLeakage(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
   return useQuery({
-    queryKey: ["analytics-defect-leakage", productId],
-    queryFn: () => fetchAnalytics<DefectLeakageResult>(withProduct("/analytics/defect-leakage", productId)),
+    queryKey: ["analytics-defect-leakage", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<DefectLeakageResult>(
+        withParams("/analytics/defect-leakage", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
     enabled,
   });
 }
@@ -68,12 +83,21 @@ export interface TestExecutionMetricsResult {
   hasData: boolean;
 }
 
-export function useTestExecutionMetrics(productId?: string, enabled: boolean = true) {
+export function useTestExecutionMetrics(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
   return useQuery({
-    queryKey: ["analytics-test-metrics", productId],
-    queryFn: () => fetchAnalytics<TestExecutionMetricsResult>(withProduct("/analytics/test-metrics", productId)),
+    queryKey: ["analytics-test-metrics", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<TestExecutionMetricsResult>(
+        withParams("/analytics/test-metrics", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
     enabled,
   });
+}
+
+export interface WorkTypeBreakdown {
+  bug: number;
+  subtask: number;
+  feature: number;
 }
 
 export interface VelocityTrendEntry {
@@ -81,13 +105,98 @@ export interface VelocityTrendEntry {
   velocity: number;
   created: number;
   resolved: number;
+  byType: WorkTypeBreakdown;
 }
 
-export function useVelocityTrend(productId?: string) {
+export function useVelocityTrend(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
   return useQuery({
-    queryKey: ["analytics-velocity-trend", productId],
-    queryFn: () => fetchAnalytics<VelocityTrendEntry[]>(`/products/${productId}/velocity-trend`),
-    enabled: !!productId,
+    queryKey: ["analytics-velocity-trend", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<VelocityTrendEntry[]>(
+        withParams("/analytics/velocity-trend", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
+    enabled,
+  });
+}
+
+export interface RecentHighPriorityFix {
+  id: string;
+  externalId: string | null;
+  title: string;
+  priority: string;
+  resolvedAt: string;
+  assigneeName: string | null;
+}
+
+export interface RecentHighPriorityFixesResult {
+  periodLabel: string;
+  periodSource: "sprint" | "week";
+  bugs: RecentHighPriorityFix[];
+  hasData: boolean;
+}
+
+export function useRecentHighPriorityFixes(productId?: string, enabled: boolean = true, limit?: number) {
+  return useQuery({
+    queryKey: ["analytics-recent-high-priority-fixes", productId, limit],
+    queryFn: () =>
+      fetchAnalytics<RecentHighPriorityFixesResult>(
+        withParams("/analytics/recent-high-priority-fixes", { productId, limit: limit?.toString() })
+      ),
+    enabled,
+  });
+}
+
+export interface QuarterVelocitySummary {
+  label: string;
+  total: number;
+  byType: WorkTypeBreakdown;
+}
+
+export interface QuarterOverQuarterVelocityResult {
+  current: QuarterVelocitySummary;
+  previous: QuarterVelocitySummary;
+  changePercent: number | null;
+  hasData: boolean;
+}
+
+export function useQuarterOverQuarterVelocity(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-velocity-qoq", productId],
+    queryFn: () => fetchAnalytics<QuarterOverQuarterVelocityResult>(withParams("/analytics/velocity-qoq", { productId })),
+    enabled,
+  });
+}
+
+export interface TracedBug {
+  id: string;
+  externalId: string | null;
+  title: string;
+  status: string;
+  priority: string | null;
+}
+
+export interface RequirementTraceRow {
+  id: string;
+  externalId: string | null;
+  title: string;
+  type: string;
+  linkedBugs: TracedBug[];
+  status: "ready" | "at_risk" | "blocked";
+}
+
+export interface RequirementTraceabilityResult {
+  requirements: RequirementTraceRow[];
+  hasData: boolean;
+}
+
+export function useRequirementTraceability(productId?: string, enabled: boolean = true, limit?: number) {
+  return useQuery({
+    queryKey: ["analytics-requirement-traceability", productId, limit],
+    queryFn: () =>
+      fetchAnalytics<RequirementTraceabilityResult>(
+        withParams("/analytics/requirement-traceability", { productId, limit: limit?.toString() })
+      ),
+    enabled,
   });
 }
 
@@ -166,5 +275,141 @@ export function useProductDeliverables(productId?: string) {
         (data) => data.deliverables
       ),
     enabled: !!productId,
+  });
+}
+
+export interface BugLabelDistributionResult {
+  distribution: Array<{ label: string; count: number }>;
+  /** False means zero bugs are tracked for this scope. */
+  hasData: boolean;
+}
+
+export function useBugLabelDistribution(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
+  return useQuery({
+    queryKey: ["analytics-bug-label-distribution", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<BugLabelDistributionResult>(
+        withParams("/analytics/bug-label-distribution", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
+    enabled,
+  });
+}
+
+export interface OpenP0P1Result {
+  count: number;
+  /** False means zero bugs are tracked — `count: 0` in that case is "never measured," not "nothing open." */
+  hasData: boolean;
+}
+
+export function useOpenP0P1Count(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-open-p0-p1-count", productId],
+    queryFn: () => fetchAnalytics<OpenP0P1Result>(withProduct("/analytics/open-p0-p1-count", productId)),
+    enabled,
+  });
+}
+
+export interface ReopenMetricsResult {
+  reopenRate: number;
+  firstTimeFixRate: number;
+  /** False means no bug has ever been resolved (or reopened) for this scope. */
+  hasData: boolean;
+}
+
+export function useReopenMetrics(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
+  return useQuery({
+    queryKey: ["analytics-reopen-metrics", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<ReopenMetricsResult>(
+        withParams("/analytics/reopen-metrics", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
+    enabled,
+  });
+}
+
+export interface QaBottleneck {
+  id: string;
+  externalId: string | null;
+  title: string;
+  rawStatus: string;
+  daysInStatus: number;
+  severity: "critical" | "warning" | "neutral";
+}
+
+export interface QaBottlenecksResult {
+  bottlenecks: QaBottleneck[];
+  /** False means nothing is currently sitting in any QA-like raw status at all. */
+  hasData: boolean;
+}
+
+export function useQaBottlenecks(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-qa-bottlenecks", productId],
+    queryFn: () => fetchAnalytics<QaBottlenecksResult>(withProduct("/analytics/qa-bottlenecks", productId)),
+    enabled,
+  });
+}
+
+export interface SimilarBugRow {
+  id: string;
+  externalId: string | null;
+  title: string;
+  status: string;
+  score: number;
+}
+
+export interface SimilarBugsResult {
+  similar: SimilarBugRow[];
+  /** False when the baseline bug doesn't exist, or no other bugs exist in its product yet. */
+  hasData: boolean;
+}
+
+export function useSimilarBugs(productId?: string, workItemId?: string, limit: number = 5) {
+  return useQuery({
+    queryKey: ["analytics-similar-bugs", productId, workItemId, limit],
+    queryFn: () =>
+      fetchAnalytics<SimilarBugsResult>(`/products/${productId}/work-items/${workItemId}/similar-bugs?limit=${limit}`),
+    enabled: !!productId && !!workItemId,
+  });
+}
+
+/** Seeds SimilarBugs with a real, most-recently-updated bug for the product — reuses the existing work-items list endpoint rather than adding a new one. */
+export function useMostRecentBugId(productId?: string) {
+  return useQuery({
+    queryKey: ["most-recent-bug-id", productId],
+    queryFn: () =>
+      fetchAnalytics<{ workItems: Array<{ id: string }> }>(
+        `/products/${productId}/work-items?type=bug&sortBy=updatedAt&sortOrder=desc&limit=1`
+      ).then((data) => data.workItems[0]?.id),
+    enabled: !!productId,
+  });
+}
+
+export interface ProjectOverviewRow {
+  productId: string;
+  productName: string;
+  connectedSystems: string[];
+  isMapped: boolean;
+  lastSyncedAt: string | null;
+  totalWorkItems: number;
+  totalBugs: number;
+  openBugs: number;
+  resolvedBugs: number;
+  /** Null (not 0) when there's nothing measurable — e.g. every bug is cancelled/closed. */
+  resolutionRate: number | null;
+  healthScore: number;
+  hasData: boolean;
+}
+
+export interface ProjectsOverviewResult {
+  projects: ProjectOverviewRow[];
+  hasData: boolean;
+}
+
+export function useProjectsOverview(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-projects-overview"],
+    queryFn: () => fetchAnalytics<ProjectsOverviewResult>("/analytics/projects-overview"),
+    enabled,
   });
 }

@@ -5,11 +5,17 @@ import dotenv from 'dotenv'
 import { healthCheck, databaseInfo } from './controllers/health.controller'
 import apiRoutes from './routes'
 import { assertJwtSecretConfigured } from '../lib/jwt'
-import { startScheduler, registerAiProviderSyncHandler, registerSyncHandler } from '../lib/scheduler'
+import { startScheduler, registerAiProviderSyncHandler, registerSyncHandler, registerGithubCommitSyncHandler } from '../lib/scheduler'
 import { syncAllProductsForIntegration as syncAllJira } from './services/jira-sync.service'
 import { syncAllProductsForIntegration as syncAllAdo } from './services/azure-devops-sync.service'
 import { syncOpenAiUsage } from './services/openai-usage-sync.service'
 import { syncAnthropicConnection } from './services/anthropic-usage-sync.service'
+import { syncVertexAiConnection } from './services/vertex-ai-usage-sync.service'
+import { syncGcpGpuCost } from './services/gcp-gpu-cost-sync.service'
+import { syncAwsGpuCost } from './services/aws-gpu-cost-sync.service'
+import { syncAzureGpuCost } from './services/azure-gpu-cost-sync.service'
+import { syncKrutrimGpuCost } from './services/krutrim-gpu-cost-sync.service'
+import { syncGithubCommits } from './services/github-commit-sync.service'
 
 // Load environment variables
 dotenv.config()
@@ -110,6 +116,17 @@ app.listen(PORT, () => {
   registerSyncHandler('azure_devops', syncAllAdo)
   registerSyncHandler('openai', syncOpenAiUsage)
   registerAiProviderSyncHandler('anthropic', syncAnthropicConnection)
+  // One GCP connection backs two distinct facts (Vertex AI/Gemini token
+  // usage, GPU-compute rental cost) from the same Billing Export table — run
+  // both per due connection rather than needing two separate vendor slots.
+  registerAiProviderSyncHandler('gcp', async (connection) => {
+    await syncVertexAiConnection(connection)
+    await syncGcpGpuCost(connection)
+  })
+  registerAiProviderSyncHandler('aws', syncAwsGpuCost)
+  registerAiProviderSyncHandler('azure', syncAzureGpuCost)
+  registerAiProviderSyncHandler('krutrim', syncKrutrimGpuCost)
+  registerGithubCommitSyncHandler(syncGithubCommits)
   startScheduler()
 })
 

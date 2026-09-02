@@ -1,6 +1,8 @@
 import prisma from '../../lib/prisma';
 import integrationService from './integration.service';
 import jiraOAuthService from './jira-oauth.service';
+import { generateEmbeddings } from './local-embeddings.service';
+import { adfToPlainText } from '../utils/adf-to-text';
 import type { Integration, Product } from '@prisma/client';
 
 const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
@@ -43,6 +45,12 @@ function mapPriority(jiraPriorityName: string | undefined, overrides: Record<str
 function mapIssueType(jiraIssueTypeName: string | undefined): string {
   const name = (jiraIssueTypeName ?? '').toLowerCase();
   if (name.includes('bug') || name.includes('defect')) return 'bug';
+  // Must be checked before the generic 'task' match below — "Sub-task"
+  // contains "task" as a substring, so the naive order previously collapsed
+  // every sub-task into the same bucket as top-level Task, silently hiding
+  // what was often the single largest category of work (real tenant data:
+  // ~40% of a sprint's completed items were sub-tasks).
+  if (name.includes('sub-task') || name.includes('subtask')) return 'subtask';
   if (name.includes('story')) return 'story';
   if (name.includes('epic')) return 'epic';
   if (name.includes('task')) return 'task';
@@ -220,7 +228,7 @@ interface JqlPage {
 
 async function* fetchIssuePages(client: JiraClient, jql: string, storyPointsFieldId: string | null): AsyncGenerator<any[]> {
   let nextPageToken: string | undefined;
-  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'sprint', 'created', 'updated', 'resolutiondate'];
+  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'sprint', 'created', 'updated', 'resolutiondate', 'labels', 'issuelinks'];
   if (storyPointsFieldId) fields.push(storyPointsFieldId);
 
   for (;;) {
@@ -258,12 +266,87 @@ export async function syncProduct(integration: Integration, product: Product): P
   const runStartedAt = new Date();
   const jql = `project = ${product.jiraProjectId} ORDER BY updated DESC`;
 
+  // Collected across every page, resolved to internal WorkItem ids only
+  // once the whole sync has finished — a link's target may live on a page
+  // not yet processed, or in a different (also-synced) product entirely
+  // (cross-project links are common), so resolution can't happen inline.
+  const collectedLinks: Array<{ sourceExternalId: string; targetExternalId: string; linkType: string }> = [];
+
   for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId)) {
-    for (const issue of issues) {
+    // Batched once per page (not per issue) so reopen/status-change detection
+    // doesn't turn into an extra ~2500 findUnique calls at full-tenant scale —
+    // this stays the same order of magnitude as the existing pagination cost.
+    const pageExternalIds = issues.map((issue: any) => String(issue.id));
+    const existingRows = await prisma.workItem.findMany({
+      where: { productId: product.id, externalSystem: 'jira', externalId: { in: pageExternalIds } },
+      select: {
+        externalId: true, status: true, externalStatusName: true, reopenCount: true,
+        title: true, description: true, embedding: true,
+      },
+    });
+    const existingByExternalId = new Map(existingRows.map((r) => [r.externalId, r]));
+
+    // Pass 1: map every issue's fields and flag which bugs need a fresh
+    // embedding (new, or title/description changed) — collected across the
+    // whole page so the OpenAI call below is one batched request, not one
+    // per issue.
+    const mapped = issues.map((issue: any) => {
       const f = issue.fields;
       const workItemType = mapIssueType(f.issuetype?.name);
       const status = mapStatus(f.status?.statusCategory?.key, workItemType);
       const priority = mapPriority(f.priority?.name, priorityOverrides);
+      const labels: string[] = Array.isArray(f.labels) ? f.labels : [];
+      const rawStatusName: string | null = f.status?.name ?? null;
+      const title = f.summary ?? '(no title)';
+      const description = f.description ? JSON.stringify(f.description) : null;
+      const existing = existingByExternalId.get(String(issue.id));
+      // Also re-embed a bug whose text hasn't changed but was never embedded
+      // in the first place — every bug synced before this feature existed
+      // has embedding=[] and needs this backfill pass, not just genuinely
+      // edited ones.
+      const contentChanged = workItemType === 'bug'
+        && (!existing || existing.title !== title || existing.description !== description || existing.embedding.length === 0);
+      return { issue, f, workItemType, status, priority, labels, rawStatusName, title, description, existing, contentChanged };
+    });
+
+    // Normalize each link to its "outward" verb direction (e.g. "blocks",
+    // not "is blocked by") regardless of which of the pair's two issues we
+    // read it from — Jira returns the same link on both sides, once as
+    // outward and once as inward, so this collapses to one consistent
+    // source->target row instead of two differently-worded duplicates.
+    for (const issue of issues) {
+      const links = issue.fields?.issuelinks;
+      if (!Array.isArray(links)) continue;
+      for (const link of links) {
+        const linkType = link.type?.outward ?? link.type?.name ?? 'related to';
+        if (link.outwardIssue) {
+          collectedLinks.push({ sourceExternalId: String(issue.id), targetExternalId: String(link.outwardIssue.id), linkType });
+        } else if (link.inwardIssue) {
+          collectedLinks.push({ sourceExternalId: String(link.inwardIssue.id), targetExternalId: String(issue.id), linkType });
+        }
+      }
+    }
+
+    const toEmbed = mapped.filter((m) => m.contentChanged);
+    const embeddingsByExternalId = new Map<string, number[]>();
+    if (toEmbed.length > 0) {
+      try {
+        const vectors = await generateEmbeddings(
+          // description is stored as raw ADF JSON — embed the plain-text
+          // extraction, not the JSON syntax noise, same util the bug detail
+          // page uses for display.
+          toEmbed.map((m) => `${m.title} ${adfToPlainText(m.description)}`)
+        );
+        toEmbed.forEach((m, i) => embeddingsByExternalId.set(String(m.issue.id), vectors[i]));
+      } catch (err) {
+        // Embeddings are an enhancement, not a sync-blocking dependency —
+        // same resilience posture as the sprint/board lookup below.
+        console.error(`Embedding generation failed for product ${product.id}, continuing without it:`, err);
+      }
+    }
+
+    for (const m of mapped) {
+      const { issue, f, workItemType, status, priority, labels, rawStatusName, title, description, existing } = m;
       const assigneeId = await resolveAssigneeId(f.assignee?.emailAddress);
       const storyPoints = storyPointsFieldId ? (f[storyPointsFieldId] ?? null) : null;
 
@@ -279,6 +362,20 @@ export async function syncProduct(integration: Integration, product: Product): P
         reporterEmail: f.reporter?.emailAddress ?? null,
       };
 
+      // Reopen detection uses the collapsed status bucket (a real business
+      // event: fixed -> broken again). Status-duration tracking below instead
+      // compares the RAW Jira status name, since e.g. "In QA" and "Code
+      // Review" both collapse to the same 'in_progress' bucket and would
+      // never register a change if compared on the bucket.
+      const isReopen = !!existing
+        && (existing.status === 'resolved' || existing.status === 'completed')
+        && (status === 'open' || status === 'in_progress');
+      const rawStatusChanged = !existing || existing.externalStatusName !== rawStatusName;
+      // Keep the previously-stored vector when content didn't change (and
+      // therefore wasn't re-embedded this pass) instead of wiping it back to
+      // "not embedded" on every routine sync touch.
+      const embedding = embeddingsByExternalId.get(String(issue.id)) ?? existing?.embedding ?? [];
+
       await prisma.workItem.upsert({
         where: {
           productId_externalSystem_externalId: {
@@ -289,8 +386,9 @@ export async function syncProduct(integration: Integration, product: Product): P
           tenantId: integration.tenantId, productId: product.id,
           externalSystem: 'jira', externalId: String(issue.id),
           type: workItemType, status, priority,
-          title: f.summary ?? '(no title)', description: f.description ? JSON.stringify(f.description) : null,
-          assigneeId, sprintId, storyPoints,
+          title, description,
+          assigneeId, sprintId, storyPoints, labels, embedding,
+          externalStatusName: rawStatusName, statusChangedAt: new Date(), reopenCount: 0,
           createdBy: systemUserId,
           // Jira's real creation date, not Prisma's now()-on-insert default —
           // a backfilled/historical issue synced today must keep its actual
@@ -302,8 +400,14 @@ export async function syncProduct(integration: Integration, product: Product): P
         },
         update: {
           type: workItemType, status, priority,
-          title: f.summary ?? '(no title)',
-          assigneeId, sprintId, storyPoints,
+          title, description,
+          assigneeId, sprintId, storyPoints, labels, embedding,
+          externalStatusName: rawStatusName,
+          // Only touch these when something actually changed, so an
+          // unrelated field update doesn't reset "days in current status" or
+          // double-count a reopen already recorded on a prior sync.
+          ...(rawStatusChanged ? { statusChangedAt: new Date() } : {}),
+          ...(isReopen ? { reopenCount: { increment: 1 } } : {}),
           // Also corrected on every update (not just create) so the very next
           // sync cycle repairs rows that were written before this fix existed,
           // instead of leaving already-synced issues permanently wrong.
@@ -315,7 +419,45 @@ export async function syncProduct(integration: Integration, product: Product): P
     }
   }
 
+  await persistWorkItemLinks(integration.tenantId, collectedLinks);
   await reconcileMissingWorkItems(product.id, runStartedAt);
+}
+
+/**
+ * Resolves collected Jira issue links (raw Jira issue ids) to internal
+ * WorkItem rows and upserts them. A link whose source or target wasn't
+ * synced at all (out-of-scope project, filtered issue type, etc.) is
+ * silently skipped — traceability only covers what's actually tracked here.
+ * Best-effort, additive: a link removed in Jira since the last sync isn't
+ * detected and removed here, same convergent-over-time posture as the rest
+ * of this sync (no hard deletes without an explicit reconcile pass).
+ */
+async function persistWorkItemLinks(
+  tenantId: string,
+  links: Array<{ sourceExternalId: string; targetExternalId: string; linkType: string }>
+): Promise<void> {
+  if (links.length === 0) return;
+
+  const involvedIds = Array.from(new Set(links.flatMap((l) => [l.sourceExternalId, l.targetExternalId])));
+  const resolved = await prisma.workItem.findMany({
+    where: { tenantId, externalSystem: 'jira', externalId: { in: involvedIds } },
+    select: { id: true, externalId: true },
+  });
+  const idByExternalId = new Map(resolved.map((r) => [r.externalId, r.id]));
+
+  for (const link of links) {
+    const sourceId = idByExternalId.get(link.sourceExternalId);
+    const targetId = idByExternalId.get(link.targetExternalId);
+    if (!sourceId || !targetId || sourceId === targetId) continue;
+
+    await prisma.workItemLink.upsert({
+      where: {
+        sourceItemId_targetItemId_linkType: { sourceItemId: sourceId, targetItemId: targetId, linkType: link.linkType },
+      },
+      create: { tenantId, sourceItemId: sourceId, targetItemId: targetId, linkType: link.linkType },
+      update: {},
+    });
+  }
 }
 
 /**

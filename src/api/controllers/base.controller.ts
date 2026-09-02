@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../../lib/prisma';
+import { paramString as toParamString, queryString as toQueryString } from '../utils/http-params';
 
 /**
  * Base Controller with common CRUD operations
@@ -96,11 +97,26 @@ export abstract class BaseController {
   }
 
   /**
-   * Get tenant ID from request (would be from JWT in production)
+   * Get the authenticated caller's own tenant id — always from the session
+   * (req.user, populated by requireAuth), never a client-supplied query
+   * param or header. Those used to be trusted here directly, which let any
+   * signed-in user read (or in a couple of call sites, silently see
+   * everyone's data when the param was just omitted) another tenant's rows
+   * by passing/omitting ?tenantId=. A caller needing a *different* tenant's
+   * data (superadmin views) should use an explicit :tenantId route param
+   * checked against requireAdmin, not this helper.
    */
   protected getTenantId(req: Request): string {
-    // For now, use query param or header
-    // In production, this would come from JWT token
-    return (req.query.tenantId as string) || (req.headers['x-tenant-id'] as string) || '';
+    return req.user?.tenantId || '';
+  }
+
+  /** A route param (e.g. req.params.id) — see utils/http-params.ts for why this is needed over a plain `req.params.id`. */
+  protected paramString(req: Request, key: string): string {
+    return toParamString(req.params[key]);
+  }
+
+  /** A query param (e.g. req.query.search) — see utils/http-params.ts. */
+  protected queryString(req: Request, key: string): string | undefined {
+    return toQueryString(req.query[key]);
   }
 }

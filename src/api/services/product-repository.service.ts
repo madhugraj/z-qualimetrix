@@ -216,7 +216,11 @@ export class ProductRepositoryService {
         where: { id: productId }
       });
 
-      if (!product) {
+      // tenantId was accepted but never checked here — any authenticated
+      // user could read another tenant's GitHub metrics by guessing/passing
+      // a foreign productId. "Product not found" for a real-but-foreign id
+      // (not 403) so this doesn't confirm the id belongs to someone else.
+      if (!product || product.tenantId !== tenantId) {
         return {
           success: false,
           message: 'Product not found'
@@ -252,7 +256,8 @@ export class ProductRepositoryService {
 
       // Fetch GitHub data for each repository
       const githubService = await import('../services/github.service');
-      await githubService.default.setTokenFromDatabase(tenantId);
+      const githubTokenService = await import('../services/github-token.service');
+      const token = await githubTokenService.default.getToken(tenantId);
 
       const repoData = await Promise.allSettled(
         repositories.map(async (repo) => {
@@ -262,7 +267,7 @@ export class ProductRepositoryService {
               throw new Error(`Invalid repo format: ${repo.githubRepo}`);
             }
 
-            const status = await githubService.default.getProjectStatus(owner, repoName);
+            const status = await githubService.default.getProjectStatus(token, owner, repoName);
             return {
               githubRepo: repo.githubRepo,
               isPrimary: repo.isPrimary,
@@ -314,6 +319,40 @@ export class ProductRepositoryService {
         message: `Failed to fetch product metrics: ${error.message}`
       };
     }
+  }
+
+  /**
+   * Whether `owner/repo` is mapped to any active product belonging to this
+   * tenant — the access boundary for GitHub read endpoints, so an
+   * authenticated tenant member can only query repos the org actually
+   * tracks, not any repo their stored credential happens to reach.
+   */
+  async isRepoMappedForTenant(tenantId: string, owner: string, repo: string): Promise<boolean> {
+    const githubRepo = `${owner}/${repo}`;
+    const match = await prisma.productRepository.findFirst({
+      where: {
+        githubRepo,
+        isActive: true,
+        product: { tenantId, isActive: true },
+      },
+      select: { id: true },
+    });
+    return match !== null;
+  }
+
+  /**
+   * Same access boundary as isRepoMappedForTenant, but returns the row itself
+   * — used where a caller needs the ProductRepository id (e.g. to attach a
+   * synced Commit to it), not just a yes/no check.
+   */
+  async findMappedRepo(tenantId: string, githubRepo: string) {
+    return prisma.productRepository.findFirst({
+      where: {
+        githubRepo,
+        isActive: true,
+        product: { tenantId, isActive: true },
+      },
+    });
   }
 
   /**

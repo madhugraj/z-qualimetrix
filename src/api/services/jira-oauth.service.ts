@@ -1,15 +1,28 @@
 /**
  * Jira Cloud OAuth 2.0 (3LO) — authorize URL, code/refresh token exchange,
- * and accessible-resources (cloudId) lookup. Scopes below are Atlassian's
- * "classic" scopes; verify against current Atlassian OAuth docs at
- * implementation time in case granular scopes are required for a given app.
+ * and accessible-resources (cloudId) lookup.
+ *
+ * Scopes mix Jira platform "classic" scopes (read:jira-work, read:jira-user)
+ * with Jira Software "granular" scopes (read:board-scope:jira-software,
+ * read:sprint:jira-software) — the Agile REST API (boards/sprints) that
+ * jira-sync.service.ts calls does not accept classic scopes at all, per
+ * Atlassian's current docs. Before this takes effect, "Jira Software API"
+ * must be added as a permission for this app at
+ * developer.atlassian.com/console/myapps, and every tenant with an existing
+ * Jira connection must re-authorize — old tokens won't carry the new scopes.
  */
 
 const AUTHORIZE_URL = 'https://auth.atlassian.com/authorize';
 const TOKEN_URL = 'https://auth.atlassian.com/oauth/token';
 const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 
-const SCOPES = ['read:jira-work', 'read:jira-user', 'offline_access'].join(' ');
+const SCOPES = [
+  'read:jira-work',
+  'read:jira-user',
+  'read:board-scope:jira-software',
+  'read:sprint:jira-software',
+  'offline_access',
+].join(' ');
 
 function requireEnv(name: string): string {
   const value = process.env[name];

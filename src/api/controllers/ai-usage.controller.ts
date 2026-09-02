@@ -20,6 +20,7 @@ import {
 } from '../../lib/ai-usage.server';
 import { extractApiRequestAttrs, mapToRawEvent } from '../../lib/otel-claude-code.server';
 import { ingestAnthropicOtelLogs, ingestAnthropicOtelMetrics } from '../services/anthropic-otel-ingest.service';
+import { recordExactCommitAttribution } from '../services/commit-attribution.service';
 
 /**
  * GET /api/v1/ai-usage/analytics
@@ -204,6 +205,32 @@ export async function ingestOrganizationOtlpMetrics(req: Request, res: Response)
   } catch (error) {
     console.error('Error ingesting organization OTLP metrics:', error);
     res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to process OTLP metrics' });
+  }
+}
+
+/**
+ * POST /api/v1/ai-usage/commit-attribution/:connectionId
+ * Requires requireProviderConnectionToken. Receiver for the Claude Code git
+ * hook's exact, per-commit attribution report (see
+ * scripts/install-claude-code-hook.sh) — reuses the tenant's existing
+ * Anthropic provider connection token, no separate connection type.
+ */
+export async function ingestCommitAttribution(req: Request, res: Response) {
+  try {
+    const { sha, repo, sessionId, occurredAt } = req.body ?? {};
+    const result = await recordExactCommitAttribution(req.aiProviderConnection!, {
+      sha,
+      repo,
+      sessionId,
+      occurredAt,
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Error ingesting commit attribution:', error);
+    res.status(400).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to record commit attribution',
+    });
   }
 }
 

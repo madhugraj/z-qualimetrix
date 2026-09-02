@@ -1,6 +1,25 @@
 import { PrismaClient } from '@prisma/client';
 
 /**
+ * Buckets our normalized WorkItem.type into the 3 categories a PM actually
+ * reasons about when reading a velocity chart — bug fixes, sub-task grind,
+ * and everything that ships user-facing scope (stories/tasks/epics).
+ * Generic across tenants/providers: driven by our own normalized `type`
+ * column, not any one org's raw issue-type names.
+ */
+type WorkTypeCategory = 'bug' | 'subtask' | 'feature';
+
+function categorizeWorkType(type: string): WorkTypeCategory {
+  if (type === 'bug') return 'bug';
+  if (type === 'subtask') return 'subtask';
+  return 'feature';
+}
+
+function emptyTypeBreakdown(): Record<WorkTypeCategory, number> {
+  return { bug: 0, subtask: 0, feature: 0 };
+}
+
+/**
  * Analytics Engine Service
  * Calculates quality metrics, KPIs, and performance indicators
  */
@@ -126,28 +145,105 @@ export class AnalyticsService {
   }
 
   /**
-   * MTTR trend over the most recent sprints — mirrors calculateDefectLeakageTrend's shape.
+   * Calendar-week buckets (most recent `fallbackWeeks` weeks, capped at 12
+   * points) used as the trend axis whenever no real Sprint/board data has
+   * been synced for a scope — Jira Software's Agile REST API (boards,
+   * sprints) needs a separate OAuth scope from classic Jira REST, so most
+   * tenants have zero Sprint rows until that's granted. Every tenant has
+   * item timestamps regardless, so this keeps trend charts real (not empty,
+   * not fabricated) for any provider and any team, sprint-based or not.
+   */
+  private weekBuckets(startDate?: Date, endDate?: Date, fallbackWeeks = 8): Array<{ start: Date; end: Date; label: string }> {
+    const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const start = new Date(end);
+    if (startDate) {
+      start.setTime(new Date(startDate).getTime());
+    } else {
+      start.setDate(start.getDate() - (fallbackWeeks * 7 - 1));
+    }
+    start.setHours(0, 0, 0, 0);
+
+    const buckets: Array<{ start: Date; end: Date; label: string }> = [];
+    const cursor = new Date(start);
+    while (cursor.getTime() <= end.getTime()) {
+      const bucketStart = new Date(cursor);
+      const bucketEnd = new Date(cursor);
+      bucketEnd.setDate(bucketEnd.getDate() + 6);
+      bucketEnd.setHours(23, 59, 59, 999);
+      if (bucketEnd.getTime() > end.getTime()) bucketEnd.setTime(end.getTime());
+      buckets.push({
+        start: bucketStart,
+        end: bucketEnd,
+        label: bucketStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      });
+      cursor.setDate(cursor.getDate() + 7);
+    }
+
+    // A YTD/quarter range would otherwise produce 20-50+ points and make
+    // the chart unreadable — keep only the most recent 12 weeks of it.
+    return buckets.slice(-12);
+  }
+
+  /**
+   * MTTR trend over the most recent sprints, falling back to calendar weeks
+   * when no Sprint data exists for this scope (see weekBuckets).
    */
   private async calculateMttrTrend(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date): Promise<Array<{ period: string; mttr: number }>> {
     const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate });
 
-    const trend = [];
+    if (sprints.length > 0) {
+      const trend = [];
 
-    for (const sprint of sprints) {
-      const resolvedBugs = await this.prisma.workItem.findMany({
-        where: { sprintId: sprint.id, type: 'bug', status: 'resolved', resolvedAt: { not: null } },
-        select: { createdAt: true, resolvedAt: true }
-      });
+      for (const sprint of sprints) {
+        const resolvedBugs = await this.prisma.workItem.findMany({
+          where: { sprintId: sprint.id, type: 'bug', status: 'resolved', resolvedAt: { not: null } },
+          select: { createdAt: true, resolvedAt: true }
+        });
 
-      const times = resolvedBugs
-        .filter((bug) => bug.resolvedAt && new Date(bug.resolvedAt).getTime() >= new Date(bug.createdAt).getTime())
-        .map((bug) => (new Date(bug.resolvedAt!).getTime() - new Date(bug.createdAt).getTime()) / (1000 * 60 * 60));
+        const times = resolvedBugs
+          .filter((bug) => bug.resolvedAt && new Date(bug.resolvedAt).getTime() >= new Date(bug.createdAt).getTime())
+          .map((bug) => (new Date(bug.resolvedAt!).getTime() - new Date(bug.createdAt).getTime()) / (1000 * 60 * 60));
 
-      const avg = times.length > 0 ? times.reduce((sum, t) => sum + t, 0) / times.length : 0;
-      trend.push({ period: sprint.name, mttr: Math.round(avg * 10) / 10 });
+        const avg = times.length > 0 ? times.reduce((sum, t) => sum + t, 0) / times.length : 0;
+        trend.push({ period: sprint.name, mttr: Math.round(avg * 10) / 10 });
+      }
+
+      return trend.reverse(); // Return in chronological order
     }
 
-    return trend.reverse(); // Return in chronological order
+    const resolvedBugs = await this.prisma.workItem.findMany({
+      where: {
+        type: 'bug',
+        status: 'resolved',
+        resolvedAt: { not: null },
+        ...(productId ? { productId } : tenantId ? { tenantId } : {})
+      },
+      select: { createdAt: true, resolvedAt: true }
+    });
+
+    const buckets = this.weekBuckets(startDate, endDate);
+    const trend: Array<{ period: string; mttr: number }> = [];
+
+    for (const bucket of buckets) {
+      const times = resolvedBugs
+        .filter((bug) => {
+          const resolved = new Date(bug.resolvedAt!).getTime();
+          return (
+            resolved >= bucket.start.getTime() &&
+            resolved <= bucket.end.getTime() &&
+            resolved >= new Date(bug.createdAt).getTime()
+          );
+        })
+        .map((bug) => (new Date(bug.resolvedAt!).getTime() - new Date(bug.createdAt).getTime()) / (1000 * 60 * 60));
+
+      if (times.length > 0) {
+        trend.push({ period: bucket.label, mttr: Math.round((times.reduce((sum, t) => sum + t, 0) / times.length) * 10) / 10 });
+      }
+    }
+
+    return trend;
   }
 
   /**
@@ -352,36 +448,202 @@ export class AnalyticsService {
   }
 
   /**
-   * Velocity (completed story points) plus bugs created/resolved, per sprint,
-   * for the most recent sprints — backs the velocity chart, which otherwise
-   * has no trend source (calculateTeamProductivity.teamVelocity is a single
-   * snapshot, not a series).
+   * Completed-item count (all types) plus bugs created/resolved, per sprint
+   * — or per calendar week when no Sprint data is synced (see weekBuckets).
+   * "Velocity" is defined as a completed-item COUNT, not story points:
+   * across this tenant's real data, story points are set on 1 of 2,494 work
+   * items, so a points-based number would silently read as ~0 for nearly
+   * every team. Count-based velocity is what actually reflects throughput
+   * for teams that don't estimate in points — and matches how PMs here
+   * already track it manually (issues completed per sprint).
    */
-  async calculateVelocityTrend(productId: string, limit: number = 6): Promise<Array<{
+  async calculateVelocityTrend(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date, limit: number = 6): Promise<Array<{
     period: string;
     velocity: number;
     created: number;
     resolved: number;
+    byType: Record<WorkTypeCategory, number>;
   }>> {
-    const sprints = await this.getRecentSprints({ productId, limit });
+    const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate, limit });
 
-    const trend = [];
+    if (sprints.length > 0) {
+      const trend = [];
 
-    for (const sprint of sprints) {
-      const [completedItems, created, resolved] = await Promise.all([
-        this.prisma.workItem.findMany({
-          where: { sprintId: sprint.id, status: 'completed', storyPoints: { not: null } },
-          select: { storyPoints: true }
-        }),
-        this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug' } }),
-        this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug', status: 'resolved' } })
-      ]);
+      for (const sprint of sprints) {
+        const [completedByType, created, resolved] = await Promise.all([
+          this.prisma.workItem.groupBy({
+            by: ['type'],
+            where: { sprintId: sprint.id, status: { in: ['resolved', 'completed'] } },
+            _count: true
+          }),
+          this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug' } }),
+          this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug', status: 'resolved' } })
+        ]);
 
-      const velocity = completedItems.reduce((sum, item) => sum + (item.storyPoints || 0), 0);
-      trend.push({ period: sprint.name, velocity, created, resolved });
+        const byType = emptyTypeBreakdown();
+        let velocity = 0;
+        for (const row of completedByType) {
+          byType[categorizeWorkType(row.type)] += row._count;
+          velocity += row._count;
+        }
+
+        trend.push({ period: sprint.name, velocity, created, resolved, byType });
+      }
+
+      return trend.reverse(); // Return in chronological order
     }
 
-    return trend.reverse(); // Return in chronological order
+    const scopeWhere = productId ? { productId } : tenantId ? { tenantId } : {};
+    const [completedItems, bugItems] = await Promise.all([
+      this.prisma.workItem.findMany({
+        where: { ...scopeWhere, status: { in: ['resolved', 'completed'] } },
+        select: { type: true, resolvedAt: true, statusChangedAt: true, updatedAt: true }
+      }),
+      this.prisma.workItem.findMany({
+        where: { ...scopeWhere, type: 'bug' },
+        select: { createdAt: true, status: true, resolvedAt: true, statusChangedAt: true }
+      })
+    ]);
+
+    const buckets = this.weekBuckets(startDate, endDate);
+    const inBucket = (bucket: { start: Date; end: Date }, at: Date) =>
+      at.getTime() >= bucket.start.getTime() && at.getTime() <= bucket.end.getTime();
+
+    const trend = buckets.map((bucket) => {
+      const itemsInBucket = completedItems.filter((item) =>
+        inBucket(bucket, new Date(item.resolvedAt ?? item.statusChangedAt ?? item.updatedAt))
+      );
+
+      const byType = emptyTypeBreakdown();
+      for (const item of itemsInBucket) byType[categorizeWorkType(item.type)]++;
+
+      const created = bugItems.filter((bug) => inBucket(bucket, new Date(bug.createdAt))).length;
+      const resolved = bugItems.filter((bug) => {
+        if (bug.status !== 'resolved') return false;
+        const at = bug.resolvedAt ?? bug.statusChangedAt;
+        return at ? inBucket(bucket, new Date(at)) : false;
+      }).length;
+
+      return { period: bucket.label, velocity: itemsInBucket.length, created, resolved, byType };
+    });
+
+    // Drop leading/trailing all-zero weeks so a product with only a few
+    // weeks of real history doesn't render as a long flat line at 0.
+    return trend.filter((point) => point.velocity > 0 || point.created > 0 || point.resolved > 0);
+  }
+
+  /**
+   * High-priority (critical/high) bugs resolved in the most recent period —
+   * the real Sprint if one is synced for this scope, otherwise the trailing
+   * 7 days (the same sprint/calendar-week fallback as the trend charts
+   * above). This is the "what did the team actually fix last sprint"
+   * question a PM asks in a status update.
+   */
+  async getRecentHighPriorityFixes(productId?: string, tenantId?: string, limit: number = 20): Promise<{
+    periodLabel: string;
+    periodSource: 'sprint' | 'week';
+    bugs: Array<{
+      id: string;
+      externalId: string | null;
+      title: string;
+      priority: string;
+      resolvedAt: string;
+      assigneeName: string | null;
+    }>;
+    hasData: boolean;
+  }> {
+    const [mostRecentSprint] = await this.getRecentSprints({ productId, tenantId, limit: 1 });
+
+    const where: any = {
+      type: 'bug',
+      status: 'resolved',
+      priority: { in: ['critical', 'high'] },
+      resolvedAt: { not: null },
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    let periodLabel: string;
+    let periodSource: 'sprint' | 'week';
+
+    if (mostRecentSprint) {
+      where.sprintId = mostRecentSprint.id;
+      periodLabel = mostRecentSprint.name;
+      periodSource = 'sprint';
+    } else {
+      where.resolvedAt = { not: null, gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
+      periodLabel = 'Last 7 days';
+      periodSource = 'week';
+    }
+
+    const bugs = await this.prisma.workItem.findMany({
+      where,
+      orderBy: { resolvedAt: 'desc' },
+      take: limit,
+      select: { id: true, externalId: true, title: true, priority: true, resolvedAt: true, externalMetadata: true }
+    });
+
+    return {
+      periodLabel,
+      periodSource,
+      bugs: bugs.map((b) => ({
+        id: b.id,
+        externalId: b.externalId,
+        title: b.title,
+        priority: b.priority ?? 'unset',
+        resolvedAt: b.resolvedAt!.toISOString(),
+        assigneeName: (b.externalMetadata as any)?.assigneeName ?? null
+      })),
+      hasData: bugs.length > 0
+    };
+  }
+
+  /**
+   * Completed-item throughput for the current calendar quarter (to date)
+   * vs. the prior full quarter — same completed-item definition as
+   * calculateVelocityTrend, summed over a fixed calendar window instead of
+   * a per-sprint/week series. Calendar quarters (not Jira sprint
+   * boundaries) so this works identically for any tenant regardless of
+   * board/sprint sync status.
+   */
+  async getQuarterOverQuarterVelocity(productId?: string, tenantId?: string): Promise<{
+    current: { label: string; total: number; byType: Record<WorkTypeCategory, number> };
+    previous: { label: string; total: number; byType: Record<WorkTypeCategory, number> };
+    changePercent: number | null;
+    hasData: boolean;
+  }> {
+    const now = new Date();
+    const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    const currentStart = new Date(now.getFullYear(), qStartMonth, 1);
+    const previousEnd = new Date(currentStart.getTime() - 1);
+    const previousStart = new Date(previousEnd.getFullYear(), Math.floor(previousEnd.getMonth() / 3) * 3, 1);
+
+    const scopeWhere = productId ? { productId } : tenantId ? { tenantId } : {};
+    const items = await this.prisma.workItem.findMany({
+      where: { ...scopeWhere, status: { in: ['resolved', 'completed'] } },
+      select: { type: true, resolvedAt: true, statusChangedAt: true, updatedAt: true }
+    });
+
+    const summarize = (start: Date, end: Date) => {
+      const inWindow = items.filter((item) => {
+        const at = new Date(item.resolvedAt ?? item.statusChangedAt ?? item.updatedAt).getTime();
+        return at >= start.getTime() && at <= end.getTime();
+      });
+      const byType = emptyTypeBreakdown();
+      for (const item of inWindow) byType[categorizeWorkType(item.type)]++;
+      return { total: inWindow.length, byType };
+    };
+
+    const quarterLabel = (start: Date, toDate: boolean) =>
+      `Q${Math.floor(start.getMonth() / 3) + 1} ${start.getFullYear()}${toDate ? ' (to date)' : ''}`;
+
+    const current = { label: quarterLabel(currentStart, true), ...summarize(currentStart, now) };
+    const previous = { label: quarterLabel(previousStart, false), ...summarize(previousStart, previousEnd) };
+
+    const changePercent = previous.total > 0
+      ? Math.round(((current.total - previous.total) / previous.total) * 1000) / 10
+      : null;
+
+    return { current, previous, changePercent, hasData: current.total > 0 || previous.total > 0 };
   }
 
   /**
@@ -662,6 +924,521 @@ export class AnalyticsService {
       overallQualityScore: Math.round(overallQualityScore),
       hasData: scoredProducts.length > 0
     };
+  }
+
+  /**
+   * Real bug distribution by Jira label (e.g. UI-BUG, FUNC-BUG) — this org's
+   * Jira projects don't use Components, so labels are the only real
+   * categorical tag on a bug. Untagged bugs bucket into "Unlabeled" so the
+   * distribution's total still sums to the bug count.
+   */
+  async calculateBugLabelDistribution(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
+    distribution: Array<{ label: string; count: number }>;
+    /** False when zero bugs are tracked for this scope. */
+    hasData: boolean;
+  }> {
+    const where: any = { type: 'bug', isActive: true };
+    if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
+    if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
+    if (endDate) where.createdAt = { ...where.createdAt, lte: endDate };
+
+    const bugs = await this.prisma.workItem.findMany({ where, select: { labels: true } });
+
+    const counts = new Map<string, number>();
+    for (const bug of bugs) {
+      const labels = bug.labels.length > 0 ? bug.labels : ['Unlabeled'];
+      for (const label of labels) {
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
+
+    const distribution = Array.from(counts.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return { distribution, hasData: bugs.length > 0 };
+  }
+
+  /**
+   * Count of currently-open critical/high priority bugs — same priority
+   * values calculateDefectLeakage already uses as its production-bug proxy,
+   * just exposed as its own standalone figure.
+   */
+  async calculateOpenP0P1Count(productId?: string, tenantId?: string): Promise<{
+    count: number;
+    /** False when zero bugs are tracked for this scope — `count: 0` in that
+     * case means "never measured," not "nothing open." */
+    hasData: boolean;
+  }> {
+    const where: any = { type: 'bug', isActive: true };
+    if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
+
+    const [totalBugs, count] = await Promise.all([
+      this.prisma.workItem.count({ where }),
+      this.prisma.workItem.count({
+        where: { ...where, priority: { in: ['critical', 'high'] }, status: { in: ['open', 'in_progress'] } }
+      })
+    ]);
+
+    return { count, hasData: totalBugs > 0 };
+  }
+
+  /**
+   * Bug Reopen Rate + First-Time Fix Rate, from reopenCount tracked at sync
+   * time (jira-sync.service.ts detects resolved/completed -> open/in_progress
+   * transitions). Population is "reopenCount > 0 OR currently resolved/
+   * completed" rather than "resolvedAt is set" — Jira clears resolutiondate
+   * when an issue is reopened, so a bug resolved-then-reopened-then-sitting
+   * in_progress again would otherwise be missed entirely.
+   */
+  async calculateReopenMetrics(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
+    reopenRate: number;
+    firstTimeFixRate: number;
+    /** False when no bug has ever been resolved (or reopened) for this scope. */
+    hasData: boolean;
+  }> {
+    const where: any = {
+      type: 'bug',
+      isActive: true,
+      OR: [{ reopenCount: { gt: 0 } }, { status: { in: ['resolved', 'completed'] } }]
+    };
+    if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
+    if (startDate) where.updatedAt = { ...where.updatedAt, gte: startDate };
+    if (endDate) where.updatedAt = { ...where.updatedAt, lte: endDate };
+
+    const everResolved = await this.prisma.workItem.findMany({ where, select: { reopenCount: true } });
+    const denominator = everResolved.length;
+    const reopened = everResolved.filter((w) => w.reopenCount > 0).length;
+    const reopenRate = denominator > 0 ? (reopened / denominator) * 100 : 0;
+
+    return {
+      reopenRate: Math.round(reopenRate * 10) / 10,
+      firstTimeFixRate: Math.round((100 - reopenRate) * 10) / 10,
+      hasData: denominator > 0
+    };
+  }
+
+  /**
+   * Items sitting in a QA/review/blocked-like raw Jira status past a day
+   * threshold. Filters on the RAW status name (not the collapsed `status`
+   * bucket — "In QA" and "Code Review" both collapse to 'in_progress') using
+   * the same simple keyword-matching style as jira-sync.service.ts's
+   * mapIssueType, no ML/NLP involved.
+   */
+  async getQaBottlenecks(productId?: string, tenantId?: string, thresholdDays: number = 3): Promise<{
+    bottlenecks: Array<{ id: string; externalId: string | null; title: string; rawStatus: string; daysInStatus: number; severity: 'critical' | 'warning' | 'neutral' }>;
+    /** False when nothing is currently sitting in any QA-like raw status at all
+     * — distinct from "some exist but none crossed the threshold yet." */
+    hasData: boolean;
+  }> {
+    const where: any = { isActive: true, status: 'in_progress', statusChangedAt: { not: null } };
+    if (productId) where.productId = productId;
+    else if (tenantId) where.tenantId = tenantId;
+
+    const candidates = await this.prisma.workItem.findMany({
+      where,
+      select: { id: true, externalId: true, title: true, externalStatusName: true, statusChangedAt: true }
+    });
+
+    const QA_STATUS_KEYWORDS = /qa|test|review|verification|blocked/i;
+    const qaCandidates = candidates.filter((c) => QA_STATUS_KEYWORDS.test(c.externalStatusName ?? ''));
+
+    const now = Date.now();
+    const bottlenecks = qaCandidates
+      .map((c) => ({
+        id: c.id,
+        externalId: c.externalId,
+        title: c.title,
+        rawStatus: c.externalStatusName as string,
+        daysInStatus: Math.round((now - c.statusChangedAt!.getTime()) / (1000 * 60 * 60 * 24))
+      }))
+      .filter((c) => c.daysInStatus >= thresholdDays)
+      .sort((a, b) => b.daysInStatus - a.daysInStatus)
+      .map((c) => ({
+        ...c,
+        severity: (c.daysInStatus >= thresholdDays * 3 ? 'critical' : c.daysInStatus >= thresholdDays * 2 ? 'warning' : 'neutral') as 'critical' | 'warning' | 'neutral'
+      }));
+
+    return { bottlenecks, hasData: qaCandidates.length > 0 };
+  }
+
+  /**
+   * Server-side related/similar bugs for one bug, over real synced titles +
+   * descriptions in the same product — replaces the client-side tf-idf demo
+   * that ran over a 10-row mock corpus in src/lib/qm-bugs.ts.
+   *
+   * Prefers real local-embedding cosine similarity (semantic — catches
+   * paraphrases tf-idf misses; see local-embeddings.service.ts) when both
+   * the baseline bug and at least one candidate have one stored; falls back
+   * to tf-idf token-overlap otherwise (this bug hasn't been re-synced since
+   * embeddings shipped yet). A tenant never sees a broken/empty panel purely
+   * because embeddings haven't backfilled yet — see jira-sync.service.ts's
+   * embedding pass.
+   */
+  async getSimilarBugs(workItemId: string, limit: number = 5): Promise<{
+    similar: Array<{ id: string; externalId: string | null; title: string; status: string; score: number }>;
+    /** False when the baseline bug doesn't exist, or no other bugs exist in its product yet. */
+    hasData: boolean;
+  }> {
+    const baseline = await this.prisma.workItem.findUnique({
+      where: { id: workItemId },
+      select: { id: true, productId: true, title: true, description: true, embedding: true, externalSystem: true }
+    });
+    if (!baseline) return { similar: [], hasData: false };
+
+    const candidates = await this.prisma.workItem.findMany({
+      where: { productId: baseline.productId, type: 'bug', isActive: true, id: { not: workItemId } },
+      select: { id: true, externalId: true, title: true, status: true, description: true, embedding: true, externalSystem: true }
+    });
+    if (candidates.length === 0) return { similar: [], hasData: false };
+
+    const embeddedCandidates = candidates.filter((c) => c.embedding.length > 0);
+    let ranked: Array<{ id: string; score: number }>;
+
+    if (baseline.embedding.length > 0 && embeddedCandidates.length > 0) {
+      const { cosineSimilarity } = await import('./local-embeddings.service');
+      // Semantic cosine similarity runs "hotter" than tf-idf's sparse-vector
+      // overlap — unrelated short texts routinely still land around 0.1-0.3
+      // in embedding space, so 0.08 (tf-idf's threshold) would flag nearly
+      // everything. 0.5 is a starting point, not an empirically-tuned value
+      // — revisit once real embeddings are live and match against actual
+      // known-duplicate pairs.
+      ranked = embeddedCandidates
+        .map((c) => ({ id: c.id, score: cosineSimilarity(baseline.embedding, c.embedding) }))
+        .filter((r) => r.score > 0.5)
+        .sort((a, b) => b.score - a.score);
+    } else {
+      const { rankBySimilarity } = await import('../utils/text-similarity');
+      const { adfToPlainText } = await import('../utils/adf-to-text');
+      // description is raw ADF JSON for Jira bugs, raw HTML for Azure
+      // DevOps ones — strip either down to plain text before comparing, or
+      // JSON/HTML syntax noise dominates the token overlap.
+      const plainText = (description: string | null, externalSystem: string): string => {
+        if (!description) return '';
+        return externalSystem === 'jira' ? adfToPlainText(description) : description.replace(/<[^>]*>/g, ' ');
+      };
+      ranked = rankBySimilarity(
+        `${baseline.title} ${plainText(baseline.description, baseline.externalSystem)}`,
+        candidates.map((c) => ({ id: c.id, text: `${c.title} ${plainText(c.description, c.externalSystem)}` }))
+      );
+    }
+
+    const similar = ranked
+      .slice(0, limit)
+      .map(({ id, score }) => {
+        const candidate = candidates.find((c) => c.id === id)!;
+        return { id: candidate.id, externalId: candidate.externalId, title: candidate.title, status: candidate.status, score: Math.round(score * 100) / 100 };
+      });
+
+    return { similar, hasData: true };
+  }
+
+  /**
+   * Holistic per-project status for the whole tenant — connection state,
+   * sync recency, bug resolution, health score. Built as a fixed number of
+   * grouped aggregate queries (not one round-trip per product) so the query
+   * count doesn't scale with how many projects a tenant has.
+   *
+   * Provider-agnostic by construction: every field comes from WorkItem's
+   * shared shape (type/status/externalSystem/lastSeenAtSourceAt), which
+   * jira-sync.service.ts and azure-devops-sync.service.ts both populate
+   * with the same status vocabulary — nothing here assumes Jira.
+   */
+  async getProjectsOverview(tenantId: string): Promise<{
+    projects: Array<{
+      productId: string;
+      productName: string;
+      /** Distinct externalSystem values actually present among this product's synced rows — reflects reality, not just config. */
+      connectedSystems: string[];
+      /** A Jira project or Azure DevOps area path is configured, whether or not anything has synced yet. */
+      isMapped: boolean;
+      lastSyncedAt: string | null;
+      totalWorkItems: number;
+      totalBugs: number;
+      openBugs: number;
+      resolvedBugs: number;
+      /** resolvedBugs / (totalBugs - closedBugs). Null, not 0, when there's nothing to measure. */
+      resolutionRate: number | null;
+      healthScore: number;
+      hasData: boolean;
+    }>;
+    hasData: boolean;
+  }> {
+    const [products, bugStatusCounts, totalCounts, lastSynced, systemRows, tenantAnalytics] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, name: true, jiraProjectId: true, azureDevopsAreaPath: true }
+      }),
+      this.prisma.workItem.groupBy({
+        by: ['productId', 'status'],
+        where: { tenantId, type: 'bug', isActive: true },
+        _count: true
+      }),
+      this.prisma.workItem.groupBy({
+        by: ['productId'],
+        where: { tenantId, isActive: true },
+        _count: true
+      }),
+      this.prisma.workItem.groupBy({
+        by: ['productId'],
+        where: { tenantId },
+        _max: { lastSeenAtSourceAt: true }
+      }),
+      this.prisma.workItem.findMany({
+        where: { tenantId },
+        distinct: ['productId', 'externalSystem'],
+        select: { productId: true, externalSystem: true }
+      }),
+      this.getTenantAnalytics(tenantId)
+    ]);
+
+    const healthByProduct = new Map(tenantAnalytics.products.map((p) => [p.productId, p]));
+    const totalsByProduct = new Map(totalCounts.map((t) => [t.productId, t._count]));
+    const lastSyncedByProduct = new Map(lastSynced.map((s) => [s.productId, s._max.lastSeenAtSourceAt]));
+
+    const systemsByProduct = new Map<string, Set<string>>();
+    for (const row of systemRows) {
+      if (!systemsByProduct.has(row.productId)) systemsByProduct.set(row.productId, new Set());
+      systemsByProduct.get(row.productId)!.add(row.externalSystem);
+    }
+
+    const bugBucketsByProduct = new Map<string, { open: number; resolved: number; closed: number; total: number }>();
+    for (const row of bugStatusCounts) {
+      const bucket = bugBucketsByProduct.get(row.productId) ?? { open: 0, resolved: 0, closed: 0, total: 0 };
+      const count = row._count as unknown as number;
+      if (row.status === 'open' || row.status === 'in_progress') bucket.open += count;
+      else if (row.status === 'resolved' || row.status === 'completed') bucket.resolved += count;
+      else if (row.status === 'closed') bucket.closed += count;
+      bucket.total += count;
+      bugBucketsByProduct.set(row.productId, bucket);
+    }
+
+    const projects = products.map((product) => {
+      const bugs = bugBucketsByProduct.get(product.id) ?? { open: 0, resolved: 0, closed: 0, total: 0 };
+      const measurableBugs = bugs.total - bugs.closed;
+      const health = healthByProduct.get(product.id);
+
+      return {
+        productId: product.id,
+        productName: product.name,
+        connectedSystems: Array.from(systemsByProduct.get(product.id) ?? []),
+        isMapped: !!(product.jiraProjectId || product.azureDevopsAreaPath),
+        lastSyncedAt: lastSyncedByProduct.get(product.id)?.toISOString() ?? null,
+        totalWorkItems: totalsByProduct.get(product.id) ?? 0,
+        totalBugs: bugs.total,
+        openBugs: bugs.open,
+        resolvedBugs: bugs.resolved,
+        resolutionRate: measurableBugs > 0 ? Math.round((bugs.resolved / measurableBugs) * 1000) / 10 : null,
+        healthScore: health?.healthScore ?? 0,
+        hasData: health?.hasData ?? false
+      };
+    });
+
+    return { projects, hasData: projects.some((p) => p.hasData) };
+  }
+
+  /**
+   * Snapshot of everything not yet done — open + in-progress work items
+   * across all item types (stories, tasks, bugs), broken down by priority
+   * and type. This is a status-derived proxy for "backlog," not a literal
+   * Jira board backlog (ranked, un-sprinted issues) — that ranking data
+   * needs the same Agile-API board/sprint scope the velocity/MTTR fallback
+   * exists for — but it's real, live, and works for every tenant/provider
+   * regardless of whether that scope has been granted.
+   */
+  async getBacklogSummary(productId?: string, tenantId?: string, type?: string): Promise<{
+    total: number;
+    byPriority: Record<string, number>;
+    byType: Record<string, number>;
+    oldestCreatedAt: string | null;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      status: { in: ['open', 'in_progress'] },
+      ...(type ? { type } : {}),
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const [total, byPriorityRows, byTypeRows, oldest] = await Promise.all([
+      this.prisma.workItem.count({ where }),
+      this.prisma.workItem.groupBy({ by: ['priority'], where, _count: true }),
+      this.prisma.workItem.groupBy({ by: ['type'], where, _count: true }),
+      this.prisma.workItem.findFirst({ where, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
+    ]);
+
+    const byPriority: Record<string, number> = {};
+    for (const row of byPriorityRows) byPriority[row.priority ?? 'unset'] = row._count;
+
+    const byType: Record<string, number> = {};
+    for (const row of byTypeRows) byType[row.type] = row._count;
+
+    return {
+      total,
+      byPriority,
+      byType,
+      oldestCreatedAt: oldest?.createdAt.toISOString() ?? null,
+      hasData: total > 0
+    };
+  }
+
+  /**
+   * Currently-open items bucketed by age (days since createdAt) — flags
+   * where a queue is accumulating stale work, something a point-in-time
+   * count can't show. Optional `type` scopes to one item type (e.g. 'bug'
+   * for Bug Intelligence); omitted, it covers the whole backlog, same
+   * open/in_progress status set getBacklogSummary uses.
+   */
+  async getAgeDistribution(productId?: string, tenantId?: string, type?: string): Promise<{
+    buckets: Array<{ label: string; count: number }>;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      status: { in: ['open', 'in_progress'] },
+      ...(type ? { type } : {}),
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const items = await this.prisma.workItem.findMany({ where, select: { createdAt: true } });
+
+    const ranges = [
+      { label: '0-7d', maxDays: 7 },
+      { label: '8-14d', maxDays: 14 },
+      { label: '15-30d', maxDays: 30 },
+      { label: '31-60d', maxDays: 60 },
+      { label: '60d+', maxDays: Infinity }
+    ];
+    const buckets = ranges.map((r) => ({ label: r.label, count: 0 }));
+
+    const now = Date.now();
+    for (const item of items) {
+      const ageDays = (now - new Date(item.createdAt).getTime()) / 86_400_000;
+      const idx = ranges.findIndex((r) => ageDays <= r.maxDays);
+      buckets[idx === -1 ? buckets.length - 1 : idx].count++;
+    }
+
+    return { buckets, hasData: items.length > 0 };
+  }
+
+  /**
+   * Items created vs. items completed (any type) per period — the backlog
+   * equivalent of calculateVelocityTrend's created/resolved overlay, but
+   * scoped to the whole backlog rather than bugs only. Net change per
+   * period (created - completed) answers "is the backlog growing or
+   * shrinking," which a current-snapshot-only summary can't. Same
+   * sprint/calendar-week fallback as the other trend methods.
+   */
+  async calculateBacklogFlow(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date, limit: number = 6): Promise<Array<{
+    period: string;
+    created: number;
+    completed: number;
+    netChange: number;
+  }>> {
+    const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate, limit });
+
+    if (sprints.length > 0) {
+      const trend = [];
+      for (const sprint of sprints) {
+        const [created, completed] = await Promise.all([
+          this.prisma.workItem.count({ where: { sprintId: sprint.id } }),
+          this.prisma.workItem.count({ where: { sprintId: sprint.id, status: { in: ['resolved', 'completed'] } } })
+        ]);
+        trend.push({ period: sprint.name, created, completed, netChange: created - completed });
+      }
+      return trend.reverse();
+    }
+
+    const scopeWhere = productId ? { productId } : tenantId ? { tenantId } : {};
+    const [createdItems, completedItems] = await Promise.all([
+      this.prisma.workItem.findMany({ where: scopeWhere, select: { createdAt: true } }),
+      this.prisma.workItem.findMany({
+        where: { ...scopeWhere, status: { in: ['resolved', 'completed'] } },
+        select: { resolvedAt: true, statusChangedAt: true, updatedAt: true }
+      })
+    ]);
+
+    const buckets = this.weekBuckets(startDate, endDate);
+    const inBucket = (bucket: { start: Date; end: Date }, at: Date) =>
+      at.getTime() >= bucket.start.getTime() && at.getTime() <= bucket.end.getTime();
+
+    const trend = buckets.map((bucket) => {
+      const created = createdItems.filter((item) => inBucket(bucket, new Date(item.createdAt))).length;
+      const completed = completedItems.filter((item) =>
+        inBucket(bucket, new Date(item.resolvedAt ?? item.statusChangedAt ?? item.updatedAt))
+      ).length;
+      return { period: bucket.label, created, completed, netChange: created - completed };
+    });
+
+    return trend.filter((point) => point.created > 0 || point.completed > 0);
+  }
+
+  /**
+   * Requirements Traceability from real issue-link data (WorkItemLink,
+   * populated at sync time from Jira/ADO's native issue links) — for each
+   * requirement (story/epic), the bugs actually linked to it and their
+   * resolution status. This is NOT test-case coverage — there's no
+   * test-management tool connected, so "coverage" here means "has a linked
+   * defect been tracked," not "% of test cases passing." Requirements with
+   * zero links are excluded rather than shown as a false "Ready" — no link
+   * means "untraced," not "verified clean."
+   */
+  async getRequirementTraceability(productId?: string, tenantId?: string, limit: number = 25): Promise<{
+    requirements: Array<{
+      id: string;
+      externalId: string | null;
+      title: string;
+      type: string;
+      linkedBugs: Array<{ id: string; externalId: string | null; title: string; status: string; priority: string | null }>;
+      status: 'ready' | 'at_risk' | 'blocked';
+    }>;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      type: { in: ['story', 'epic'] },
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const requirements = await this.prisma.workItem.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true, externalId: true, title: true, type: true,
+        linksFrom: { select: { targetItem: { select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } } } },
+        linksTo: { select: { sourceItem: { select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } } } }
+      }
+    });
+
+    const rows = requirements.map((req) => {
+      const linked = [
+        ...req.linksFrom.map((l) => l.targetItem),
+        ...req.linksTo.map((l) => l.sourceItem)
+      ].filter((item) => item.type === 'bug');
+
+      const seen = new Set<string>();
+      const linkedBugs = linked.filter((b) => (seen.has(b.id) ? false : (seen.add(b.id), true)));
+
+      const openBugs = linkedBugs.filter((b) => b.status === 'open' || b.status === 'in_progress');
+      const criticalOpen = openBugs.filter((b) => b.priority === 'critical' || b.priority === 'high');
+
+      const status: 'ready' | 'at_risk' | 'blocked' =
+        criticalOpen.length > 0 ? 'blocked' : openBugs.length > 0 ? 'at_risk' : 'ready';
+
+      return {
+        id: req.id,
+        externalId: req.externalId,
+        title: req.title,
+        type: req.type,
+        linkedBugs: linkedBugs.map((b) => ({ id: b.id, externalId: b.externalId, title: b.title, status: b.status, priority: b.priority })),
+        status
+      };
+    });
+
+    const withLinks = rows.filter((r) => r.linkedBugs.length > 0);
+
+    return { requirements: withLinks, hasData: withLinks.length > 0 };
   }
 }
 

@@ -1,0 +1,73 @@
+import { Request, Response } from "express";
+import providerConnectionService from "../services/provider-connection.service";
+import { releaseIntegrationOperation, requestSyncNow, reserveIntegrationOperation } from "../../lib/scheduler";
+import { syncAwsGpuCost } from "../services/aws-gpu-cost-sync.service";
+import { paramString } from "../utils/http-params";
+
+function tenantId(req: Request): string | null {
+  return req.user?.tenantId ?? null;
+}
+
+export async function listAwsConnections(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant) return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const data = await providerConnectionService.listForTenant(tenant, "aws");
+  res.json({ success: true, data: data.map(({ encryptedCredential, ...rest }) => rest) });
+}
+
+/** Needs an IAM user/role with ce:GetCostAndUsage permission — an access-key+secret pair, not an assumed-role ARN, for this first cut. */
+export async function createAwsConnection(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant) return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  if (!req.user?.id) return res.status(401).json({ success: false, error: "Not authenticated" });
+
+  const { awsAccountId, accessKeyId, secretAccessKey } = req.body ?? {};
+  if (!awsAccountId || !accessKeyId || !secretAccessKey) {
+    return res.status(400).json({ success: false, error: "awsAccountId, accessKeyId and secretAccessKey are required" });
+  }
+
+  try {
+    const connection = await providerConnectionService.createConnection({
+      tenantId: tenant,
+      createdBy: req.user.id,
+      vendor: "aws",
+      product: "gpu_compute",
+      externalAccountId: awsAccountId,
+      credential: JSON.stringify({ accessKeyId, secretAccessKey }),
+      authType: "access_key",
+    });
+    const { encryptedCredential, ...safe } = connection;
+    res.status(201).json({ success: true, data: safe });
+  } catch (error) {
+    res.status(409).json({ success: false, error: error instanceof Error ? error.message : "Failed to create connection" });
+  }
+}
+
+export async function syncAwsNow(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant) return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const id = paramString(req.params.id);
+  const connection = await providerConnectionService.getForTenant(tenant, id);
+  if (!connection) return res.status(404).json({ success: false, error: "Connection not found" });
+
+  const accepted = requestSyncNow(connection.id, () => syncAwsGpuCost(connection));
+  if (!accepted) return res.status(409).json({ success: false, error: "A sync for this connection is already running" });
+  res.json({ success: true, message: "Sync started" });
+}
+
+export async function disconnectAwsConnection(req: Request, res: Response) {
+  const tenant = tenantId(req);
+  if (!tenant) return res.status(403).json({ success: false, error: "Not assigned to an organization yet" });
+  const id = paramString(req.params.id);
+  const connection = await providerConnectionService.getForTenant(tenant, id);
+  if (!connection) return res.status(404).json({ success: false, error: "Connection not found" });
+  if (!reserveIntegrationOperation(id)) {
+    return res.status(409).json({ success: false, error: "A synchronization is running. Wait for it to finish, then retry." });
+  }
+  try {
+    await providerConnectionService.disconnect(id, tenant);
+    res.json({ success: true });
+  } finally {
+    releaseIntegrationOperation(id);
+  }
+}

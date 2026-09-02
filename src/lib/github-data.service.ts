@@ -6,7 +6,6 @@
 import { API_V1_URL } from "@/lib/api-config";
 
 const API_BASE = API_V1_URL;
-const TENANT_ID = "11d0f8f8-fd2e-4e2c-8d01-8f9b0ae1e167";
 
 export interface GitHubRepository {
   name: string;
@@ -66,12 +65,41 @@ export interface SprintMetrics {
   storyPoints?: number;
 }
 
+export interface GitHubWorkflowRun {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  created_at: string;
+  updated_at: string;
+  url: string;
+}
+
+/**
+ * Real CI run history from GitHub Actions for the given repo — this is the
+ * closest thing to "automated testing activity" this app can surface
+ * without a dedicated test-management tool (Xray/Zephyr) connected: no
+ * concept of "% of test cases automated" exists here, but real workflow
+ * runs and their pass/fail outcome do. No tenantId param — the backend
+ * derives the caller's tenant from their session, not a client-supplied ID.
+ */
+export async function getWorkflowRuns(owner: string, repo: string, limit: number = 30): Promise<GitHubWorkflowRun[]> {
+  try {
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/workflows?limit=${limit}`, { credentials: 'include' });
+    const data = await response.json();
+    return data.success ? data.data : [];
+  } catch (error) {
+    console.error('Failed to fetch GitHub workflow runs:', error);
+    return [];
+  }
+}
+
 /**
  * Fetch GitHub repositories for the current user
  */
 export async function getGitHubRepositories(): Promise<GitHubRepository[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/user-repositories?tenantId=${TENANT_ID}`, { credentials: 'include' });
+    const response = await fetch(`${API_BASE}/github/user-repositories`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -92,10 +120,10 @@ export async function getGitHubMetrics(owner: string, repo: string): Promise<Git
   try {
     // Fetch data from GitHub endpoints
     const [commitsResponse, prsResponse, issuesResponse, statusResponse] = await Promise.all([
-      fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
-      fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
-      fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' }),
-      fetch(`${API_BASE}/github/${owner}/${repo}/status?tenantId=${TENANT_ID}`, { credentials: 'include' })
+      fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100`, { credentials: 'include' }),
+      fetch(`${API_BASE}/github/${owner}/${repo}/status`, { credentials: 'include' })
     ]);
 
     const [commitsData, prsData, issuesData, statusData] = await Promise.all([
@@ -141,12 +169,38 @@ export async function getGitHubMetrics(owner: string, repo: string): Promise<Git
   }
 }
 
+export interface CommitAttributionSummary {
+  totalCommits: number;
+  exact: number;
+  heuristic: number;
+  unattributed: number;
+  byTool: Record<string, number>;
+  churn: { additions: number; deletions: number; commitsWithStats: number; commitsMissingStats: number };
+}
+
+/**
+ * Real, persisted AI-vs-human commit attribution for the last 30 days
+ * (github-commit-sync.service.ts + the Claude Code hook). Distinct from
+ * getCommitData below, which is a live GitHub API passthrough with no
+ * attribution or persisted diff stats.
+ */
+export async function getCommitAttribution(owner: string, repo: string): Promise<CommitAttributionSummary | null> {
+  try {
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/commit-attribution`, { credentials: 'include' });
+    const data = await response.json();
+    return data.success ? data.data : null;
+  } catch (error) {
+    console.error('Failed to fetch commit attribution:', error);
+    return null;
+  }
+}
+
 /**
  * Get commit data with sprint alignment
  */
 export async function getCommitData(owner: string, repo: string, since: string): Promise<GitHubCommit[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/commits?limit=100`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -172,7 +226,7 @@ export async function getCommitData(owner: string, repo: string, since: string):
  */
 export async function getPullRequestData(owner: string, repo: string): Promise<GitHubPullRequest[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/pull-requests?state=all&limit=100`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {
@@ -200,7 +254,7 @@ export async function getPullRequestData(owner: string, repo: string): Promise<G
  */
 export async function getIssueData(owner: string, repo: string): Promise<GitHubIssue[]> {
   try {
-    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100&tenantId=${TENANT_ID}`, { credentials: 'include' });
+    const response = await fetch(`${API_BASE}/github/${owner}/${repo}/issues?state=all&limit=100`, { credentials: 'include' });
     const data = await response.json();
 
     if (data.success) {

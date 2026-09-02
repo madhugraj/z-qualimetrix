@@ -6,6 +6,7 @@ import workItemController from '../controllers/workitem.controller';
 import testCaseController from '../controllers/testcase.controller';
 import userController from '../controllers/user.controller';
 import analyticsController from '../controllers/analytics.controller';
+import { getGpuSpendSummary, getGpuSpendTrend, getGpuSpendBySquad, getGpuSpendByType } from '../controllers/gpu-spend.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
 import productRepositoryRoutes from './product-repository.routes';
@@ -24,6 +25,7 @@ import {
   ingestAiUsageEvents,
   ingestOrganizationOtlpLogs,
   ingestOrganizationOtlpMetrics,
+  ingestCommitAttribution,
   manualUsageEntry
 } from '../controllers/ai-usage.controller';
 import {
@@ -35,6 +37,7 @@ import {
 import { requireAuth, requireAdmin, requireProductWriteAccess, requireProductScope } from '../middleware/auth.middleware';
 import { requireIngestToken } from '../middleware/ingest-token.middleware';
 import { requireProviderConnectionToken } from '../middleware/provider-connection-token.middleware';
+import { paramString } from '../utils/http-params';
 import adminRoutes from './admin.routes';
 
 const router = Router();
@@ -64,8 +67,8 @@ router.put('/products/:id', requireAuth, requireProductWriteAccess, productContr
 router.delete('/products/:id', requireAdmin, productController.deleteProduct);
 router.get('/products/:id/stats', requireAuth, productController.getProductStats);
 router.get('/tenants/:tenantId/products', requireAuth, productController.getProductsByTenant);
-router.get('/products/:productId/deliverables', requireAuth, requireProductScope((req) => req.params.productId), productController.getProductDeliverables);
-router.post('/products/:productId/deliverables', requireAuth, requireProductScope((req) => req.params.productId), productController.createDeliverable);
+router.get('/products/:productId/deliverables', requireAuth, requireProductScope((req) => paramString(req.params.productId)), productController.getProductDeliverables);
+router.post('/products/:productId/deliverables', requireAuth, requireProductScope((req) => paramString(req.params.productId)), productController.createDeliverable);
 
 // Work Item routes
 router.get('/work-items', requireAuth, workItemController.getAllWorkItems);
@@ -73,7 +76,7 @@ router.get('/work-items/:id', requireAuth, workItemController.getWorkItemById);
 router.post('/work-items', requireAuth, workItemController.createWorkItem);
 router.put('/work-items/:id', requireAuth, workItemController.updateWorkItem);
 router.delete('/work-items/:id', requireAuth, workItemController.deleteWorkItem);
-router.get('/products/:productId/work-items', requireAuth, workItemController.getWorkItemsByProduct);
+router.get('/products/:productId/work-items', requireAuth, requireProductScope((req) => paramString(req.params.productId)), workItemController.getWorkItemsByProduct);
 router.get('/sprints/:sprintId/work-items', requireAuth, workItemController.getWorkItemsBySprint);
 router.post('/work-items/bulk-update-status', requireAuth, workItemController.bulkUpdateStatus);
 
@@ -106,22 +109,41 @@ router.get('/analytics/test-metrics', requireAuth, analyticsController.getTestEx
 router.get('/analytics/team-productivity', requireAuth, analyticsController.getTeamProductivity);
 router.get('/analytics/dashboard', requireAuth, analyticsController.getQualityDashboard);
 router.get('/analytics/trends', requireAuth, analyticsController.getQualityTrends);
-router.get('/products/:productId/analytics', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getProductAnalytics);
-router.get('/products/:productId/release-readiness', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getReleaseReadiness);
-router.get('/products/:productId/velocity-trend', requireAuth, requireProductScope((req) => req.params.productId), analyticsController.getVelocityTrend);
+router.get('/products/:productId/analytics', requireAuth, requireProductScope((req) => paramString(req.params.productId)), analyticsController.getProductAnalytics);
+router.get('/products/:productId/release-readiness', requireAuth, requireProductScope((req) => paramString(req.params.productId)), analyticsController.getReleaseReadiness);
+router.get('/analytics/velocity-trend', requireAuth, analyticsController.getVelocityTrend);
 router.get('/tenants/:tenantId/analytics', requireAuth, analyticsController.getTenantAnalytics);
+router.get('/analytics/bug-label-distribution', requireAuth, analyticsController.getBugLabelDistribution);
+router.get('/analytics/open-p0-p1-count', requireAuth, analyticsController.getOpenP0P1Count);
+router.get('/analytics/reopen-metrics', requireAuth, analyticsController.getReopenMetrics);
+router.get('/analytics/qa-bottlenecks', requireAuth, analyticsController.getQaBottlenecks);
+router.get('/products/:productId/work-items/:workItemId/similar-bugs', requireAuth, requireProductScope((req) => paramString(req.params.productId)), analyticsController.getSimilarBugs);
+router.get('/analytics/projects-overview', requireAuth, analyticsController.getProjectsOverview);
+router.get('/analytics/backlog-summary', requireAuth, analyticsController.getBacklogSummary);
+router.get('/analytics/recent-high-priority-fixes', requireAuth, analyticsController.getRecentHighPriorityFixes);
+router.get('/analytics/velocity-qoq', requireAuth, analyticsController.getQuarterOverQuarterVelocity);
+router.get('/analytics/age-distribution', requireAuth, analyticsController.getAgeDistribution);
+router.get('/analytics/backlog-flow', requireAuth, analyticsController.getBacklogFlow);
+router.get('/analytics/requirement-traceability', requireAuth, analyticsController.getRequirementTraceability);
+router.get('/gpu-spend/summary', requireAuth, getGpuSpendSummary);
+router.get('/gpu-spend/trend', requireAuth, getGpuSpendTrend);
+router.get('/gpu-spend/by-squad', requireAuth, getGpuSpendBySquad);
+router.get('/gpu-spend/by-type', requireAuth, getGpuSpendByType);
 
 // GitHub integration routes
 router.use('/github', githubRoutes);
 
 // GitHub token management routes (directly defined) — saving/deleting the
 // token is PM-only, same as connecting Jira/ADO; status/validate/test are
-// read-only checks against an already-stored token.
+// read-only checks against an already-stored token. Tenant always comes
+// from req.user (see github-token.controller.ts), never a URL param — no
+// :tenantId here, unlike the old routes, or one tenant could read/delete
+// another's connection by guessing a UUID.
 router.post('/github-token/validate', requireAuth, validateGitHubToken);
 router.post('/github-token/tokens', requireAdmin, saveGitHubToken);
-router.get('/github-token/status/:tenantId', requireAuth, getGitHubStatus);
-router.get('/github-token/test/:tenantId', requireAuth, testGitHubToken);
-router.delete('/github-token/tokens/:tenantId', requireAdmin, deleteGitHubToken);
+router.get('/github-token/status', requireAuth, getGitHubStatus);
+router.get('/github-token/test', requireAuth, testGitHubToken);
+router.delete('/github-token/tokens', requireAdmin, deleteGitHubToken);
 
 // Product repository routes
 router.use('/product-repository', productRepositoryRoutes);
@@ -131,6 +153,7 @@ router.get('/ai-usage/analytics', requireAuth, getAiUsageAnalyticsHandler);
 router.post('/public/ai-usage/events', requireIngestToken, ingestAiUsageEvents);
 router.post('/ai-usage/otlp/:connectionId/logs', requireProviderConnectionToken, ingestOrganizationOtlpLogs);
 router.post('/ai-usage/otlp/:connectionId/metrics', requireProviderConnectionToken, ingestOrganizationOtlpMetrics);
+router.post('/ai-usage/commit-attribution/:connectionId', requireProviderConnectionToken, ingestCommitAttribution);
 router.post('/ai-usage/manual-entry', requireAdmin, manualUsageEntry);
 
 // AI model catalog (pricing per vendor/model, tenant-scoped) — the "add a

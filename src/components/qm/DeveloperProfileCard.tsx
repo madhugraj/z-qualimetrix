@@ -73,7 +73,7 @@ export function DeveloperProfileCard({ dev }: { dev: Developer }) {
               dataKey="v"
               stroke="var(--primary)"
               strokeWidth={1.75}
-              fill="color-mix(in oklab, var(--primary) 18%, transparent)"
+              fill="color-mix(in oklab, var(--primary) 8%, transparent)"
               isAnimationActive={false}
             />
           </AreaChart>

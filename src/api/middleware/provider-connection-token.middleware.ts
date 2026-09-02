@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import type { AiProviderConnection } from "@prisma/client";
 import aiProviderConnectionService from "../services/ai-provider-connection.service";
+import { paramString } from "../utils/http-params";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -25,7 +26,7 @@ export async function requireProviderConnectionToken(
         .json({ success: false, error: "Missing x-qualimetrix-connection-token header" });
 
     const connection = await aiProviderConnectionService.resolveTelemetryConnection(
-      req.params.connectionId,
+      paramString(req.params.connectionId),
       token,
     );
     if (!connection)

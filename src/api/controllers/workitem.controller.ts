@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { BaseController } from './base.controller';
 import { Prisma } from '@prisma/client';
 import { isValidUUID, validationErrorResponse } from '../utils/validators';
+import { canAccessProduct } from '../middleware/auth.middleware';
+import { adfToPlainText } from '../utils/adf-to-text';
 
 /**
  * Work Item Controller
@@ -9,23 +11,81 @@ import { isValidUUID, validationErrorResponse } from '../utils/validators';
  */
 export class WorkItemController extends BaseController {
 
+  private isPortfolioRole(role?: string): boolean {
+    return role === 'pm' || role === 'executive';
+  }
+
+  /**
+   * Resolves the scope for the optional-productId work-item list endpoint —
+   * same shape as analytics.controller.ts's resolveProductOrTenantScope.
+   * A given productId is checked against the caller's real access; an
+   * omitted one only falls back to a tenant-wide scope for pm/executive
+   * (everyone else must pick a specific product), and the tenant is always
+   * the caller's own — never a client-supplied query param/header, which is
+   * exactly the trust bug this replaces (see getTenantId's doc comment).
+   */
+  private async resolveWorkItemScope(
+    req: Request,
+    res: Response
+  ): Promise<{ productId?: string; tenantId?: string } | null> {
+    const productId = req.query.productId as string | undefined;
+
+    if (productId) {
+      if (!req.user || !(await canAccessProduct(req.user, productId))) {
+        this.error(res, 'Not scoped to this product', 403);
+        return null;
+      }
+      return { productId };
+    }
+
+    if (!this.isPortfolioRole(req.user?.role)) {
+      this.error(res, 'productId is required for this role', 400);
+      return null;
+    }
+
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      this.error(res, 'No tenant associated with this account', 403);
+      return null;
+    }
+    return { tenantId };
+  }
+
   /**
    * Get all work items with pagination and filtering
    */
   getAllWorkItems = this.asyncHandler(async (req: Request, res: Response) => {
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'createdAt', 'desc');
-    const tenantId = this.getTenantId(req);
+
+    const scope = await this.resolveWorkItemScope(req, res);
+    if (!scope) return;
 
     // Build where clause
     const where: Prisma.WorkItemWhereInput = {};
-    if (tenantId) {
-      where.tenantId = tenantId;
+    if (scope.productId) where.productId = scope.productId;
+    else if (scope.tenantId) where.tenantId = scope.tenantId;
+
+    // Add filters (productId already resolved above via resolveWorkItemScope)
+    const filters = this.getFilters(req, ['type', 'priority', 'sprintId', 'assigneeId']);
+    Object.assign(where, filters);
+
+    // Labels use Prisma's array-contains-any, not the plain-equality
+    // semantics getFilters provides, so they're handled separately.
+    const labelsParam = req.query.labels as string | undefined;
+    const labels = labelsParam?.split(',').map((l) => l.trim()).filter(Boolean);
+    if (labels?.length) {
+      where.labels = { hasSome: labels };
     }
 
-    // Add filters
-    const filters = this.getFilters(req, ['productId', 'type', 'status', 'priority', 'sprintId', 'assigneeId']);
-    Object.assign(where, filters);
+    // status supports a comma-separated list (e.g. "open,in_progress" for a
+    // backlog view) as well as a single value — getFilters only does exact
+    // equality, so this needs the same special-casing as labels above.
+    const statusParam = req.query.status as string | undefined;
+    const statuses = statusParam?.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses?.length) {
+      where.status = statuses.length > 1 ? { in: statuses } : statuses[0];
+    }
 
     // Add search
     if (req.query.search) {
@@ -68,7 +128,7 @@ export class WorkItemController extends BaseController {
    * Get work item by ID
    */
   getWorkItemById = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -94,7 +154,25 @@ export class WorkItemController extends BaseController {
       return this.error(res, 'Work item not found', 404);
     }
 
-    return this.success(res, workItem);
+    // 404, not 403 — a cross-tenant/cross-product lookup shouldn't reveal
+    // that the id exists at all. canAccessProduct already re-derives the
+    // product's real tenantId internally, so this one call covers both the
+    // tenant-ownership check and the per-product membership check.
+    if (!req.user || !(await canAccessProduct(req.user, workItem.productId))) {
+      return this.error(res, 'Work item not found', 404);
+    }
+
+    const jiraIntegration = await this.prisma.integration.findUnique({
+      where: { tenantId_provider: { tenantId: workItem.tenantId, provider: 'jira' } },
+      select: { externalMetadata: true }
+    });
+    const jiraSiteUrl = (jiraIntegration?.externalMetadata as any)?.siteUrl ?? null;
+
+    return this.success(res, {
+      ...workItem,
+      descriptionText: adfToPlainText(workItem.description),
+      jiraSiteUrl
+    });
   });
 
   /**
@@ -149,7 +227,7 @@ export class WorkItemController extends BaseController {
    * Update work item
    */
   updateWorkItem = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -197,7 +275,7 @@ export class WorkItemController extends BaseController {
    * Delete work item
    */
   deleteWorkItem = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -225,7 +303,7 @@ export class WorkItemController extends BaseController {
    * Get work items by product
    */
   getWorkItemsByProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
 
     // Validate UUID format
     if (!isValidUUID(productId)) {
@@ -271,7 +349,7 @@ export class WorkItemController extends BaseController {
    * Get work items by sprint
    */
   getWorkItemsBySprint = this.asyncHandler(async (req: Request, res: Response) => {
-    const { sprintId } = req.params;
+    const sprintId = this.paramString(req, 'sprintId');
 
     const workItems = await this.prisma.workItem.findMany({
       where: { sprintId },

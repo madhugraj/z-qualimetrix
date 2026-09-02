@@ -19,12 +19,12 @@ export class UserController extends BaseController {
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'name', 'asc');
     const tenantId = this.getTenantId(req);
+    if (!tenantId) {
+      return this.error(res, 'No tenant associated with this account', 403);
+    }
 
     // Build where clause
-    const where: Prisma.UserWhereInput = {};
-    if (tenantId) {
-      where.tenantId = tenantId;
-    }
+    const where: Prisma.UserWhereInput = { tenantId };
 
     // Add filters
     const filters = this.getFilters(req, ['role', 'isActive']);
@@ -85,7 +85,7 @@ export class UserController extends BaseController {
    * Get user by ID
    */
   getUserById = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -186,7 +186,7 @@ export class UserController extends BaseController {
    * Update user
    */
   updateUser = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -238,7 +238,7 @@ export class UserController extends BaseController {
    * Delete user
    */
   deleteUser = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -276,7 +276,7 @@ export class UserController extends BaseController {
    * Update last login
    */
   updateLastLogin = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -308,7 +308,7 @@ export class UserController extends BaseController {
    * Get user activity
    */
   getUserActivity = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -372,7 +372,7 @@ export class UserController extends BaseController {
    * Get users by tenant
    */
   getUsersByTenant = this.asyncHandler(async (req: Request, res: Response) => {
-    const { tenantId } = req.params;
+    const tenantId = this.paramString(req, 'tenantId');
 
     // Validate UUID format
     if (!isValidUUID(tenantId)) {

@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { CheckCircle2, CircleDashed, RefreshCw, Loader2, Star, FolderKanban, Users } from "lucide-react";
 import { AppShell } from "@/components/qm/AppShell";
 import { DocumentHub } from "@/components/qm/DocumentHub";
 import { GitInsights } from "@/components/qm/GitInsights";
 import { ProductRepositories } from "@/components/qm/ProductRepositories";
+import { GpuComputeConnect } from "@/components/qm/GpuComputeConnect";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { RequireRole } from "@/components/qm/RequireRole";
 import { INTEGRATIONS } from "@/lib/qm-data";
@@ -67,6 +68,8 @@ function Integrations() {
   const [githubUsername, setGithubUsername] = useState<string | null>(null);
   const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [githubToken, setGithubToken] = useState("");
+  const [connectingGithub, setConnectingGithub] = useState(false);
   const [jiraStatus, setJiraStatus] = useState<ProviderStatus>({ isConnected: false });
   const [adoStatus, setAdoStatus] = useState<ProviderStatus>({ isConnected: false });
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
@@ -77,51 +80,28 @@ function Integrations() {
   const [loadingJiraDiscovery, setLoadingJiraDiscovery] = useState(false);
   const [savingJiraSelection, setSavingJiraSelection] = useState(false);
 
-  // Check GitHub connection status from both localStorage and database
-  useEffect(() => {
-    const checkGitHubConnection = async () => {
-      // First check localStorage
-      const localToken = localStorage.getItem('github_token');
-      if (localToken) {
+  // GitHub credential lives server-side only now — never synced into
+  // localStorage or read directly from the browser (see github.controller.ts
+  // and settings.tsx's now-removed PAT form). Just check status and, if
+  // connected, fetch the repo list through the backend proxy.
+  const checkGitHubConnection = async () => {
+    try {
+      const response = await fetch(`${API_V1_URL}/github-token/status`, { credentials: "include" });
+      const data = await response.json();
+      if (data.success && data.data.isConnected) {
         setIsGitHubConnected(true);
-        const localUsername = localStorage.getItem('github_username');
-        if (localUsername) {
-          setGithubUsername(localUsername);
-        }
-        // Fetch repositories when connected
+        setGithubUsername(data.data.username || null);
         fetchGitHubRepositories();
-        return;
+      } else {
+        setIsGitHubConnected(false);
+        setGithubUsername(null);
       }
+    } catch (error) {
+      console.error('Failed to check GitHub status:', error);
+    }
+  };
 
-      // Then check database status and sync token to localStorage
-      try {
-        const response = await fetch(`${API_V1_URL}/github-token/status/${tenantId}`, { credentials: "include" });
-        const data = await response.json();
-        if (data.success && data.data.isConnected) {
-          setIsGitHubConnected(true);
-          setGithubUsername(data.data.username || null);
-          // Sync to localStorage for consistency and GitInsights access
-          localStorage.setItem('github_username', data.data.username || '');
-
-          // Fetch the actual token and sync to localStorage for GitInsights
-          try {
-            const tokenResponse = await fetch(`${API_V1_URL}/github-token/get/${tenantId}`, { credentials: "include" });
-            const tokenData = await tokenResponse.json();
-            if (tokenData.success && tokenData.data.token) {
-              localStorage.setItem('github_token', tokenData.data.token);
-            }
-          } catch (tokenError) {
-            console.error('Failed to sync GitHub token to localStorage:', tokenError);
-          }
-
-          // Fetch repositories when connected
-          fetchGitHubRepositories();
-        }
-      } catch (error) {
-        console.error('Failed to check GitHub status:', error);
-      }
-    };
-
+  useEffect(() => {
     if (tenantId) checkGitHubConnection();
   }, [tenantId]);
 
@@ -295,6 +275,49 @@ function Integrations() {
     fetchGitHubRepositories();
   };
 
+  const connectGitHub = async () => {
+    if (!githubToken.trim()) {
+      toast.error("Enter a GitHub personal access token");
+      return;
+    }
+    setConnectingGithub(true);
+    try {
+      const response = await fetch(`${API_V1_URL}/github-token/tokens`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ token: githubToken.trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message ?? "Failed to connect GitHub");
+      toast.success(`GitHub connected${data.data?.username ? ` as ${data.data.username}` : ""}`);
+      setGithubToken("");
+      checkGitHubConnection();
+    } catch (error) {
+      toast.error("Couldn't connect GitHub", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setConnectingGithub(false);
+    }
+  };
+
+  const disconnectGitHub = async () => {
+    try {
+      const response = await fetch(`${API_V1_URL}/github-token/tokens`, { method: "DELETE", credentials: "include" });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.message ?? "Failed to disconnect GitHub");
+      setIsGitHubConnected(false);
+      setGithubUsername(null);
+      setGithubRepos([]);
+      toast.success("GitHub disconnected");
+    } catch (error) {
+      toast.error("Couldn't disconnect GitHub", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+
   // Override mock status with live data for every provider we actually check
   const updatedIntegrations = INTEGRATIONS.map(integration => {
     if (integration.name === "GitHub") {
@@ -324,20 +347,12 @@ function Integrations() {
   return (
     <RequireRole roles={["pm"]}>
     <AppShell>
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Integrations</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Automated ingestion sources. Dashboards fall back to sample data until a source is
-            connected.
-          </p>
-        </div>
-        <Link
-          to="/settings"
-          className="glass rounded-full px-4 py-2 text-xs font-medium transition-colors hover:text-primary"
-        >
-          {isGitHubConnected ? "Manage GitHub" : "Configure GitHub"}
-        </Link>
+      <header className="mb-6">
+        <h1 className="text-gradient text-2xl font-semibold md:text-3xl">Integrations</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Automated ingestion sources. Dashboards fall back to sample data until a source is
+          connected.
+        </p>
       </header>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -374,32 +389,86 @@ function Integrations() {
               </div>
               <div className="flex items-center justify-between border-t border-glass-border/60 pt-3 text-xs text-muted-foreground">
                 <span>Last sync: {i.synced}</span>
-                <button
-                  onClick={
-                    i.name === "GitHub"
-                      ? refreshGitHubData
-                      : i.name === "Jira Cloud"
-                      ? () => handleProviderAction("jira", jiraStatus.isConnected)
-                      : i.name === "Azure DevOps"
-                      ? () => handleProviderAction("azure_devops", adoStatus.isConnected)
-                      : undefined
-                  }
-                  className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25"
-                >
-                  {(isLoadingRepos && i.name === "GitHub") ||
-                  (syncingProvider === "jira" && i.name === "Jira Cloud") ||
-                  (syncingProvider === "azure_devops" && i.name === "Azure DevOps") ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                {i.name === "GitHub" ? (
+                  connected ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={refreshGitHubData}
+                        className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25"
+                      >
+                        {isLoadingRepos ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        )}
+                        Sync now
+                      </button>
+                      <button onClick={disconnectGitHub} className="rounded-full px-3 py-1.5 font-medium text-critical transition-colors hover:bg-critical/10">
+                        Disconnect
+                      </button>
+                    </div>
                   ) : (
-                    <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
-                  )}
-                  {connected ? "Sync now" : "Connect"}
-                </button>
+                    <span className="text-[11px]">Connect below ↓</span>
+                  )
+                ) : (
+                  <button
+                    onClick={
+                      i.name === "Jira Cloud"
+                        ? () => handleProviderAction("jira", jiraStatus.isConnected)
+                        : i.name === "Azure DevOps"
+                        ? () => handleProviderAction("azure_devops", adoStatus.isConnected)
+                        : undefined
+                    }
+                    className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 font-medium text-primary transition-colors hover:bg-primary/25"
+                  >
+                    {(syncingProvider === "jira" && i.name === "Jira Cloud") ||
+                    (syncingProvider === "azure_devops" && i.name === "Azure DevOps") ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />
+                    )}
+                    {connected ? "Sync now" : "Connect"}
+                  </button>
+                )}
               </div>
             </GlassPanel>
           );
         })}
       </div>
+
+      {!isGitHubConnected && (
+        <GlassPanel
+          title="Connect GitHub"
+          subtitle="Personal access token with repo, read:org scopes — stored encrypted server-side, never exposed to the browser"
+          className="mt-4"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="password"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              placeholder="ghp_..."
+              className="glass flex-1 rounded-xl px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+            />
+            <button
+              type="button"
+              onClick={connectGitHub}
+              disabled={connectingGithub}
+              className="glass shrink-0 rounded-full px-4 py-2 text-xs font-medium disabled:opacity-50"
+            >
+              {connectingGithub ? "Connecting…" : "Connect GitHub"}
+            </button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Generate one at{" "}
+            <a href="https://github.com/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+              github.com/settings/tokens
+            </a>
+            . An org-owned "machine user" token is recommended over a personal account's, so access
+            survives personnel changes.
+          </p>
+        </GlassPanel>
+      )}
 
       {jiraStatus.isConnected && (
         <GlassPanel
@@ -517,9 +586,11 @@ function Integrations() {
         </GlassPanel>
       )}
 
+      <ProductRepositories />
+
       <GitInsights />
 
-      <ProductRepositories />
+      <GpuComputeConnect />
 
       <DocumentHub />
 

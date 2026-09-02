@@ -3,32 +3,33 @@ import githubTokenService from '../services/github-token.service';
 
 /**
  * GitHub Token Controller
- * Handles secure storage and retrieval of GitHub integration tokens
+ * Handles secure storage and retrieval of GitHub integration tokens.
+ * Tenant is always derived from req.user (set by requireAuth/requireAdmin),
+ * never from the request body or a URL param — a client-supplied tenantId
+ * here would let one tenant read/overwrite/delete another's connection.
  */
 
 export async function saveGitHubToken(req: Request, res: Response): Promise<void> {
   try {
-    const { token, tenantId, userId } = req.body;
+    const { token } = req.body;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.id;
 
-    if (!token || !tenantId) {
+    if (!tenantId || !userId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
+      return;
+    }
+    if (!token) {
       res.status(400).json({
         error: 'Bad Request',
-        message: 'Token and tenantId are required'
+        message: 'Token is required'
       });
       return;
     }
 
-    // For now, use a default tenant ID if not provided (for testing)
-    const actualTenantId = tenantId || 'default-tenant';
-    const actualUserId = userId || 'system-user';
+    console.log(`🔐 Saving GitHub token for tenant: ${tenantId}`);
 
-    console.log(`🔐 Saving GitHub token for tenant: ${actualTenantId}`);
-
-    const result = await githubTokenService.saveToken({
-      tenantId: actualTenantId,
-      token,
-      userId: actualUserId
-    });
+    const result = await githubTokenService.saveToken({ tenantId, token, userId });
 
     if (result.success) {
       res.json({
@@ -51,49 +52,15 @@ export async function saveGitHubToken(req: Request, res: Response): Promise<void
   }
 }
 
-export async function getGitHubToken(req: Request, res: Response): Promise<void> {
-  try {
-    const { tenantId } = req.params;
-
-    if (!tenantId) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Tenant ID is required'
-      });
-      return;
-    }
-
-    const token = await githubTokenService.getToken(tenantId);
-
-    if (!token) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'No GitHub token found for this tenant'
-      });
-      return;
-    }
-
-    res.json({
-      success: true,
-      data: {
-        token // In production, you might want to be more careful about returning tokens
-      }
-    });
-  } catch (error: any) {
-    console.error('Error retrieving GitHub token:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve GitHub token',
-      message: error.message || 'Unknown error'
-    });
-  }
-}
-
 export async function getGitHubStatus(req: Request, res: Response): Promise<void> {
   try {
-    const { tenantId } = req.params;
-    const actualTenantId = tenantId || 'default-tenant';
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
+      return;
+    }
 
-    const status = await githubTokenService.getStatus(actualTenantId);
+    const status = await githubTokenService.getStatus(tenantId);
 
     res.json({
       success: true,
@@ -150,12 +117,15 @@ export async function validateGitHubToken(req: Request, res: Response): Promise<
 
 export async function deleteGitHubToken(req: Request, res: Response): Promise<void> {
   try {
-    const { tenantId } = req.params;
-    const actualTenantId = tenantId || 'default-tenant';
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
+      return;
+    }
 
-    console.log(`🗑️  Deleting GitHub token for tenant: ${actualTenantId}`);
+    console.log(`🗑️  Deleting GitHub token for tenant: ${tenantId}`);
 
-    const result = await githubTokenService.deleteToken(actualTenantId);
+    const result = await githubTokenService.deleteToken(tenantId);
 
     if (result.success) {
       res.json({
@@ -179,12 +149,15 @@ export async function deleteGitHubToken(req: Request, res: Response): Promise<vo
 
 export async function testGitHubToken(req: Request, res: Response): Promise<void> {
   try {
-    const { tenantId } = req.params;
-    const actualTenantId = tenantId || 'default-tenant';
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(403).json({ error: 'Forbidden', message: 'Not assigned to an organization yet' });
+      return;
+    }
 
-    console.log(`🧪 Testing stored GitHub token for tenant: ${actualTenantId}`);
+    console.log(`🧪 Testing stored GitHub token for tenant: ${tenantId}`);
 
-    const result = await githubTokenService.testStoredToken(actualTenantId);
+    const result = await githubTokenService.testStoredToken(tenantId);
 
     if (result.isValid) {
       res.json({

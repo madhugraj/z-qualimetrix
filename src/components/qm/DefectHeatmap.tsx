@@ -9,11 +9,24 @@ function tone(count: number) {
   return { bg: "color-mix(in oklab, var(--critical) 58%, transparent)", label: "High" };
 }
 
-export function DefectHeatmap() {
+interface DefectHeatmapProps {
+  distribution?: Array<{ label: string; count: number }>;
+  hasData?: boolean;
+}
+
+export function DefectHeatmap({ distribution, hasData }: DefectHeatmapProps = {}) {
+  // Real data: this org's Jira projects don't use Components, only labels
+  // (e.g. UI-BUG, FUNC-BUG) — so real cells are labels, not modules. Fall
+  // back to the demo module list when nothing's synced yet.
+  const cells = hasData && distribution
+    ? distribution.map((d) => ({ module: d.label, defects: d.count }))
+    : HEATMAP;
+  const axisLabel = hasData && distribution ? "label" : "feature/module";
+
   return (
     <div>
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-        {HEATMAP.map((cell) => {
+        {cells.map((cell) => {
           const t = tone(cell.defects);
           return (
             <div
@@ -40,7 +53,7 @@ export function DefectHeatmap() {
         </span>
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-        Each cell is a feature/module. The number is its currently open defect count; the shade is
+        Each cell is a {axisLabel}. The number is its currently open defect count; the shade is
         that count banded against the thresholds above, so hot cells flag where defects concentrate
         and regression effort should be aimed.
       </p>

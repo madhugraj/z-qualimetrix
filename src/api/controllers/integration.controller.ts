@@ -7,6 +7,7 @@ import jiraOAuthService from '../services/jira-oauth.service';
 import azureDevOpsOAuthService from '../services/azure-devops-oauth.service';
 import { requestSyncNow, getSyncHandler } from '../../lib/scheduler';
 import { maskToken } from '../../lib/encryption';
+import { paramString } from '../utils/http-params';
 
 // Mutating endpoints (connect/disconnect/update-frequency/sync-now) are gated
 // requireAdmin (PM-only) at the router level — see integration.routes.ts.
@@ -24,7 +25,7 @@ function getUserId(req: Request): string {
 }
 
 function isKnownProvider(provider: string): provider is IntegrationProvider {
-  return provider === 'jira' || provider === 'azure_devops' || provider === 'openai' || provider === 'vertex_ai';
+  return provider === 'jira' || provider === 'azure_devops' || provider === 'openai';
 }
 
 function isOAuthProvider(provider: IntegrationProvider): provider is 'jira' | 'azure_devops' {
@@ -32,7 +33,7 @@ function isOAuthProvider(provider: IntegrationProvider): provider is 'jira' | 'a
 }
 
 export async function startConnect(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider) || !isOAuthProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown or non-OAuth provider: ${provider}` });
   }
@@ -61,7 +62,7 @@ export async function startConnect(req: Request, res: Response) {
  * on this request. Do not add requireAdmin here; it cannot work on this route.
  */
 export async function handleCallback(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   const { code, state, error: oauthError } = req.query;
 
   if (oauthError) {
@@ -131,7 +132,7 @@ export async function handleCallback(req: Request, res: Response) {
 }
 
 export async function getStatus(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
   }
@@ -157,7 +158,7 @@ export async function listAll(req: Request, res: Response) {
 }
 
 export async function updateSyncFrequency(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   const { minutes } = req.body;
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
@@ -171,7 +172,7 @@ export async function updateSyncFrequency(req: Request, res: Response) {
 }
 
 export async function disconnect(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
   }
@@ -181,7 +182,7 @@ export async function disconnect(req: Request, res: Response) {
 }
 
 export async function triggerSync(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
   }
@@ -204,7 +205,7 @@ export async function triggerSync(req: Request, res: Response) {
 }
 
 export async function listProjects(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider) || !isOAuthProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown or non-project-based provider: ${provider}` });
   }
@@ -382,7 +383,7 @@ export async function connectOpenAi(req: Request, res: Response) {
  * in routes).
  */
 export async function listKeyMappings(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
   }
@@ -398,7 +399,7 @@ export async function listKeyMappings(req: Request, res: Response) {
 }
 
 export async function upsertKeyMapping(req: Request, res: Response) {
-  const { provider } = req.params;
+  const provider = paramString(req.params.provider);
   if (!isKnownProvider(provider)) {
     return res.status(400).json({ success: false, error: `Unknown provider: ${provider}` });
   }
@@ -421,7 +422,7 @@ export async function upsertKeyMapping(req: Request, res: Response) {
 }
 
 export async function deleteKeyMapping(req: Request, res: Response) {
-  const { id } = req.params;
+  const id = paramString(req.params.id);
   const tenantId = req.user!.tenantId;
   if (!tenantId) return res.status(403).json({ success: false, error: 'Not assigned to an organization yet' });
 

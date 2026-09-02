@@ -16,12 +16,12 @@ export class TestCaseController extends BaseController {
     const { skip, limit } = this.getPagination(req);
     const { sortBy, sortOrder } = this.getSort(req, 'name', 'asc');
     const tenantId = this.getTenantId(req);
+    if (!tenantId) {
+      return this.error(res, 'No tenant associated with this account', 403);
+    }
 
     // Build where clause
-    const where: Prisma.TestCaseWhereInput = {};
-    if (tenantId) {
-      where.tenantId = tenantId;
-    }
+    const where: Prisma.TestCaseWhereInput = { tenantId };
 
     // Add filters
     const filters = this.getFilters(req, ['productId', 'type', 'status', 'priority', 'automationStatus']);
@@ -70,7 +70,7 @@ export class TestCaseController extends BaseController {
    * Get test case by ID with executions
    */
   getTestCaseById = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -178,7 +178,7 @@ export class TestCaseController extends BaseController {
    * Update test case
    */
   updateTestCase = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -225,7 +225,7 @@ export class TestCaseController extends BaseController {
    * Delete test case
    */
   deleteTestCase = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
 
     // Validate UUID format
     if (!isValidUUID(id)) {
@@ -297,7 +297,7 @@ export class TestCaseController extends BaseController {
    * Get test executions for a test case
    */
   getTestExecutions = this.asyncHandler(async (req: Request, res: Response) => {
-    const { testCaseId } = req.params;
+    const testCaseId = this.paramString(req, 'testCaseId');
 
     // Validate UUID format
     if (!isValidUUID(testCaseId)) {
@@ -344,7 +344,7 @@ export class TestCaseController extends BaseController {
    * Get test cases by product
    */
   getTestCasesByProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
 
     // Validate UUID format
     if (!isValidUUID(productId)) {

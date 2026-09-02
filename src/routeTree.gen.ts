@@ -12,11 +12,14 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
+import { Route as BacklogRouteImport } from './routes/backlog'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
+import { Route as InfraSpendRouteImport } from './routes/infra-spend'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ManualLogRouteImport } from './routes/manual-log'
+import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -38,6 +41,11 @@ const AiUsageRoute = AiUsageRouteImport.update({
   path: '/ai-usage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BacklogRoute = BacklogRouteImport.update({
+  id: '/backlog',
+  path: '/backlog',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -46,6 +54,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
   id: '/engineering-health',
   path: '/engineering-health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfraSpendRoute = InfraSpendRouteImport.update({
+  id: '/infra-spend',
+  path: '/infra-spend',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -61,6 +74,11 @@ const LoginRoute = LoginRouteImport.update({
 const ManualLogRoute = ManualLogRouteImport.update({
   id: '/manual-log',
   path: '/manual-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsRoute = ProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRoute = ReportsRouteImport.update({
@@ -93,11 +111,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
+  '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
+  '/projects': typeof ProjectsRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -108,11 +129,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
+  '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
+  '/projects': typeof ProjectsRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -124,11 +148,14 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
+  '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
   '/manual-log': typeof ManualLogRoute
+  '/projects': typeof ProjectsRoute
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -141,11 +168,14 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ai-usage'
+    | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/infra-spend'
     | '/integrations'
     | '/login'
     | '/manual-log'
+    | '/projects'
     | '/reports'
     | '/settings'
     | '/setup'
@@ -156,11 +186,14 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ai-usage'
+    | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/infra-spend'
     | '/integrations'
     | '/login'
     | '/manual-log'
+    | '/projects'
     | '/reports'
     | '/settings'
     | '/setup'
@@ -171,11 +204,14 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/ai-usage'
+    | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/infra-spend'
     | '/integrations'
     | '/login'
     | '/manual-log'
+    | '/projects'
     | '/reports'
     | '/settings'
     | '/setup'
@@ -187,11 +223,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AiUsageRoute: typeof AiUsageRoute
+  BacklogRoute: typeof BacklogRoute
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
+  InfraSpendRoute: typeof InfraSpendRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
   ManualLogRoute: typeof ManualLogRoute
+  ProjectsRoute: typeof ProjectsRoute
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
@@ -222,6 +261,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AiUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/backlog': {
+      id: '/backlog'
+      path: '/backlog'
+      fullPath: '/backlog'
+      preLoaderRoute: typeof BacklogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -234,6 +280,13 @@ declare module '@tanstack/react-router' {
       path: '/engineering-health'
       fullPath: '/engineering-health'
       preLoaderRoute: typeof EngineeringHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra-spend': {
+      id: '/infra-spend'
+      path: '/infra-spend'
+      fullPath: '/infra-spend'
+      preLoaderRoute: typeof InfraSpendRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -255,6 +308,13 @@ declare module '@tanstack/react-router' {
       path: '/manual-log'
       fullPath: '/manual-log'
       preLoaderRoute: typeof ManualLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects': {
+      id: '/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof ProjectsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports': {
@@ -299,11 +359,14 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AiUsageRoute: AiUsageRoute,
+  BacklogRoute: BacklogRoute,
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
+  InfraSpendRoute: InfraSpendRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
   ManualLogRoute: ManualLogRoute,
+  ProjectsRoute: ProjectsRoute,
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,

@@ -34,6 +34,7 @@ model Tenant {
   tenantMemberships         TenantMembership[]
   users                     User[]
   workItems                 WorkItem[]
+  workItemLinks             WorkItemLink[]
   testCases                 TestCase[]
   deliverables              ManualDeliverable[]
   sprints                   Sprint[]
@@ -44,10 +45,13 @@ model Tenant {
   integrationDelegations    IntegrationDelegation[]
   aiProviderKeyMappings     AiProviderKeyMapping[]
   aiProviderConnections     AiProviderConnection[]
+  gpuComputeUsageEvents     GpuComputeUsageEvent[]
   aiProviderIdentities      AiProviderIdentity[]
   aiProviderRawEvents       AiProviderRawEvent[]
   aiProviderDailyActivities AiProviderDailyActivity[]
   aiProviderDeletionAudits  AiProviderDeletionAudit[]
+  commits                   Commit[]
+  commitAttributions        CommitAttribution[]
 
   @@index([slug])
   @@index([domain])
@@ -191,12 +195,23 @@ model WorkItem {
   isActive           Boolean   @default(true) @map("is_active")
   lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
   externalMetadata   Json?     @default("{}") @map("external_metadata")
+  labels             String[]  @default([])
+  externalStatusName String?   @map("external_status_name") @db.VarChar(100)
+  statusChangedAt    DateTime? @map("status_changed_at") @db.Timestamptz
+  reopenCount        Int       @default(0) @map("reopen_count")
+  /// text-embedding-3-small (1536 dims) over title+description, generated at sync time when
+  /// content changes. Prisma list fields can't be nullable, so an empty array (the default)
+  /// IS the "not embedded yet" sentinel — getSimilarBugs checks .length, never treats it as
+  /// a real zero vector to compare against.
+  embedding          Float[]   @default([])
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sprint  Sprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  creator User    @relation("WorkItemCreator", fields: [createdBy], references: [id])
-  updater User?   @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sprint    Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  creator   User           @relation("WorkItemCreator", fields: [createdBy], references: [id])
+  updater   User?          @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
+  linksFrom WorkItemLink[] @relation("LinkSource")
+  linksTo   WorkItemLink[] @relation("LinkTarget")
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -206,6 +221,33 @@ model WorkItem {
   @@index([assigneeId])
   @@index([externalSystem])
   @@map("work_items")
+}
+
+/// Native issue-link graph from the source system (Jira "relates to"/"is
+/// tested by"/"blocks", Azure DevOps work item relations). Backs
+/// Requirements Traceability: a story/epic's linked bugs and their status,
+/// with no test-management tool involved — just real cross-issue links the
+/// team already creates in Jira/ADO. `linkType` is the raw provider label
+/// (e.g. "Tests", "Blocks", "Relates") since it's descriptive text shown to
+/// the user, not a fixed enum this app enforces.
+model WorkItemLink {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  sourceItemId String   @map("source_item_id") @db.Uuid
+  targetItemId String   @map("target_item_id") @db.Uuid
+  linkType     String   @map("link_type") @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceItem WorkItem @relation("LinkSource", fields: [sourceItemId], references: [id], onDelete: Cascade)
+  targetItem WorkItem @relation("LinkTarget", fields: [targetItemId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceItemId, targetItemId, linkType])
+  @@index([tenantId])
+  @@index([sourceItemId])
+  @@index([targetItemId])
+  @@map("work_item_links")
 }
 
 model TestCase {
@@ -321,17 +363,23 @@ model Sprint {
 // ============================================================================
 
 model GitHubIntegration {
-  id             String    @id @default(uuid()) @db.Uuid
-  tenantId       String    @map("tenant_id") @db.Uuid
-  encryptedToken String    @map("encrypted_token") @db.Text
-  tokenType      String    @map("token_type") @db.VarChar(50)
-  githubUsername String?   @map("github_username") @db.VarChar(255)
-  lastValidated  DateTime? @map("last_validated") @db.Timestamptz
-  lastUsed       DateTime? @map("last_used") @db.Timestamptz
-  isActive       Boolean   @default(true) @map("is_active")
-  createdBy      String    @map("created_by") @db.Uuid
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  encryptedToken       String    @map("encrypted_token") @db.Text
+  tokenType            String    @map("token_type") @db.VarChar(50)
+  githubUsername       String?   @map("github_username") @db.VarChar(255)
+  lastValidated        DateTime? @map("last_validated") @db.Timestamptz
+  lastUsed             DateTime? @map("last_used") @db.Timestamptz
+  // Commit-sync scheduling (github-commit-sync.service.ts), mirroring the
+  // due-check convention used by Integration/AiProviderConnection —
+  // computed live from lastSyncedAt + syncFrequencyMinutes, not a stored
+  // nextSyncAt column.
+  lastSyncedAt         DateTime? @map("last_synced_at") @db.Timestamptz
+  syncFrequencyMinutes Int       @default(60) @map("sync_frequency_minutes")
+  isActive             Boolean   @default(true) @map("is_active")
+  createdBy            String    @map("created_by") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
@@ -355,13 +403,73 @@ model ProductRepository {
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  commits Commit[]
 
   @@unique([productId, githubRepo])
   @@index([productId])
   @@index([githubRepo])
   @@index([isActive])
   @@map("product_repositories")
+}
+
+// ============================================================================
+// COMMIT ATTRIBUTION (AI vs human authorship)
+// ============================================================================
+
+// Real, persisted per-commit data — replaces the previous request-time-only,
+// unpersisted GitHub API fetch. additions/deletions start null and are
+// backfilled by github-commit-sync.service.ts's stats pass (per-commit detail
+// calls are rate-limit-heavy, so they're batched separately from the cheap
+// list-commits pass that creates the row).
+model Commit {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  productRepositoryId String    @map("product_repository_id") @db.Uuid
+  sha                 String    @db.VarChar(64)
+  message             String    @db.Text
+  authorName          String?   @map("author_name") @db.VarChar(255)
+  authorEmail         String?   @map("author_email") @db.VarChar(255)
+  authoredAt          DateTime  @map("authored_at") @db.Timestamptz
+  url                 String    @db.Text
+  additions           Int?
+  deletions           Int?
+  statsSyncedAt       DateTime? @map("stats_synced_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productRepository ProductRepository   @relation(fields: [productRepositoryId], references: [id], onDelete: Cascade)
+  attributions      CommitAttribution[]
+
+  @@unique([productRepositoryId, sha])
+  @@index([tenantId, authoredAt])
+  @@index([statsSyncedAt])
+  @@map("commits")
+}
+
+// A commit can carry more than one attribution signal at different
+// confidence tiers (e.g. an exact Claude-Code-hook report AND a
+// self-tagged commit trailer for the same commit) — deliberately never
+// collapsed into a single number. Consumers must display confidence tiers
+// separately and prefer "exact" over "heuristic" when both exist.
+model CommitAttribution {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  commitId        String   @map("commit_id") @db.Uuid
+  confidence      String   @db.VarChar(20) // "exact" | "heuristic"
+  tool            String   @db.VarChar(50) // e.g. "claude_code", "github_copilot" — freeform, matches AiProviderConnection.vendor convention
+  source          String   @db.VarChar(50) // "claude_code_hook" | "trailer_detected"
+  sessionId       String?  @map("session_id") @db.VarChar(255) // joined against AiUsageEvent.sessionId at query time for model enrichment; not duplicated at write time
+  detectedTrailer String?  @map("detected_trailer") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  commit Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@unique([commitId, source])
+  @@index([tenantId])
+  @@index([sessionId])
+  @@map("commit_attributions")
 }
 
 // ============================================================================
@@ -428,43 +536,54 @@ model AiUsageEvent {
 // deliberately separate from Integration: a tenant may connect multiple
 // Anthropic organizations and each can expose a different collection channel.
 model AiProviderConnection {
-  id                      String    @id @default(uuid()) @db.Uuid
-  tenantId                String    @map("tenant_id") @db.Uuid
-  vendor                  String    @db.VarChar(50)
-  product                 String    @default("claude_code") @db.VarChar(50)
-  acquisitionChannel      String    @map("acquisition_channel") @db.VarChar(50)
-  planType                String    @map("plan_type") @db.VarChar(50)
-  organizationName        String    @map("organization_name") @db.VarChar(255)
-  externalAccountId       String    @map("external_account_id") @db.VarChar(255)
-  domain                  String?   @db.VarChar(255)
-  collectionMode          String    @map("collection_mode") @db.VarChar(50)
-  authType                String    @default("none") @map("auth_type") @db.VarChar(50)
-  encryptedCredential     String?   @map("encrypted_credential") @db.Text
-  credentialLabel         String?   @map("credential_label") @db.VarChar(255)
-  telemetryTokenHash      String?   @unique @map("telemetry_token_hash") @db.VarChar(64)
-  telemetryTokenCreatedAt DateTime? @map("telemetry_token_created_at") @db.Timestamptz
-  status                  String    @default("awaiting_configuration") @db.VarChar(40)
-  scopes                  String[]  @default([])
-  capabilities            Json      @default("{}")
-  config                  Json      @default("{}")
-  syncCursor              Json      @default("{}") @map("sync_cursor")
-  syncFrequencyMinutes    Int       @default(60) @map("sync_frequency_minutes")
-  lastValidatedAt         DateTime? @map("last_validated_at") @db.Timestamptz
-  lastTelemetryAt         DateTime? @map("last_telemetry_at") @db.Timestamptz
-  lastSyncedAt            DateTime? @map("last_synced_at") @db.Timestamptz
-  lastSyncStartedAt       DateTime? @map("last_sync_started_at") @db.Timestamptz
-  lastSyncError           String?   @map("last_sync_error") @db.Text
-  isActive                Boolean   @default(true) @map("is_active")
-  createdBy               String    @map("created_by") @db.Uuid
-  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id                       String    @id @default(uuid()) @db.Uuid
+  tenantId                 String    @map("tenant_id") @db.Uuid
+  vendor                   String    @db.VarChar(50)
+  product                  String    @default("claude_code") @db.VarChar(50)
+  // Nullable: these four are Anthropic-specific vocabulary
+  // (anthropic_direct/team/managed_otel, etc.) — a GCP/AWS/Azure connection
+  // has no honest value for them. AiProviderConnectionService still requires
+  // them for vendor:"anthropic" rows; provider-connection.service.ts (the
+  // generic path every other vendor uses) never sets them.
+  acquisitionChannel       String?   @map("acquisition_channel") @db.VarChar(50)
+  planType                 String?   @map("plan_type") @db.VarChar(50)
+  organizationName         String?   @map("organization_name") @db.VarChar(255)
+  externalAccountId        String    @map("external_account_id") @db.VarChar(255)
+  // The specific billing account/subscription this connection reads (GCP
+  // billing account id, AWS payer account id, Azure subscription id) — a
+  // tenant may connect more than one, so this also feeds usage-row
+  // idempotency keys downstream, not just display.
+  externalBillingAccountId String?   @map("external_billing_account_id") @db.VarChar(255)
+  domain                   String?   @db.VarChar(255)
+  collectionMode           String?   @map("collection_mode") @db.VarChar(50)
+  authType                 String    @default("none") @map("auth_type") @db.VarChar(50)
+  encryptedCredential      String?   @map("encrypted_credential") @db.Text
+  credentialLabel          String?   @map("credential_label") @db.VarChar(255)
+  telemetryTokenHash       String?   @unique @map("telemetry_token_hash") @db.VarChar(64)
+  telemetryTokenCreatedAt  DateTime? @map("telemetry_token_created_at") @db.Timestamptz
+  status                   String    @default("awaiting_configuration") @db.VarChar(40)
+  scopes                   String[]  @default([])
+  capabilities             Json      @default("{}")
+  config                   Json      @default("{}")
+  syncCursor               Json      @default("{}") @map("sync_cursor")
+  syncFrequencyMinutes     Int       @default(60) @map("sync_frequency_minutes")
+  lastValidatedAt          DateTime? @map("last_validated_at") @db.Timestamptz
+  lastTelemetryAt          DateTime? @map("last_telemetry_at") @db.Timestamptz
+  lastSyncedAt             DateTime? @map("last_synced_at") @db.Timestamptz
+  lastSyncStartedAt        DateTime? @map("last_sync_started_at") @db.Timestamptz
+  lastSyncError            String?   @map("last_sync_error") @db.Text
+  isActive                 Boolean   @default(true) @map("is_active")
+  createdBy                String    @map("created_by") @db.Uuid
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  creator         User                      @relation("AiProviderConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
-  identities      AiProviderIdentity[]
-  rawEvents       AiProviderRawEvent[]
-  dailyActivities AiProviderDailyActivity[]
-  usageEvents     AiUsageEvent[]
+  tenant                Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator               User                      @relation("AiProviderConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  identities            AiProviderIdentity[]
+  rawEvents             AiProviderRawEvent[]
+  dailyActivities       AiProviderDailyActivity[]
+  usageEvents           AiUsageEvent[]
+  gpuComputeUsageEvents GpuComputeUsageEvent[]
 
   @@unique([tenantId, vendor, acquisitionChannel, externalAccountId], map: "ai_provider_connections_tenant_vendor_channel_account_key")
   @@index([tenantId, vendor])
@@ -578,6 +697,41 @@ model AiProviderDeletionAudit {
   @@index([tenantId, completedAt])
   @@index([connectionFingerprint])
   @@map("ai_provider_deletion_audits")
+}
+
+/// External GPU-compute rental spend (AWS/GCP/Azure GPU instances, and later
+/// specialized GPU clouds) — deliberately separate from AiUsageEvent, which
+/// is LLM-token-shaped and doesn't fit instance/region/GPU-hours data.
+/// utilizationPct is null until a Monitoring/telemetry integration exists
+/// per provider — never fabricated from cost data alone.
+model GpuComputeUsageEvent {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  connectionId      String   @map("connection_id") @db.Uuid
+  provider          String   @db.VarChar(30) // "gcp" | "aws" | "azure" | "krutrim" (more specialized clouds join later)
+  externalAccountId String   @map("external_account_id") @db.VarChar(255)
+  externalEventId   String   @map("external_event_id") @db.VarChar(255) // idempotent upsert key (provider's line-item/bucket id)
+  date              DateTime @db.Timestamptz
+  instanceType      String?  @map("instance_type") @db.VarChar(100)
+  gpuType           String?  @map("gpu_type") @db.VarChar(50) // e.g. "A100-80GB" — best-effort parsed from SKU description, null if unparseable
+  region            String?  @db.VarChar(100)
+  squad             String?  @db.VarChar(100) // User.squad if resolvable, else null (unmapped — same honesty pattern as AI usage's unmapped identities)
+  gpuHours          Float?   @map("gpu_hours")
+  utilizationPct    Float?   @map("utilization_pct")
+  costUsd           Float    @map("cost_usd")
+  pricingModel      String?  @map("pricing_model") @db.VarChar(30) // "on_demand" | "spot" | "committed_use" — bigger cost swing than currency
+  costSource        String   @map("cost_source") @db.VarChar(30) // "provider_billed" | "provider_estimated"
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection AiProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalEventId])
+  @@index([tenantId, date])
+  @@index([provider])
+  @@map("gpu_compute_usage_events")
 }
 
 model AiModelCatalog {

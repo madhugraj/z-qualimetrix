@@ -102,47 +102,13 @@ interface ProjectStatus {
 }
 
 class GitHubService {
-  private token: string | null = null
   private baseUrl = 'https://api.github.com'
   private requestCache = new Map<string, { data: any; expiry: number }>()
   private readonly CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-  constructor() {
-    this.token = process.env.GITHUB_TOKEN || null
-    if (!this.token) {
-      console.warn('⚠️  GitHub token not configured. Some features may be limited.')
-    }
-  }
-
-  /**
-   * Set token from database storage
-   */
-  async setTokenFromDatabase(tenantId: string): Promise<void> {
+  private async fetchFromGitHub(token: string | null, endpoint: string): Promise<any> {
     try {
-      // Try to get token from database first
-      const githubTokenService = await import('./github-token.service')
-      const storedToken = await githubTokenService.default.getToken(tenantId)
-
-      if (storedToken) {
-        this.token = storedToken
-        console.log('✅ Using GitHub token from database')
-      } else {
-        // Fall back to environment variable
-        this.token = process.env.GITHUB_TOKEN || null
-        if (this.token) {
-          console.warn('⚠️  Using GitHub token from environment variable (no database token found)')
-        }
-      }
-    } catch (error) {
-      console.error('Failed to set token from database:', error)
-      // Fall back to environment variable
-      this.token = process.env.GITHUB_TOKEN || null
-    }
-  }
-
-  private async fetchFromGitHub(endpoint: string): Promise<any> {
-    try {
-      const cacheKey = `${this.token}-${endpoint}`
+      const cacheKey = `${token}-${endpoint}`
       const cached = this.requestCache.get(cacheKey)
 
       if (cached && cached.expiry > Date.now()) {
@@ -154,8 +120,8 @@ class GitHubService {
         'User-Agent': 'QualiMetrix-GitHub-Integration'
       }
 
-      if (this.token) {
-        headers['Authorization'] = `Bearer ${this.token}`
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`
       }
 
       const response = await fetch(`${this.baseUrl}${endpoint}`, { headers })
@@ -178,12 +144,12 @@ class GitHubService {
     }
   }
 
-  async getRepository(owner: string, repo: string): Promise<GitHubRepository> {
-    return this.fetchFromGitHub(`/repos/${owner}/${repo}`)
+  async getRepository(token: string | null, owner: string, repo: string): Promise<GitHubRepository> {
+    return this.fetchFromGitHub(token, `/repos/${owner}/${repo}`)
   }
 
-  async getRecentCommits(owner: string, repo: string, limit: number = 10): Promise<GitHubCommit[]> {
-    const commits = await this.fetchFromGitHub(`/repos/${owner}/${repo}/commits?per_page=${limit}`)
+  async getRecentCommits(token: string | null, owner: string, repo: string, limit: number = 10): Promise<GitHubCommit[]> {
+    const commits = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/commits?per_page=${limit}`)
 
     return commits.map((commit: any) => ({
       sha: commit.sha,
@@ -194,8 +160,45 @@ class GitHubService {
     }))
   }
 
-  async getIssues(owner: string, repo: string, state: string = 'all', limit: number = 20): Promise<GitHubIssue[]> {
-    const issues = await this.fetchFromGitHub(`/repos/${owner}/${repo}/issues?state=${state}&per_page=${limit}&sort=created&direction=desc`)
+  /**
+   * Full commit data for persistence (github-commit-sync.service.ts) —
+   * unlike getRecentCommits (first-line message only, live display), this
+   * keeps the full message (trailers included, needed for AI-attribution
+   * detection) and author email.
+   */
+  async getCommitsForSync(
+    token: string | null,
+    owner: string,
+    repo: string,
+    opts: { since?: string; perPage?: number } = {},
+  ): Promise<Array<{ sha: string; message: string; authorName: string | null; authorEmail: string | null; authoredAt: string; url: string }>> {
+    const params = new URLSearchParams({ per_page: String(opts.perPage ?? 100) })
+    if (opts.since) params.set('since', opts.since)
+    const commits = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/commits?${params.toString()}`)
+
+    return commits.map((commit: any) => ({
+      sha: commit.sha,
+      message: commit.commit.message,
+      authorName: commit.commit.author?.name ?? commit.author?.login ?? null,
+      authorEmail: commit.commit.author?.email ?? null,
+      authoredAt: commit.commit.author?.date,
+      url: commit.html_url,
+    }))
+  }
+
+  /** Per-commit diff stats — a separate, heavier call than the list endpoint above, so callers should batch/rate-limit it. */
+  async getCommitStats(token: string | null, owner: string, repo: string, sha: string): Promise<{ additions: number; deletions: number } | null> {
+    try {
+      const detail = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/commits/${sha}`)
+      return { additions: detail.stats?.additions ?? 0, deletions: detail.stats?.deletions ?? 0 }
+    } catch (error) {
+      console.warn(`Could not fetch commit stats for ${sha}:`, error)
+      return null
+    }
+  }
+
+  async getIssues(token: string | null, owner: string, repo: string, state: string = 'all', limit: number = 20): Promise<GitHubIssue[]> {
+    const issues = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/issues?state=${state}&per_page=${limit}&sort=created&direction=desc`)
 
     return issues.map((issue: any) => ({
       id: issue.id,
@@ -211,8 +214,8 @@ class GitHubService {
     }))
   }
 
-  async getPullRequests(owner: string, repo: string, state: string = 'all', limit: number = 20): Promise<GitHubPullRequest[]> {
-    const prs = await this.fetchFromGitHub(`/repos/${owner}/${repo}/pulls?state=${state}&per_page=${limit}&sort=created&direction=desc`)
+  async getPullRequests(token: string | null, owner: string, repo: string, state: string = 'all', limit: number = 20): Promise<GitHubPullRequest[]> {
+    const prs = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/pulls?state=${state}&per_page=${limit}&sort=created&direction=desc`)
 
     return prs.map((pr: any) => ({
       id: pr.id,
@@ -229,8 +232,8 @@ class GitHubService {
     }))
   }
 
-  async getBranches(owner: string, repo: string): Promise<GitHubBranch[]> {
-    const branches = await this.fetchFromGitHub(`/repos/${owner}/${repo}/branches?per_page=100`)
+  async getBranches(token: string | null, owner: string, repo: string): Promise<GitHubBranch[]> {
+    const branches = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/branches?per_page=100`)
 
     return branches.map((branch: any) => ({
       name: branch.name,
@@ -242,9 +245,9 @@ class GitHubService {
     }))
   }
 
-  async getRecentWorkflows(owner: string, repo: string, limit: number = 10): Promise<GitHubWorkflowRun[]> {
+  async getRecentWorkflows(token: string | null, owner: string, repo: string, limit: number = 10): Promise<GitHubWorkflowRun[]> {
     try {
-      const runs = await this.fetchFromGitHub(`/repos/${owner}/${repo}/actions/runs?per_page=${limit}`)
+      const runs = await this.fetchFromGitHub(token, `/repos/${owner}/${repo}/actions/runs?per_page=${limit}`)
 
       return runs.workflow_runs.map((run: any) => ({
         id: run.id,
@@ -263,15 +266,15 @@ class GitHubService {
     }
   }
 
-  async getProjectStatus(owner: string, repo: string): Promise<ProjectStatus> {
+  async getProjectStatus(token: string | null, owner: string, repo: string): Promise<ProjectStatus> {
     try {
       const [repository, commits, issues, pullRequests, branches, workflows] = await Promise.all([
-        this.getRepository(owner, repo),
-        this.getRecentCommits(owner, repo),
-        this.getIssues(owner, repo, 'all', 100),
-        this.getPullRequests(owner, repo, 'all', 100),
-        this.getBranches(owner, repo),
-        this.getRecentWorkflows(owner, repo)
+        this.getRepository(token, owner, repo),
+        this.getRecentCommits(token, owner, repo),
+        this.getIssues(token, owner, repo, 'all', 100),
+        this.getPullRequests(token, owner, repo, 'all', 100),
+        this.getBranches(token, owner, repo),
+        this.getRecentWorkflows(token, owner, repo)
       ])
 
       const openIssues = issues.filter(i => i.state === 'open')
@@ -354,30 +357,6 @@ class GitHubService {
     this.requestCache.clear()
   }
 
-  getTokenStatus(): { hasToken: boolean; tokenType: string | null } {
-    const hasToken = !!this.token
-    let tokenType = null
-
-    if (this.token) {
-      // Simple heuristic to determine token type
-      if (this.token.startsWith('ghp_')) {
-        tokenType = 'personal_access_token'
-      } else if (this.token.startsWith('gho_')) {
-        tokenType = 'oauth_token'
-      } else if (this.token.startsWith('ghu_')) {
-        tokenType = 'user_token'
-      } else {
-        tokenType = 'unknown'
-      }
-    }
-
-    return { hasToken, tokenType }
-  }
-
-  setToken(token: string): void {
-    this.token = token
-  }
-
   async validateToken(token: string): Promise<boolean> {
     try {
       const headers: Record<string, string> = {
@@ -408,9 +387,9 @@ class GitHubService {
     return 'unknown'
   }
 
-  async getUserRepositories(): Promise<Array<{ name: string; full_name: string; description: string }>> {
+  async getUserRepositories(token: string | null): Promise<Array<{ name: string; full_name: string; description: string }>> {
     try {
-      const repos = await this.fetchFromGitHub('/user/repos?per_page=100&sort=updated')
+      const repos = await this.fetchFromGitHub(token, '/user/repos?per_page=100&sort=updated')
 
       return repos.map((repo: any) => ({
         name: repo.name,

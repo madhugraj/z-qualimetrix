@@ -12,7 +12,7 @@ import { isValidUUID, validationErrorResponse } from '../utils/validators';
 export class MembershipController extends BaseController {
 
   getAllMemberships = this.asyncHandler(async (req: Request, res: Response) => {
-    const tenantId = this.getTenantId(req) || req.user?.tenantId || '';
+    const tenantId = this.getTenantId(req);
     if (!tenantId) {
       return this.error(res, 'tenantId is required', 400);
     }
@@ -109,7 +109,7 @@ export class MembershipController extends BaseController {
 
   /** Revokes a delegation without deleting it — keeps the grant/revoke audit trail. */
   revokeDelegation = this.asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = this.paramString(req, 'id');
     if (!isValidUUID(id)) {
       return validationErrorResponse(res);
     }
@@ -131,7 +131,7 @@ export class MembershipController extends BaseController {
   });
 
   listDelegationsForProduct = this.asyncHandler(async (req: Request, res: Response) => {
-    const { productId } = req.params;
+    const productId = this.paramString(req, 'productId');
     if (!isValidUUID(productId)) {
       return validationErrorResponse(res);
     }

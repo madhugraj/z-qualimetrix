@@ -34,7 +34,7 @@ export function AllocationChart() {
   return (
     <ResponsiveContainer width="100%" height={260}>
       <BarChart data={ALLOCATION}>
-        <CartesianGrid vertical={false} stroke="var(--border)" />
+        <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.35} />
         <XAxis dataKey="name" {...axis} />
         <YAxis {...axis} width={34} unit="%" />
         <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} />
@@ -57,7 +57,7 @@ export function ConsistencyChart() {
   return (
     <ResponsiveContainer width="100%" height={240}>
       <ComposedChart data={CONSISTENCY_TREND}>
-        <CartesianGrid vertical={false} stroke="var(--border)" />
+        <CartesianGrid vertical={false} stroke="var(--border)" strokeOpacity={0.35} />
         <XAxis dataKey="sprint" {...axis} />
         <YAxis yAxisId="left" {...axis} width={34} />
         <YAxis yAxisId="right" orientation="right" domain={[60, 100]} {...axis} width={34} />
@@ -77,7 +77,7 @@ export function ConsistencyChart() {
           dataKey="quality"
           name="Quality score"
           stroke="var(--ops)"
-          strokeWidth={2.2}
+          strokeWidth={2}
           dot={false}
           isAnimationActive={false}
         />

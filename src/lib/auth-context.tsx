@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { API_V1_URL } from "@/lib/api-config";
+import { apiFetch } from "@/lib/api-client";
 
 // role is free-text ('pm' | 'po' | 'executive' | 'developer' | 'tester' |
 // 'unassigned' in practice, not a fixed union) — matches the backend contract
@@ -30,7 +30,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchMe = useCallback(async () => {
     try {
-      const res = await fetch(`${API_V1_URL}/auth/me`, { credentials: "include" });
+      // apiFetch (not raw fetch) so an expired 15-minute access token gets
+      // silently refreshed-and-retried here too — otherwise a routine TTL
+      // expiry reads as "user has no role/account" instead of what it
+      // actually is, a session that just needs its cookie refreshed.
+      const res = await apiFetch("/auth/me");
       if (!res.ok) {
         setUser(null);
         return;

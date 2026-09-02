@@ -690,7 +690,7 @@ class AiProviderConnectionService {
       product: connection.product,
       active: connection.isActive,
       legalHold: connectionHasLegalHold(connection),
-      confirmationPhrase: deletionConfirmationPhrase(connection.organizationName),
+      confirmationPhrase: deletionConfirmationPhrase(connection.organizationName ?? ""),
       recordCounts: {
         connections: 1,
         identities,
@@ -730,7 +730,7 @@ class AiProviderConnectionService {
           "This organization is under legal hold. Remove the hold through the authorized governance process before deletion.",
         );
       }
-      if (confirmation !== deletionConfirmationPhrase(connection.organizationName)) {
+      if (confirmation !== deletionConfirmationPhrase(connection.organizationName ?? "")) {
         throw new Error("Deletion confirmation phrase does not match.");
       }
 

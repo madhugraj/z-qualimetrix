@@ -8,6 +8,9 @@ import {
   PlugZap,
   PenLine,
   Settings,
+  FolderKanban,
+  ListTodo,
+  Cpu,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { GlobalSearch } from "@/components/qm/GlobalSearch";
@@ -21,9 +24,12 @@ import { useAuth } from "@/lib/auth-context";
 // leadership/PM only, matching this app's manager/lead/HR intent.
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/projects", label: "Projects", icon: FolderKanban, roles: ["pm", "executive"] },
+  { to: "/backlog", label: "Backlog", icon: ListTodo },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
   { to: "/engineering-health", label: "Engineering Health", icon: Users, roles: ["pm", "executive"] },
+  { to: "/infra-spend", label: "GPU & Compute Spend", icon: Cpu, roles: ["pm", "executive"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/integrations", label: "Integrations", icon: PlugZap, roles: ["pm"] },
   { to: "/manual-log", label: "Manual Log", icon: PenLine },

@@ -1,58 +1,29 @@
-import { SPRINTS } from "@/lib/qm-data";
-import { useState, useEffect } from "react";
-import { getGitHubRepositories, type GitHubRepository } from "@/lib/github-data.service";
 import { useCurrentProduct } from "@/lib/product-context";
+import { useProductRepositories, primaryRepo } from "@/lib/queries/product-repositories";
+import { useDateRange, RANGE_OPTIONS, type RangeKey } from "@/lib/date-range-context";
 
-function Pill({ label, options }: { label: string; options: string[] }) {
-  return (
-    <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <select className="cursor-pointer bg-transparent text-xs font-medium outline-none">
-        {options.map((o) => (
-          <option key={o} className="bg-popover text-popover-foreground">
-            {o}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
+// Sprint and Team pills used to live here as fixed dropdowns with no real
+// data behind either option list on any page — removed rather than left as
+// decoration. Reintroducing either should be a targeted pill on the specific
+// page/role that actually has real data to filter (e.g. a Sprint pill once
+// real Jira sprint sync exists, scoped to the pages that show sprint data —
+// not a global, always-rendered fixture like this bar used to be).
 
-function GitHubRepoPill() {
-  const [repositories, setRepositories] = useState<GitHubRepository[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
+/**
+ * Read-only display of the current product's mapped GitHub repo — the same
+ * ProductRepository row dashboard.tsx's CI panel reads via the identical
+ * hook, so the two can never disagree. Replaces the old account-wide repo
+ * picker (any repo the connected token could see, written to a
+ * `selectedGitHubRepo` localStorage key + `githubRepoChanged` window event)
+ * — that let a user pick repos unrelated to the current product, which the
+ * backend now 403s on anyway since reads are scoped to mapped repos.
+ */
+export function GitHubRepoPill() {
+  const { currentProduct } = useCurrentProduct();
+  const { data: repos, isLoading } = useProductRepositories(currentProduct?.id);
+  const repo = primaryRepo(repos);
 
-  useEffect(() => {
-    const loadRepositories = async () => {
-      setIsLoading(true);
-      try {
-        const repos = await getGitHubRepositories();
-        setRepositories(repos);
-
-        // Auto-select first repository or set to empty
-        if (repos.length > 0) {
-          setSelectedRepo(repos[0].full_name);
-          // Store in localStorage for dashboard components to access
-          localStorage.setItem('selectedGitHubRepo', repos[0].full_name);
-        }
-      } catch (error) {
-        console.error('Failed to load GitHub repositories:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadRepositories();
-  }, []);
-
-  const handleRepoChange = (repoFullName: string) => {
-    setSelectedRepo(repoFullName);
-    localStorage.setItem('selectedGitHubRepo', repoFullName);
-
-    // Dispatch custom event for dashboard components to listen to
-    window.dispatchEvent(new CustomEvent('githubRepoChanged', { detail: { repo: repoFullName } }));
-  };
+  if (!currentProduct) return null;
 
   if (isLoading) {
     return (
@@ -63,11 +34,11 @@ function GitHubRepoPill() {
     );
   }
 
-  if (repositories.length === 0) {
+  if (!repo) {
     return (
       <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
         <span className="text-muted-foreground">Repository</span>
-        <span className="text-xs text-muted-foreground">No repos</span>
+        <span className="text-xs text-muted-foreground">Not mapped</span>
       </label>
     );
   }
@@ -75,24 +46,16 @@ function GitHubRepoPill() {
   return (
     <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
       <span className="text-muted-foreground">Repository</span>
-      <select
-        value={selectedRepo}
-        onChange={(e) => handleRepoChange(e.target.value)}
-        className="cursor-pointer bg-transparent text-xs font-medium outline-none min-w-[200px]"
-      >
-        {repositories.map((repo) => (
-          <option key={repo.full_name} value={repo.full_name} className="bg-popover text-popover-foreground">
-            {repo.full_name} {repo.description ? `- ${repo.description}` : ''}
-          </option>
-        ))}
-      </select>
-      <span className="text-[10px] text-primary">{repositories.length} repos</span>
+      <span className="text-xs font-medium">{repo}</span>
+      {repos && repos.length > 1 && (
+        <span className="text-[10px] text-primary">+{repos.length - 1} more</span>
+      )}
     </label>
   );
 }
 
-function ProductPill() {
-  const { products, currentProduct, setCurrentProductId, isLoading, isPortfolioView } = useCurrentProduct();
+export function ProductPill() {
+  const { products, currentProduct, setCurrentProductId, isLoading, canViewPortfolio } = useCurrentProduct();
 
   if (isLoading) {
     return (
@@ -120,7 +83,7 @@ function ProductPill() {
         onChange={(e) => setCurrentProductId(e.target.value || null)}
         className="cursor-pointer bg-transparent text-xs font-medium outline-none"
       >
-        {isPortfolioView && (
+        {canViewPortfolio && (
           <option value="" className="bg-popover text-popover-foreground">
             All products
           </option>
@@ -135,14 +98,40 @@ function ProductPill() {
   );
 }
 
-export function FilterBar() {
+export function RangePill() {
+  const { range, setRange } = useDateRange();
+  return (
+    <label className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
+      <span className="text-muted-foreground">Range</span>
+      <select
+        value={range}
+        onChange={(e) => setRange(e.target.value as RangeKey)}
+        className="cursor-pointer bg-transparent text-xs font-medium outline-none"
+      >
+        {RANGE_OPTIONS.map((o) => (
+          <option key={o.key} value={o.key} className="bg-popover text-popover-foreground">
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/**
+ * Product + Range are the only pills with real data behind them on every
+ * page that renders this — Repository is opt-in (`showRepository`) since
+ * only the Dashboard's CI panel actually reads the selected repo; every
+ * other page rendering it before was dead UI. Pages with nothing real to
+ * filter by (AI Usage has its own visibility-level control instead) should
+ * render their own pills directly rather than this bar, not just omit props.
+ */
+export function FilterBar({ showRepository = false }: { showRepository?: boolean } = {}) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <GitHubRepoPill />
+      {showRepository && <GitHubRepoPill />}
       <ProductPill />
-      <Pill label="Sprint" options={SPRINTS} />
-      <Pill label="Team" options={["All teams", "Squad Nova", "Squad Kite", "Squad Pulse"]} />
-      <Pill label="Range" options={["Last 30 days", "Last 7 days", "This quarter", "YTD"]} />
+      <RangePill />
     </div>
   );
 }
