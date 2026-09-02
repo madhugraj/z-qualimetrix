@@ -52,6 +52,9 @@ model Tenant {
   aiProviderDeletionAudits  AiProviderDeletionAudit[]
   commits                   Commit[]
   commitAttributions        CommitAttribution[]
+  chatConversations         ChatConversation[]
+  chatMessages              ChatMessage[]
+  assistantProviderConnections AssistantProviderConnection[]
 
   @@index([slug])
   @@index([domain])
@@ -91,6 +94,9 @@ model User {
   aiProviderConnectionsCreated AiProviderConnection[]    @relation("AiProviderConnectionCreator")
   aiProviderIdentities         AiProviderIdentity[]
   aiProviderDeletionAudits     AiProviderDeletionAudit[] @relation("AiProviderDeletionRequester")
+  chatConversationsStarted     ChatConversation[]
+  chatMessages                 ChatMessage[]
+  assistantProviderConnectionsCreated AssistantProviderConnection[]
 
   @@index([email])
   @@index([tenantId])
@@ -470,6 +476,76 @@ model CommitAttribution {
   @@index([tenantId])
   @@index([sessionId])
   @@map("commit_attributions")
+}
+
+// ============================================================================
+// PM/LEADERSHIP ANALYTICS ASSISTANT
+// ============================================================================
+
+// A tenant-wide, shared conversation history — visible to any pm/executive in the
+// tenant (an audit trail of what's been asked), not private per-user.
+model ChatConversation {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  startedByUserId String  @map("started_by_user_id") @db.Uuid
+  title          String?  @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startedBy   User          @relation(fields: [startedByUserId], references: [id], onDelete: Cascade)
+  messages    ChatMessage[]
+
+  @@index([tenantId, updatedAt])
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid // set for "user" messages, null for "assistant" replies
+  role           String   @db.VarChar(20) // "user" | "assistant"
+  content        String   @db.Text
+  toolCalls      Json?    @map("tool_calls") // [{ tool, args, resultSummary }] — audit/transparency trail
+  inputTokens    Int?     @map("input_tokens")
+  outputTokens   Int?     @map("output_tokens")
+  costUsd        Decimal? @map("cost_usd") @db.Decimal(18, 8)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId])
+  @@map("chat_messages")
+}
+
+// One LLM connection per tenant, powering the PM/Leadership analytics
+// assistant — modeled on GitHubIntegration (encrypted-at-rest credential,
+// validated live before save), not on AiProviderConnection (which carries
+// usage-sync-specific fields that don't apply to "store one API key").
+// Tenant-owned and tenant-billed: no platform-wide fallback key exists.
+model AssistantProviderConnection {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  provider        String    @db.VarChar(20) // "anthropic" | "openai" | "gemini"
+  encryptedApiKey String    @map("encrypted_api_key") @db.Text
+  modelId         String?   @map("model_id") @db.VarChar(100)
+  lastValidated   DateTime? @map("last_validated") @db.Timestamptz
+  lastUsed        DateTime? @map("last_used") @db.Timestamptz
+  isActive        Boolean   @default(true) @map("is_active")
+  createdBy       String    @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant  Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId])
+  @@index([isActive])
+  @@map("assistant_provider_connections")
 }
 
 // ============================================================================

@@ -6,6 +6,8 @@ import workItemController from '../controllers/workitem.controller';
 import testCaseController from '../controllers/testcase.controller';
 import userController from '../controllers/user.controller';
 import analyticsController from '../controllers/analytics.controller';
+import assistantController from '../controllers/assistant.controller';
+import assistantProviderConnectionController from '../controllers/assistant-provider-connection.controller';
 import { getGpuSpendSummary, getGpuSpendTrend, getGpuSpendBySquad, getGpuSpendByType } from '../controllers/gpu-spend.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
@@ -34,7 +36,7 @@ import {
   updateModelCatalogEntry,
   deactivateModelCatalogEntry
 } from '../controllers/ai-model-catalog.controller';
-import { requireAuth, requireAdmin, requireProductWriteAccess, requireProductScope } from '../middleware/auth.middleware';
+import { requireAuth, requireAdmin, requireRole, requireProductWriteAccess, requireProductScope } from '../middleware/auth.middleware';
 import { requireIngestToken } from '../middleware/ingest-token.middleware';
 import { requireProviderConnectionToken } from '../middleware/provider-connection-token.middleware';
 import { paramString } from '../utils/http-params';
@@ -125,6 +127,21 @@ router.get('/analytics/velocity-qoq', requireAuth, analyticsController.getQuarte
 router.get('/analytics/age-distribution', requireAuth, analyticsController.getAgeDistribution);
 router.get('/analytics/backlog-flow', requireAuth, analyticsController.getBacklogFlow);
 router.get('/analytics/requirement-traceability', requireAuth, analyticsController.getRequirementTraceability);
+
+// PM/Leadership analytics assistant — role-gated at the route layer, and
+// independently re-scoped to req.user!.tenantId inside every service call
+// (assistant-chat.service.ts / assistant-tools.service.ts never trust a
+// client-supplied id either).
+router.get('/assistant/conversations', requireRole('pm', 'executive'), assistantController.listConversations);
+router.post('/assistant/conversations', requireRole('pm', 'executive'), assistantController.createConversation);
+router.get('/assistant/conversations/:id', requireRole('pm', 'executive'), assistantController.getConversation);
+router.post('/assistant/conversations/:id/messages', requireRole('pm', 'executive'), assistantController.sendMessage);
+
+// PM-only: configuring the assistant's LLM connection is a Settings action,
+// distinct from using the already-configured assistant (pm+executive above).
+router.get('/assistant/provider-connection/status', requireRole('pm'), assistantProviderConnectionController.status);
+router.post('/assistant/provider-connection', requireRole('pm'), assistantProviderConnectionController.save);
+router.delete('/assistant/provider-connection', requireRole('pm'), assistantProviderConnectionController.remove);
 router.get('/gpu-spend/summary', requireAuth, getGpuSpendSummary);
 router.get('/gpu-spend/trend', requireAuth, getGpuSpendTrend);
 router.get('/gpu-spend/by-squad', requireAuth, getGpuSpendBySquad);

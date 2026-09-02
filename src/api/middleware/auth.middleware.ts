@@ -124,6 +124,42 @@ export const requireProductScope = (getProductId: (req: Request) => string | und
     }
   };
 
+export function isPortfolioRole(role?: string): boolean {
+  return role === 'pm' || role === 'executive';
+}
+
+export class ScopeError extends Error {}
+
+export type ResolvedScope = { productId?: string; tenantId?: string };
+
+/**
+ * Pure (no `res` coupling) version of the productId-or-tenant-wide scope rule
+ * `AnalyticsController.resolveProductOrTenantScope` enforces at the route
+ * layer: an explicit productId is checked via canAccessProduct; omitting it
+ * only resolves to a tenant-wide scope for pm/executive — never substitutes
+ * another tenant's id. Callers that aren't Express handlers (e.g. the chat
+ * assistant's tool dispatcher, which must never trust a model-supplied
+ * tenantId) throw/catch ScopeError instead of writing an HTTP response.
+ */
+export async function resolveProductOrTenantScope(
+  user: AuthenticatedUser,
+  productId?: string
+): Promise<ResolvedScope> {
+  if (productId) {
+    if (!(await canAccessProduct(user, productId))) {
+      throw new ScopeError('Not scoped to this product');
+    }
+    return { productId };
+  }
+  if (!isPortfolioRole(user.role)) {
+    throw new ScopeError('productId is required for this role');
+  }
+  if (!user.tenantId) {
+    throw new ScopeError('No tenant associated with this account');
+  }
+  return { tenantId: user.tenantId };
+}
+
 const PRODUCT_MAPPING_FIELDS = ['jiraProjectKey', 'jiraProjectId', 'azureDevopsAreaPath'];
 
 /**

@@ -38,7 +38,13 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     const refreshed = await refreshSession();
     if (refreshed) {
       res = await doFetch();
-    } else if (typeof window !== "undefined") {
+    } else if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      // Already on /login means there was never a session to begin with
+      // (e.g. AuthProvider's own /auth/me check on first load) — redirecting
+      // to /login from /login is a full-page reload that remounts
+      // AuthProvider, which immediately repeats this exact 401-then-refresh-
+      // fail sequence, looping forever. Only redirect when actually leaving
+      // an authenticated page after the session dies.
       window.location.href = "/login";
     }
   }

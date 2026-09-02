@@ -23,6 +23,7 @@ import { AzureDevOpsConfig } from "@/components/qm/AzureDevOpsConfig";
 import { RequireRole } from "@/components/qm/RequireRole";
 import { TeamManagementPanel } from "@/components/qm/TeamManagementPanel";
 import { AiToolPicker } from "@/components/qm/AiToolPicker";
+import { AssistantProviderConnect } from "@/components/qm/AssistantProviderConnect";
 import { ROLES } from "@/lib/qm-data";
 
 export const Route = createFileRoute("/settings")({
@@ -322,7 +323,10 @@ function Settings() {
         </TabsContent>
 
         <TabsContent value="ai-providers">
-          <AiToolPicker />
+          <div className="space-y-4">
+            <AssistantProviderConnect />
+            <AiToolPicker />
+          </div>
         </TabsContent>
 
         <TabsContent value="access">

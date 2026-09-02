@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from "react";
 import { GlobalSearch } from "@/components/qm/GlobalSearch";
 import { NotificationsBell } from "@/components/qm/NotificationsBell";
+import { AssistantWidget } from "@/components/qm/AssistantWidget";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 
@@ -107,6 +108,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <main className="min-w-0 flex-1 p-4 md:p-7">{children}</main>
       </div>
+      <AssistantWidget role={user?.role} />
     </div>
   );
 }
