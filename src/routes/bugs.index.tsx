@@ -7,7 +7,6 @@ import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BacklogFlowChart, PriorityBreakdownChart, AgeDistributionChart } from "@/components/qm/charts";
-import { BUGS } from "@/lib/qm-bugs";
 import { cn } from "@/lib/utils";
 import { useCurrentProduct } from "@/lib/product-context";
 import { useDateRange } from "@/lib/date-range-context";
@@ -322,7 +321,7 @@ function BugsPage() {
             {bugsList.isLoading || similarBugs.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : (
-              <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[0]} limit={4} />
+              <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} isLoading={similarBugs.isLoading} />
             )}
           </GlassPanel>
         </div>

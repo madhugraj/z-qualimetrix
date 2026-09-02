@@ -7,7 +7,8 @@ import { DemoDataBanner } from "@/components/qm/DemoDataNotice";
 import { DeveloperProfileCard } from "@/components/qm/DeveloperProfileCard";
 import { AllocationChart, ConsistencyChart } from "@/components/qm/people-charts";
 import { SiloAlerts, TrainingList } from "@/components/qm/people-panels";
-import { DEVELOPERS, HR_KPIS } from "@/lib/qm-people";
+import { HR_KPIS } from "@/lib/qm-people";
+import { useDeveloperHealthProfiles } from "@/lib/queries/engineering-health";
 
 export const Route = createFileRoute("/engineering-health")({
   head: () => ({
@@ -31,6 +32,8 @@ export const Route = createFileRoute("/engineering-health")({
 });
 
 function EngineeringHealth() {
+  const { data } = useDeveloperHealthProfiles();
+
   return (
     <AppShell>
       <header className="mb-6">
@@ -44,8 +47,10 @@ function EngineeringHealth() {
           resourcing decisions — never used for individual performance ranking.
         </p>
         <DemoDataBanner>
-          This entire page is illustrative sample data — burnout/allocation/silo signals have no
-          backing data source yet (no schema fields for after-hours activity, feature/fix split, etc.).
+          The developer health profiles below are real, computed from actual commit and work-item
+          data. The KPI cards, feature/fix allocation, knowledge-silo and training panels above/below
+          them are still illustrative sample data — no schema field backs allocation split, silo
+          detection or training signals yet.
         </DemoDataBanner>
       </header>
 
@@ -82,12 +87,15 @@ function EngineeringHealth() {
 
         <GlassPanel
           title="Developer health profiles"
-          subtitle="Workload strain, after-hours activity and suggested support"
+          subtitle="Workload strain, after-hours activity and P0/P1 load — real, from commits and work items"
           className="xl:col-span-3"
           bodyClassName="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
         >
-          {DEVELOPERS.map((dev) => (
-            <DeveloperProfileCard key={dev.id} dev={dev} />
+          {data?.developers.length === 0 && (
+            <p className="text-sm text-muted-foreground">No developers found for this organization yet.</p>
+          )}
+          {data?.developers.map((dev) => (
+            <DeveloperProfileCard key={dev.id} dev={dev} burnoutFormula={data.burnoutFormula} />
           ))}
         </GlassPanel>
       </div>

@@ -8,6 +8,7 @@ import userController from '../controllers/user.controller';
 import analyticsController from '../controllers/analytics.controller';
 import assistantController from '../controllers/assistant.controller';
 import assistantProviderConnectionController from '../controllers/assistant-provider-connection.controller';
+import engineeringHealthController from '../controllers/engineering-health.controller';
 import { getGpuSpendSummary, getGpuSpendTrend, getGpuSpendBySquad, getGpuSpendByType } from '../controllers/gpu-spend.controller';
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
@@ -142,6 +143,8 @@ router.post('/assistant/conversations/:id/messages', requireRole('pm', 'executiv
 router.get('/assistant/provider-connection/status', requireRole('pm'), assistantProviderConnectionController.status);
 router.post('/assistant/provider-connection', requireRole('pm'), assistantProviderConnectionController.save);
 router.delete('/assistant/provider-connection', requireRole('pm'), assistantProviderConnectionController.remove);
+
+router.get('/engineering-health/developers', requireRole('pm', 'executive'), engineeringHealthController.getDeveloperProfiles);
 router.get('/gpu-spend/summary', requireAuth, getGpuSpendSummary);
 router.get('/gpu-spend/trend', requireAuth, getGpuSpendTrend);
 router.get('/gpu-spend/by-squad', requireAuth, getGpuSpendBySquad);

@@ -55,6 +55,7 @@ model Tenant {
   chatConversations         ChatConversation[]
   chatMessages              ChatMessage[]
   assistantProviderConnections AssistantProviderConnection[]
+  workItemActivities           WorkItemActivity[]
 
   @@index([slug])
   @@index([domain])
@@ -97,6 +98,7 @@ model User {
   chatConversationsStarted     ChatConversation[]
   chatMessages                 ChatMessage[]
   assistantProviderConnectionsCreated AssistantProviderConnection[]
+  workItemActivities                  WorkItemActivity[]
 
   @@index([email])
   @@index([tenantId])
@@ -216,8 +218,9 @@ model WorkItem {
   sprint    Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
   creator   User           @relation("WorkItemCreator", fields: [createdBy], references: [id])
   updater   User?          @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
-  linksFrom WorkItemLink[] @relation("LinkSource")
-  linksTo   WorkItemLink[] @relation("LinkTarget")
+  linksFrom  WorkItemLink[]     @relation("LinkSource")
+  linksTo    WorkItemLink[]     @relation("LinkTarget")
+  activities WorkItemActivity[]
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -227,6 +230,37 @@ model WorkItem {
   @@index([assigneeId])
   @@index([externalSystem])
   @@map("work_items")
+}
+
+/// Real per-event activity on a work item — e.g. a Jira status transition
+/// with its actual event timestamp (not a sync-time stamp; see
+/// WorkItem.statusChangedAt, which IS sync-time and isn't usable for
+/// activity-timing purposes). Generalizes beyond Jira on purpose (same
+/// `source` pattern as CommitAttribution.source) — used by
+/// engineering-health.service.ts alongside Commit timestamps to build a
+/// developer's real activity timeline for after-hours/weekend detection.
+model WorkItemActivity {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  workItemId String   @map("work_item_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  eventType  String   @map("event_type") @db.VarChar(30)
+  fromStatus String?  @map("from_status") @db.VarChar(100)
+  toStatus   String?  @map("to_status") @db.VarChar(100)
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz
+  source     String   @db.VarChar(20)
+  /// The source system's own stable id for this event (e.g. a Jira
+  /// changelog entry id) — idempotency key for re-syncs.
+  externalId String   @map("external_id") @db.VarChar(100)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([workItemId, externalId])
+  @@index([tenantId, userId, occurredAt])
+  @@map("work_item_activities")
 }
 
 /// Native issue-link graph from the source system (Jira "relates to"/"is

@@ -221,6 +221,72 @@ async function resolveAssigneeId(email: string | undefined): Promise<string | nu
   return user?.id ?? null;
 }
 
+interface JiraChangelogEntry {
+  id: string;
+  created: string;
+  author?: { accountId?: string };
+  items: Array<{ field: string; fromString?: string; toString?: string }>;
+}
+
+/**
+ * Offset-paginated (startAt/maxResults/isLast) — confirmed via a live probe
+ * against a real Jira Cloud site that this is a SEPARATE call from issue
+ * search, not an `expand` param: `/search/jql`'s `expand:['changelog']`
+ * returns 400, and the legacy `/search?expand=changelog` returns 410 Gone
+ * ("migrate to /rest/api/3/search/jql" — which doesn't support expand at
+ * all). This dedicated endpoint is the only path.
+ */
+async function* fetchChangelogPages(client: JiraClient, issueKey: string): AsyncGenerator<JiraChangelogEntry[]> {
+  let startAt = 0;
+  for (;;) {
+    const page = await jiraFetch(client, `/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=100`);
+    const values: JiraChangelogEntry[] = page.values ?? [];
+    yield values;
+    if (page.isLast || values.length === 0) break;
+    startAt += values.length;
+  }
+}
+
+/**
+ * A changelog entry's `author` only carries `accountId` — no email, unlike
+ * `issue.fields.assignee`/`reporter` (which have both). `accountIdToEmail`
+ * is built from those fields as the same sync pass processes issues, so
+ * resolving a changelog author to a real User needs no extra API call for
+ * anyone who's also an assignee/reporter somewhere in this run; anyone else
+ * stays unresolved (`userId: null` — the event is still recorded) rather
+ * than paying for a per-author `/rest/api/3/user` lookup.
+ */
+async function syncStatusActivity(
+  tenantId: string,
+  workItemId: string,
+  client: JiraClient,
+  issueKey: string,
+  accountIdToEmail: Map<string, string>
+): Promise<void> {
+  for await (const entries of fetchChangelogPages(client, issueKey)) {
+    for (const entry of entries) {
+      const statusItem = entry.items.find((i) => i.field === 'status');
+      if (!statusItem) continue;
+      const email = entry.author?.accountId ? accountIdToEmail.get(entry.author.accountId) : undefined;
+      const userId = await resolveAssigneeId(email);
+
+      await prisma.workItemActivity.upsert({
+        where: { workItemId_externalId: { workItemId, externalId: entry.id } },
+        create: {
+          tenantId, workItemId, userId,
+          eventType: 'status_transition',
+          fromStatus: statusItem.fromString ?? null,
+          toStatus: statusItem.toString ?? null,
+          occurredAt: new Date(entry.created),
+          source: 'jira',
+          externalId: entry.id,
+        },
+        update: {}, // immutable historical event — nothing to reconcile on re-sync
+      });
+    }
+  }
+}
+
 interface JqlPage {
   issues: any[];
   nextPageToken?: string;
@@ -271,6 +337,14 @@ export async function syncProduct(integration: Integration, product: Product): P
   // not yet processed, or in a different (also-synced) product entirely
   // (cross-project links are common), so resolution can't happen inline.
   const collectedLinks: Array<{ sourceExternalId: string; targetExternalId: string; linkType: string }> = [];
+  // Built progressively as issues are processed across this whole sync run
+  // (not reset per page) — see syncStatusActivity's doc comment.
+  const accountIdToEmail = new Map<string, string>();
+  // No changelog fetch on a tenant's very first sync ever (lastSyncedAt null)
+  // — avoids a potentially large one-time burst of per-issue API calls
+  // against a big existing backlog. Activity starts accumulating from the
+  // next sync onward, same as any other incremental signal.
+  const changelogWatermark = integration.lastSyncedAt;
 
   for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId)) {
     // Batched once per page (not per issue) so reopen/status-change detection
@@ -350,6 +424,9 @@ export async function syncProduct(integration: Integration, product: Product): P
       const assigneeId = await resolveAssigneeId(f.assignee?.emailAddress);
       const storyPoints = storyPointsFieldId ? (f[storyPointsFieldId] ?? null) : null;
 
+      if (f.assignee?.accountId && f.assignee?.emailAddress) accountIdToEmail.set(f.assignee.accountId, f.assignee.emailAddress);
+      if (f.reporter?.accountId && f.reporter?.emailAddress) accountIdToEmail.set(f.reporter.accountId, f.reporter.emailAddress);
+
       const jiraSprintField = Array.isArray(f.sprint) ? f.sprint[f.sprint.length - 1] : f.sprint;
       const sprintId = jiraSprintField?.id ? sprintIdMap.get(jiraSprintField.id) ?? null : null;
 
@@ -376,7 +453,7 @@ export async function syncProduct(integration: Integration, product: Product): P
       // "not embedded" on every routine sync touch.
       const embedding = embeddingsByExternalId.get(String(issue.id)) ?? existing?.embedding ?? [];
 
-      await prisma.workItem.upsert({
+      const workItemRow = await prisma.workItem.upsert({
         where: {
           productId_externalSystem_externalId: {
             productId: product.id, externalSystem: 'jira', externalId: String(issue.id),
@@ -416,6 +493,10 @@ export async function syncProduct(integration: Integration, product: Product): P
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
         },
       });
+
+      if (changelogWatermark && f.updated && new Date(f.updated) > changelogWatermark) {
+        await syncStatusActivity(integration.tenantId, workItemRow.id, client, issue.key, accountIdToEmail);
+      }
     }
   }
 

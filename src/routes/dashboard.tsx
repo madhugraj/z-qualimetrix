@@ -18,7 +18,6 @@ import { ProductHealthList } from "@/components/qm/ProductHealthList";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
-import { BUGS } from "@/lib/qm-bugs";
 import { KPIS, ROLES, type Kpi } from "@/lib/qm-data";
 import { liveKpi } from "@/lib/kpi-utils";
 import {
@@ -270,7 +269,7 @@ function Dashboard() {
             className="xl:col-span-2"
             action={!similarBugs.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[0]} />
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} isLoading={mostRecentBugId.isLoading || similarBugs.isLoading} />
           </GlassPanel>
           <GlassPanel title="Bug domain distribution" subtitle="Auto-tagged defect layers" action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}>
             <BugDomainDonut distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
@@ -321,7 +320,7 @@ function Dashboard() {
             subtitle="Check before you start: this may already be fixed"
             action={!similarBugs.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[2]} />
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} isLoading={mostRecentBugId.isLoading || similarBugs.isLoading} />
           </GlassPanel>
           <GlassPanel
             title="Bug domain distribution"

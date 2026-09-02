@@ -125,7 +125,11 @@ function ProjectsPage() {
 
   const openProject = (row: ProjectOverviewRow) => {
     setCurrentProductId(row.productId);
-    navigate({ to: "/bugs" });
+    // /backlog, not /bugs — the "Items" count above is every work item type
+    // (task/story/epic/subtask/bug), but /bugs only ever shows bug-type
+    // items. A project with a nonzero count and zero bugs would otherwise
+    // land on a view that's always empty.
+    navigate({ to: "/backlog" });
   };
 
   return (

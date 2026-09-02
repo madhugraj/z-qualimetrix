@@ -4,7 +4,6 @@ import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
-import { BUGS } from "@/lib/qm-bugs";
 import { exportJson } from "@/lib/qm-export";
 import { useBugDetail } from "@/lib/queries/bugs";
 import { useSimilarBugs } from "@/lib/queries/analytics";
@@ -209,7 +208,7 @@ function BugDetail() {
           {similarBugs.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
-            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} fallbackBug={BUGS[0]} limit={4} />
+            <SimilarBugs hasData={similarBugs.data?.hasData} matches={similarBugs.data?.similar} isLoading={similarBugs.isLoading} />
           )}
         </GlassPanel>
       </div>
