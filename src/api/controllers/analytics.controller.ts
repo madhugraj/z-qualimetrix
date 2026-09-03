@@ -209,6 +209,24 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
+   * Get per-epic progress rollups (child item counts by status, % complete)
+   */
+  getEpicRollups = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, limit } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const rollups = await analyticsService.getEpicRollups(
+      scope.productId,
+      scope.tenantId,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, rollups);
+  });
+
+  /**
    * Get backlog flow (items created vs. completed per period)
    */
   getBacklogFlow = this.asyncHandler(async (req: Request, res: Response) => {

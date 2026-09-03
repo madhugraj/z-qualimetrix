@@ -128,6 +128,7 @@ router.get('/analytics/velocity-qoq', requireAuth, analyticsController.getQuarte
 router.get('/analytics/age-distribution', requireAuth, analyticsController.getAgeDistribution);
 router.get('/analytics/backlog-flow', requireAuth, analyticsController.getBacklogFlow);
 router.get('/analytics/requirement-traceability', requireAuth, analyticsController.getRequirementTraceability);
+router.get('/analytics/epics', requireAuth, analyticsController.getEpicRollups);
 
 // PM/Leadership analytics assistant — role-gated at the route layer, and
 // independently re-scoped to req.user!.tenantId inside every service call

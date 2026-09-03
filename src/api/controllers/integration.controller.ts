@@ -254,26 +254,25 @@ export async function listProjects(req: Request, res: Response) {
   });
 }
 
-export async function listJiraUsers(req: Request, res: Response) {
-  const tenantId = getTenantId(req);
-  const tokens = await integrationService.getDecryptedTokens(tenantId, 'jira');
-  if (!tokens) return res.status(404).json({ success: false, error: 'Jira integration not connected' });
+interface JiraUserSummary {
+  accountId: string;
+  displayName: string;
+  emailAddress: string | null;
+  avatarUrl: string | null;
+}
 
-  const cloudId = (tokens.externalMetadata as any)?.cloudId;
-  if (!cloudId) return res.status(409).json({ success: false, error: 'Jira site is not configured' });
-
-  const users: Array<{ accountId: string; displayName: string; emailAddress: string | null; avatarUrl: string | null }> = [];
+/** Shared by listJiraUsers (display) and saveJiraSelection (server-side accountId->email resolution — never trust a client-supplied email for this). */
+async function fetchJiraUsers(cloudId: string, accessToken: string): Promise<JiraUserSummary[]> {
+  const users: JiraUserSummary[] = [];
   let startAt = 0;
   const maxResults = 100;
 
   while (true) {
     const response = await fetch(
       `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/users/search?startAt=${startAt}&maxResults=${maxResults}`,
-      { headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' } },
+      { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } },
     );
-    if (!response.ok) {
-      return res.status(502).json({ success: false, error: 'Failed to fetch Jira users' });
-    }
+    if (!response.ok) throw new Error('Failed to fetch Jira users');
     const page = await response.json() as any[];
     users.push(...page
       .filter((u: any) => u.accountType === 'atlassian' && u.active !== false)
@@ -287,7 +286,23 @@ export async function listJiraUsers(req: Request, res: Response) {
     startAt += page.length;
   }
 
-  return res.json({ success: true, data: users });
+  return users;
+}
+
+export async function listJiraUsers(req: Request, res: Response) {
+  const tenantId = getTenantId(req);
+  const tokens = await integrationService.getDecryptedTokens(tenantId, 'jira');
+  if (!tokens) return res.status(404).json({ success: false, error: 'Jira integration not connected' });
+
+  const cloudId = (tokens.externalMetadata as any)?.cloudId;
+  if (!cloudId) return res.status(409).json({ success: false, error: 'Jira site is not configured' });
+
+  try {
+    const users = await fetchJiraUsers(cloudId, tokens.accessToken);
+    return res.json({ success: true, data: users });
+  } catch {
+    return res.status(502).json({ success: false, error: 'Failed to fetch Jira users' });
+  }
 }
 
 export async function saveJiraSelection(req: Request, res: Response) {
@@ -343,9 +358,30 @@ export async function saveJiraSelection(req: Request, res: Response) {
     },
   })));
 
+  // Selected users scope per-person ANALYTICS (e.g. Engineering Health's
+  // developer roster) — deliberately NOT a sync filter like selectedProjectIds;
+  // a deselected person's work items still sync everywhere else. Emails are
+  // resolved from Jira's own live user list here, server-side — never trusted
+  // from the client — since engineering-health.service.ts filters by
+  // User.email, not Jira accountId, and there's no accountId column on User
+  // to join against later.
+  let selectedUserEmails: string[] = [];
+  if (userAccountIds.length > 0) {
+    try {
+      const availableUsers = await fetchJiraUsers(cloudId, tokens.accessToken);
+      const emailByAccountId = new Map(availableUsers.map((u) => [u.accountId, u.emailAddress]));
+      selectedUserEmails = [...new Set(userAccountIds)]
+        .map((id) => emailByAccountId.get(id))
+        .filter((email): email is string => !!email);
+    } catch {
+      return res.status(502).json({ success: false, error: 'Failed to validate Jira users' });
+    }
+  }
+
   await integrationService.updateExternalMetadata(tenantId, 'jira', {
     selectedProjectIds: [...new Set(projectIds)],
     selectedUserAccountIds: [...new Set(userAccountIds)],
+    selectedUserEmails,
     selectionUpdatedAt: new Date().toISOString(),
   });
   return res.json({ success: true });

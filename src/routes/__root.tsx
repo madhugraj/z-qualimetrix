@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "../lib/auth-context";
 import { ProductProvider } from "../lib/product-context";
 import { DateRangeProvider } from "../lib/date-range-context";
+import { ThemeProvider } from "../lib/theme-context";
 
 function NotFoundComponent() {
   return (
@@ -129,15 +130,17 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ProductProvider>
-          <DateRangeProvider>
-            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-            <Outlet />
-            <Toaster position="bottom-right" />
-          </DateRangeProvider>
-        </ProductProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ProductProvider>
+            <DateRangeProvider>
+              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+              <Outlet />
+              <Toaster position="bottom-right" />
+            </DateRangeProvider>
+          </ProductProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

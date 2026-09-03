@@ -1440,6 +1440,227 @@ export class AnalyticsService {
 
     return { requirements: withLinks, hasData: withLinks.length > 0 };
   }
+
+  /**
+   * Per-epic progress rollup from WorkItem.parentId (populated at sync time
+   * by jira-sync.service.ts / azure-devops-sync.service.ts from Jira's
+   * parent/Epic Link fields or ADO's System.Parent). Counts DIRECT children
+   * only — a sub-task under a story under an epic already rolls into that
+   * story, not counted transitively here. An epic with zero synced children
+   * is still returned (a real "nothing scoped under this epic yet" signal,
+   * not noise); percentComplete/pointsComplete are null, never a fabricated
+   * 0%, when there's nothing measurable.
+   *
+   * `summary` is aggregated across the FULL matching set (bounded only by
+   * EPIC_SCAN_CAP, a sanity ceiling — not by `limit`), so KPI tiles/charts on
+   * a dashboard never misrepresent the portfolio just because the table view
+   * only renders `limit` rows. `health` reuses the same "blocked > at risk"
+   * severity ordering as getRequirementTraceability, but derived from an
+   * epic's own direct children rather than WorkItemLink — 'blocked' means at
+   * least one open critical/high child; 'at_risk' means no such blocker but
+   * the epic hasn't been touched in STALE_DAYS while still incomplete
+   * (a real "nothing is moving" signal, not just "has open work," which
+   * would otherwise flag nearly every active epic).
+   */
+  async getEpicRollups(productId?: string, tenantId?: string, limit: number = 50): Promise<{
+    epics: Array<{
+      id: string;
+      externalId: string | null;
+      title: string;
+      status: string;
+      externalStatusName: string | null;
+      productId: string;
+      productName: string;
+      updatedAt: string;
+      totalChildren: number;
+      childCounts: Record<string, number>;
+      percentComplete: number | null;
+      pointsComplete: { done: number; total: number; percent: number } | null;
+      timeComplete: { spentSeconds: number; estimateSeconds: number; percent: number } | null;
+      health: 'on_track' | 'at_risk' | 'blocked';
+    }>;
+    summary: {
+      totalEpics: number;
+      epicsWithNoChildren: number;
+      avgPercentComplete: number | null;
+      byHealth: { on_track: number; at_risk: number; blocked: number };
+      byStatus: Record<string, number>;
+      byProgressBucket: { no_data: number; '0-25': number; '25-50': number; '50-75': number; '75-100': number };
+    };
+    hasData: boolean;
+  }> {
+    const STALE_DAYS = 14;
+    // Sanity ceiling on the unbounded portfolio scan, same "known v1
+    // limitation at extreme scale" posture as azure-devops-sync.service.ts's
+    // 20,000-result WIQL cap — no tenant is anywhere near this today.
+    const EPIC_SCAN_CAP = 2000;
+    const emptySummary = {
+      totalEpics: 0, epicsWithNoChildren: 0, avgPercentComplete: null as number | null,
+      byHealth: { on_track: 0, at_risk: 0, blocked: 0 },
+      byStatus: {} as Record<string, number>,
+      byProgressBucket: { no_data: 0, '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 }
+    };
+
+    const where: any = {
+      type: 'epic',
+      isActive: true,
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const allEpics = await this.prisma.workItem.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: EPIC_SCAN_CAP,
+      select: {
+        id: true, externalId: true, title: true, status: true, externalStatusName: true,
+        updatedAt: true, productId: true, product: { select: { name: true } },
+        // An epic can carry directly-logged time on its own issue (confirmed
+        // on real data), not just via its children — timeComplete below adds
+        // this in on top of the children rollup, unlike pointsComplete
+        // (epics essentially never carry their own story points).
+        originalEstimateSeconds: true, timeSpentSeconds: true
+      }
+    });
+
+    if (allEpics.length === 0) return { epics: [], summary: emptySummary, hasData: false };
+
+    const allEpicIds = allEpics.map((e) => e.id);
+
+    // Every epic's child counts/points, and its "blocked" signal, each in one
+    // aggregate query regardless of portfolio size — same "one groupBy for
+    // everything" shape as getProjectsOverview's bugStatusCounts above.
+    const [statusGroups, riskyGroups] = await Promise.all([
+      this.prisma.workItem.groupBy({
+        by: ['parentId', 'status'],
+        where: { parentId: { in: allEpicIds }, isActive: true },
+        _count: true,
+        _sum: { storyPoints: true, originalEstimateSeconds: true, timeSpentSeconds: true }
+      }),
+      this.prisma.workItem.groupBy({
+        by: ['parentId'],
+        where: {
+          parentId: { in: allEpicIds }, isActive: true,
+          status: { in: ['open', 'in_progress'] },
+          priority: { in: ['critical', 'high'] }
+        },
+        _count: true
+      })
+    ]);
+
+    const groupsByEpicId = new Map<string, typeof statusGroups>();
+    for (const row of statusGroups) {
+      if (!row.parentId) continue;
+      const list = groupsByEpicId.get(row.parentId) ?? [];
+      list.push(row);
+      groupsByEpicId.set(row.parentId, list);
+    }
+    const riskyCountByEpicId = new Map<string, number>();
+    for (const row of riskyGroups) {
+      if (!row.parentId) continue;
+      riskyCountByEpicId.set(row.parentId, row._count as unknown as number);
+    }
+
+    const staleThreshold = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000);
+
+    const allRows = allEpics.map((epic) => {
+      const groups = groupsByEpicId.get(epic.id) ?? [];
+      const childCounts: Record<string, number> = {};
+      let totalChildren = 0;
+      let closedOrDone = 0;
+      let pointsDone = 0;
+      let pointsTotal = 0;
+      let anyPoints = false;
+      let spentSeconds = 0;
+      let estimateSeconds = 0;
+      let anyTime = false;
+
+      for (const g of groups) {
+        const count = g._count as unknown as number;
+        childCounts[g.status] = (childCounts[g.status] ?? 0) + count;
+        totalChildren += count;
+        if (g.status === 'resolved' || g.status === 'completed') closedOrDone += count;
+
+        const pointsSum = g._sum?.storyPoints ?? null;
+        if (pointsSum != null) {
+          anyPoints = true;
+          pointsTotal += pointsSum;
+          if (g.status === 'resolved' || g.status === 'completed') pointsDone += pointsSum;
+        }
+
+        // Time spent isn't gated by status like points-done is — hours
+        // already logged are already logged whether or not the item is
+        // finished, so this is a burn-rate (spent vs. estimate), not a
+        // done-vs-total ratio.
+        const spentSum = g._sum?.timeSpentSeconds ?? null;
+        const estimateSum = g._sum?.originalEstimateSeconds ?? null;
+        if (spentSum != null) { anyTime = true; spentSeconds += spentSum; }
+        if (estimateSum != null) { anyTime = true; estimateSeconds += estimateSum; }
+      }
+
+      // An epic can carry directly-logged time on its own issue, not just via
+      // its children (confirmed on real data) — add it in on top.
+      if (epic.timeSpentSeconds != null) { anyTime = true; spentSeconds += epic.timeSpentSeconds; }
+      if (epic.originalEstimateSeconds != null) { anyTime = true; estimateSeconds += epic.originalEstimateSeconds; }
+
+      // Exclude closed (without resolving) from the denominator — same
+      // convention as getProjectsOverview's resolutionRate: out of scope, not remaining work.
+      const measurable = totalChildren - (childCounts.closed ?? 0);
+      const percentComplete = measurable > 0 ? Math.round((closedOrDone / measurable) * 1000) / 10 : null;
+
+      const isBlocked = (riskyCountByEpicId.get(epic.id) ?? 0) > 0;
+      const isStalledIncomplete = epic.updatedAt < staleThreshold && percentComplete !== null && percentComplete < 100;
+      const health: 'on_track' | 'at_risk' | 'blocked' = isBlocked ? 'blocked' : isStalledIncomplete ? 'at_risk' : 'on_track';
+
+      return {
+        id: epic.id,
+        externalId: epic.externalId,
+        title: epic.title,
+        status: epic.status,
+        externalStatusName: epic.externalStatusName,
+        productId: epic.productId,
+        productName: epic.product.name,
+        updatedAt: epic.updatedAt.toISOString(),
+        totalChildren,
+        childCounts,
+        percentComplete,
+        pointsComplete: anyPoints && pointsTotal > 0
+          ? { done: pointsDone, total: pointsTotal, percent: Math.round((pointsDone / pointsTotal) * 1000) / 10 }
+          : null,
+        timeComplete: anyTime && estimateSeconds > 0
+          ? { spentSeconds, estimateSeconds, percent: Math.round((spentSeconds / estimateSeconds) * 1000) / 10 }
+          : null,
+        health
+      };
+    });
+
+    const withProgress = allRows.filter((r) => r.percentComplete !== null);
+    const byProgressBucket = { no_data: 0, '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 };
+    const byHealth = { on_track: 0, at_risk: 0, blocked: 0 };
+    const byStatus: Record<string, number> = {};
+
+    for (const r of allRows) {
+      byHealth[r.health]++;
+      byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+      if (r.percentComplete === null) byProgressBucket.no_data++;
+      else if (r.percentComplete < 25) byProgressBucket['0-25']++;
+      else if (r.percentComplete < 50) byProgressBucket['25-50']++;
+      else if (r.percentComplete < 75) byProgressBucket['50-75']++;
+      else byProgressBucket['75-100']++;
+    }
+
+    const summary = {
+      totalEpics: allRows.length,
+      epicsWithNoChildren: allRows.filter((r) => r.totalChildren === 0).length,
+      avgPercentComplete: withProgress.length > 0
+        ? Math.round(withProgress.reduce((sum, r) => sum + (r.percentComplete ?? 0), 0) / withProgress.length)
+        : null,
+      byHealth,
+      byStatus,
+      byProgressBucket
+    };
+
+    return { epics: allRows.slice(0, limit), summary, hasData: allRows.length > 0 };
+  }
 }
 
 // Export singleton instance

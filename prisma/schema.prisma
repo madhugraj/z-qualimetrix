@@ -56,6 +56,7 @@ model Tenant {
   chatMessages              ChatMessage[]
   assistantProviderConnections AssistantProviderConnection[]
   workItemActivities           WorkItemActivity[]
+  workLogs                     WorkLog[]
 
   @@index([slug])
   @@index([domain])
@@ -193,6 +194,14 @@ model WorkItem {
   assigneeId         String?   @map("assignee_id") @db.Uuid
   sprintId           String?   @map("sprint_id") @db.Uuid
   storyPoints        Int?      @map("story_points")
+  /// Seconds, from Jira's `fields.timetracking` or Azure DevOps's
+  /// OriginalEstimate/RemainingWork/CompletedWork (hours, converted at sync
+  /// time). timeSpentSeconds is the source system's own rollup — Jira
+  /// maintains it directly; it is NOT computed by summing this app's WorkLog
+  /// rows and must never be reconciled against that sum as if required to match.
+  originalEstimateSeconds  Int? @map("original_estimate_seconds")
+  remainingEstimateSeconds Int? @map("remaining_estimate_seconds")
+  timeSpentSeconds         Int? @map("time_spent_seconds")
   createdBy          String    @map("created_by") @db.Uuid
   updatedBy          String?   @map("updated_by") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
@@ -212,15 +221,23 @@ model WorkItem {
   /// IS the "not embedded yet" sentinel — getSimilarBugs checks .length, never treats it as
   /// a real zero vector to compare against.
   embedding          Float[]   @default([])
+  /// Direct parent (epic) for a story/task, or a story for a subtask — one level,
+  /// not transitive. Populated from Jira's `parent` field / classic Epic Link
+  /// custom field, or Azure DevOps's System.Parent. Sync always writes this
+  /// explicitly (including back to null on un-parenting), never leaves it stale.
+  parentId           String?   @map("parent_id") @db.Uuid
 
   tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
   sprint    Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
   creator   User           @relation("WorkItemCreator", fields: [createdBy], references: [id])
   updater   User?          @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
+  parent    WorkItem?          @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  WorkItem[]         @relation("WorkItemHierarchy")
   linksFrom  WorkItemLink[]     @relation("LinkSource")
   linksTo    WorkItemLink[]     @relation("LinkTarget")
   activities WorkItemActivity[]
+  workLogs   WorkLog[]
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -229,6 +246,7 @@ model WorkItem {
   @@index([status])
   @@index([assigneeId])
   @@index([externalSystem])
+  @@index([parentId])
   @@map("work_items")
 }
 
@@ -261,6 +279,40 @@ model WorkItemActivity {
   @@unique([workItemId, externalId])
   @@index([tenantId, userId, occurredAt])
   @@map("work_item_activities")
+}
+
+/// Real per-person Jira worklog entries (jira-sync.service.ts's syncWorklogs,
+/// site-wide via /rest/api/3/worklog/updated + /worklog/list, not per-project
+/// like the rest of this sync). Author is free-text (authorName/authorEmail),
+/// never a resolved userId — same "author is a string, joined to User at
+/// query time via case-insensitive email match" pattern as Commit.authorEmail
+/// (see engineering-health.service.ts), so a worklog author who doesn't match
+/// any User row today isn't silently wrong tomorrow if one appears later.
+/// Azure DevOps has no equivalent per-entry worklog API, so this is Jira-only
+/// — a permanent platform limitation, not a v1 gap.
+model WorkLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  workItemId       String   @map("work_item_id") @db.Uuid
+  authorName       String?  @map("author_name") @db.VarChar(255)
+  authorEmail      String?  @map("author_email") @db.VarChar(255)
+  timeSpentSeconds Int      @map("time_spent_seconds")
+  startedAt        DateTime @map("started_at") @db.Timestamptz
+  externalSystem   String   @default("jira") @map("external_system") @db.VarChar(20)
+  /// Jira's own worklog id — globally unique per site (not per-issue), which
+  /// is also what /rest/api/3/worklog/deleted returns with no issue context,
+  /// so the unique key below is on this alone, not [workItemId, externalId].
+  externalId       String   @map("external_id") @db.VarChar(100)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@unique([externalSystem, externalId])
+  @@index([tenantId, authorEmail, startedAt])
+  @@index([workItemId])
+  @@map("work_logs")
 }
 
 /// Native issue-link graph from the source system (Jira "relates to"/"is

@@ -14,6 +14,7 @@ export interface DeveloperHealthProfile {
   weekendActivityPct: number | null;
   p0p1Load: number;
   burnoutIndex: number | null;
+  hoursLoggedSeconds: number;
 }
 
 interface DeveloperHealthResult {

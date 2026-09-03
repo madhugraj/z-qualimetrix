@@ -191,7 +191,8 @@ async function* fetchWorkItemBatches(client: AdoClient, ids: number[], stateCate
     'System.Title', 'System.Description', 'System.WorkItemType', 'System.State', 'System.AssignedTo', 'System.CreatedBy',
     'System.IterationId', 'System.IterationPath', 'Microsoft.VSTS.Common.Priority',
     'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Scheduling.Effort',
-    'Microsoft.VSTS.Common.ResolvedDate',
+    'Microsoft.VSTS.Common.ResolvedDate', 'System.Parent',
+    'Microsoft.VSTS.Scheduling.OriginalEstimate', 'Microsoft.VSTS.Scheduling.RemainingWork', 'Microsoft.VSTS.Scheduling.CompletedWork',
   ];
 
   for (let i = 0; i < ids.length; i += BATCH_SIZE) {
@@ -221,6 +222,11 @@ export async function syncProduct(integration: Integration, product: Product): P
 
   const runStartedAt = new Date();
   const ids = await fetchWorkItemIds(client, project, product.azureDevopsAreaPath);
+  // Collected for EVERY work item across every batch (not just ones with a
+  // parent) — see persistWorkItemParents's doc comment for why omitting
+  // parent-less items here would leave un-parented items with a stale
+  // parentId forever.
+  const collectedParents: Array<{ childExternalId: string; parentExternalId: string | null }> = [];
 
   for await (const items of fetchWorkItemBatches(client, ids, stateCategoryCache, project)) {
     const batchExternalIds = items.map((item: any) => String(item.id));
@@ -266,7 +272,19 @@ export async function syncProduct(integration: Integration, product: Product): P
       const assigneeId = await resolveAssigneeId(f['System.AssignedTo']?.uniqueName);
       const storyPoints = f['Microsoft.VSTS.Scheduling.StoryPoints'] ?? f['Microsoft.VSTS.Scheduling.Effort'] ?? null;
       const sprintId = f['System.IterationId'] ? iterationIdMap.get(String(f['System.IterationId'])) ?? null : null;
+      // ADO's scheduling fields are decimal hours, not seconds — convert to
+      // match the unit WorkItem's time-tracking columns use (shared with Jira).
+      const hoursToSeconds = (hours: number | undefined) => (hours != null ? Math.round(hours * 3600) : null);
+      const originalEstimateSeconds = hoursToSeconds(f['Microsoft.VSTS.Scheduling.OriginalEstimate']);
+      const remainingEstimateSeconds = hoursToSeconds(f['Microsoft.VSTS.Scheduling.RemainingWork']);
+      const timeSpentSeconds = hoursToSeconds(f['Microsoft.VSTS.Scheduling.CompletedWork']);
       const embedding = embeddingsByExternalId.get(String(item.id)) ?? existing?.embedding ?? [];
+
+      const parentField = f['System.Parent'];
+      collectedParents.push({
+        childExternalId: String(item.id),
+        parentExternalId: parentField != null ? String(parentField) : null,
+      });
 
       const externalMetadata = {
         assigneeName: f['System.AssignedTo']?.displayName ?? null,
@@ -287,6 +305,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           type: workItemType, status, priority,
           title, description, embedding,
           assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
+          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           createdBy: systemUserId,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
@@ -295,6 +314,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           type: workItemType, status, priority,
           title, description, embedding,
           assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
+          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
         },
@@ -302,7 +322,56 @@ export async function syncProduct(integration: Integration, product: Product): P
     }
   }
 
+  await persistWorkItemParents(product.id, collectedParents);
   await reconcileMissingWorkItems(product.id, runStartedAt);
+}
+
+/**
+ * Resolves collected System.Parent references (ADO returns the parent's
+ * numeric work item id directly, no key/custom-field ambiguity like Jira)
+ * to internal WorkItem ids and writes them onto WorkItem.parentId. Scoped to
+ * a single product, same reasoning as jira-sync.service.ts's counterpart.
+ *
+ * Writes an entry for every work item, including a `parentExternalId: null`
+ * one — an item un-parented in ADO since the last sync must have its stored
+ * parentId explicitly cleared here, or it stays stale forever.
+ */
+async function persistWorkItemParents(
+  productId: string,
+  entries: Array<{ childExternalId: string; parentExternalId: string | null }>
+): Promise<void> {
+  if (entries.length === 0) return;
+
+  const parentIds = Array.from(new Set(entries.map((e) => e.parentExternalId).filter((v): v is string => !!v)));
+  const childExternalIds = entries.map((e) => e.childExternalId);
+
+  const [parents, children] = await Promise.all([
+    parentIds.length
+      ? prisma.workItem.findMany({
+          where: { productId, externalSystem: 'azure_devops', externalId: { in: parentIds } },
+          select: { id: true, externalId: true },
+        })
+      : Promise.resolve([]),
+    prisma.workItem.findMany({
+      where: { productId, externalSystem: 'azure_devops', externalId: { in: childExternalIds } },
+      select: { id: true, externalId: true, parentId: true },
+    }),
+  ]);
+
+  const idByExternalId = new Map(parents.map((r) => [r.externalId as string, r.id]));
+  const childByExternalId = new Map(children.map((c) => [c.externalId as string, c]));
+
+  for (const entry of entries) {
+    const child = childByExternalId.get(entry.childExternalId);
+    if (!child) continue;
+
+    const resolvedParentId = entry.parentExternalId ? idByExternalId.get(entry.parentExternalId) ?? null : null;
+
+    if (resolvedParentId === child.id) continue; // guard against self-parent
+    if (resolvedParentId === child.parentId) continue; // no-op, already correct
+
+    await prisma.workItem.update({ where: { id: child.id }, data: { parentId: resolvedParentId } });
+  }
 }
 
 async function reconcileMissingWorkItems(productId: string, runStartedAt: Date): Promise<void> {

@@ -325,6 +325,81 @@ export function PriorityBreakdownChart({
   );
 }
 
+const HEALTH_ORDER = ["on_track", "at_risk", "blocked"] as const;
+const HEALTH_LABEL: Record<string, string> = {
+  on_track: "On track",
+  at_risk: "At risk",
+  blocked: "Blocked",
+};
+const HEALTH_COLOR: Record<string, string> = {
+  on_track: "var(--good)",
+  at_risk: "var(--warning)",
+  blocked: "var(--critical)",
+};
+
+/** Epic count by health signal (blocked > at_risk > on_track, see analytics.service.ts's getEpicRollups). */
+export function EpicHealthChart({
+  byHealth,
+  emptyMessage = "No epics synced yet for this scope.",
+}: {
+  byHealth?: Record<string, number>;
+  emptyMessage?: string;
+}) {
+  const rows = HEALTH_ORDER
+    .filter((h) => (byHealth?.[h] ?? 0) > 0)
+    .map((h) => ({ health: h, count: byHealth![h] }));
+
+  if (rows.length === 0) {
+    return <EmptyChartState message={emptyMessage} />;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <BarChart data={rows} layout="vertical" margin={{ left: 8 }}>
+        <CartesianGrid horizontal={false} stroke="var(--border)" {...gridProps} />
+        <XAxis type="number" {...axis} allowDecimals={false} />
+        <YAxis type="category" dataKey="health" {...axis} width={72} tickFormatter={(v) => HEALTH_LABEL[v] ?? v} />
+        <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} labelFormatter={(v) => HEALTH_LABEL[v as string] ?? String(v)} />
+        <Bar dataKey="count" name="Epics" radius={[0, 4, 4, 0]} isAnimationActive={false}>
+          {rows.map((r) => (
+            <Cell key={r.health} fill={HEALTH_COLOR[r.health] ?? "var(--primary)"} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export interface EpicProgressBucket {
+  label: string;
+  count: number;
+}
+
+/** Epic count by % complete bucket — same bucketed-bar shape as AgeDistributionChart. */
+export function EpicProgressDistributionChart({
+  data,
+  emptyMessage = "No epics synced yet for this scope.",
+}: {
+  data?: EpicProgressBucket[];
+  emptyMessage?: string;
+}) {
+  if (!data || data.every((d) => d.count === 0)) {
+    return <EmptyChartState message={emptyMessage} />;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <BarChart data={data}>
+        <CartesianGrid vertical={false} stroke="var(--border)" {...gridProps} />
+        <XAxis dataKey="label" {...axis} />
+        <YAxis {...axis} width={32} allowDecimals={false} />
+        <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} />
+        <Bar dataKey="count" name="Epics" fill="var(--primary)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export interface BacklogFlowPoint {
   period: string;
   created: number;

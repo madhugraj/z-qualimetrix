@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ThemeToggle } from "@/components/qm/ThemeToggle";
 import { API_V1_URL } from "@/lib/api-config";
 import { useAuth } from "@/lib/auth-context";
 
@@ -71,7 +72,7 @@ function LoginPage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
+    <div className="qm-page-canvas relative flex min-h-screen flex-col overflow-hidden bg-background">
       <div
         className="gloss-bloom -top-40 -left-32 h-[32rem] w-[32rem]"
         style={{ background: "radial-gradient(circle, oklch(0.82 0.11 70 / 45%), transparent 70%)" }}
@@ -88,9 +89,10 @@ function LoginPage() {
           </div>
           <span className="text-sm font-semibold tracking-tight">QubeIQ</span>
         </Link>
+        <ThemeToggle className="ml-auto" />
         <Link
           to="/"
-          className="gloss gloss-hover ml-auto inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
+          className="gloss gloss-hover inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
           Back

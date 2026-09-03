@@ -8,16 +8,18 @@
  * before touching the database, using `tenantId`/`role` from the
  * authenticated session — never from the model's tool-call arguments.
  *
- * Deliberately excludes anything backed by `src/lib/qm-people.ts` (burnout
- * index, after-hours %, weekend commits) — that's still hardcoded sample
- * data, not real signal, so no tool exists that could let the assistant
- * answer confidently from a fabricated number.
+ * Deliberately excludes anything still backed by `src/lib/qm-people.ts`
+ * (feature/fix allocation, knowledge silos, training suggestions) — that
+ * stays hardcoded sample data with no real data path yet. Burnout index/
+ * after-hours %/weekend activity moved to real signal in
+ * engineering-health.service.ts and IS exposed below (get_developer_health_profiles).
  */
 import { AuthenticatedUser, resolveProductOrTenantScope, ScopeError } from '../middleware/auth.middleware';
 import analyticsService from './analytics.service';
 import productRepositoryService from './product-repository.service';
 import { getCommitAttributionSummary, type CommitAttributionSummary } from './commit-attribution.service';
 import gpuSpendAnalyticsService from './gpu-spend-analytics.service';
+import { getDeveloperHealthProfiles } from './engineering-health.service';
 import type { ToolSchema } from './assistant-providers';
 
 const productIdProp = {
@@ -127,6 +129,12 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
     execute: async (args, user) => analyticsService.calculateTeamProductivity(requireTenantId(user), parseDate(args.startDate), parseDate(args.endDate)),
   },
   {
+    name: 'get_developer_health_profiles',
+    description: 'Per-developer signals: after-hours/weekend activity, P0/P1 bug load, hours logged (from Jira worklogs), and a transparent burnout-index formula. Always tenant-wide.',
+    parameters: { type: 'object', properties: {} },
+    execute: async (_args, user) => getDeveloperHealthProfiles(requireTenantId(user)),
+  },
+  {
     name: 'get_tenant_analytics',
     description: 'Portfolio-wide rollup — per-product health scores, team productivity, and an overall quality score across every product in the tenant.',
     parameters: { type: 'object', properties: { ...dateRangeProps } },
@@ -211,6 +219,16 @@ export const ASSISTANT_TOOLS: ToolDef[] = [
       const scope = await scopeArgs(user, args);
       const limit = typeof args.limit === 'number' ? args.limit : undefined;
       return analyticsService.getRequirementTraceability(scope.productId, scope.tenantId, limit);
+    },
+  },
+  {
+    name: 'get_epic_rollup',
+    description: 'Per-epic progress rollup — direct child item counts by status, % complete (count- and points-based), and a health signal (on_track/at_risk/blocked). Also returns a portfolio-wide summary (unaffected by limit).',
+    parameters: { type: 'object', properties: { ...productIdProp, limit: { type: 'integer', description: 'Max epics to return (default 50).' } } },
+    execute: async (args, user) => {
+      const scope = await scopeArgs(user, args);
+      const limit = typeof args.limit === 'number' ? args.limit : undefined;
+      return analyticsService.getEpicRollups(scope.productId, scope.tenantId, limit);
     },
   },
   {

@@ -63,7 +63,10 @@ interface JiraClient {
 }
 
 async function jiraFetch(client: JiraClient, path: string, init?: RequestInit): Promise<any> {
-  const url = `https://api.atlassian.com/ex/jira/${client.cloudId}${path}`;
+  // `path` is usually relative, but some paginated endpoints (e.g.
+  // /worklog/updated's `nextPage`) hand back a full absolute URL to follow
+  // as-is rather than a cursor to re-append — pass it straight through.
+  const url = path.startsWith('http') ? path : `https://api.atlassian.com/ex/jira/${client.cloudId}${path}`;
   const response = await fetch(url, {
     ...init,
     headers: {
@@ -140,6 +143,29 @@ async function getStoryPointsFieldId(client: JiraClient, integration: Integratio
   await prisma.integration.update({
     where: { id: integration.id },
     data: { externalMetadata: { ...metadata, storyPointsFieldId: fieldId } },
+  });
+  return fieldId;
+}
+
+/**
+ * Classic (non-hierarchy) Jira company-managed projects expose epic
+ * membership via a custom "Epic Link" field (holding the epic's issue KEY,
+ * not its id) instead of the modern `fields.parent` relation. Discovered and
+ * cached the same way as story points. Returns null (and caches that) on
+ * team-managed/hierarchy-enabled sites where the field doesn't exist at all
+ * — the normal case, not an error.
+ */
+async function getEpicLinkFieldId(client: JiraClient, integration: Integration): Promise<string | null> {
+  const metadata = (integration.externalMetadata as Record<string, unknown>) ?? {};
+  if (typeof metadata.epicLinkFieldId === 'string') return metadata.epicLinkFieldId;
+
+  const fields: Array<{ id: string; name: string }> = await jiraFetch(client, '/rest/api/3/field');
+  const match = fields.find((f) => /^epic link$/i.test(f.name));
+
+  const fieldId = match?.id ?? null;
+  await prisma.integration.update({
+    where: { id: integration.id },
+    data: { externalMetadata: { ...metadata, epicLinkFieldId: fieldId } },
   });
   return fieldId;
 }
@@ -292,10 +318,16 @@ interface JqlPage {
   nextPageToken?: string;
 }
 
-async function* fetchIssuePages(client: JiraClient, jql: string, storyPointsFieldId: string | null): AsyncGenerator<any[]> {
+async function* fetchIssuePages(
+  client: JiraClient,
+  jql: string,
+  storyPointsFieldId: string | null,
+  epicLinkFieldId: string | null
+): AsyncGenerator<any[]> {
   let nextPageToken: string | undefined;
-  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'sprint', 'created', 'updated', 'resolutiondate', 'labels', 'issuelinks'];
+  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'sprint', 'created', 'updated', 'resolutiondate', 'labels', 'issuelinks', 'parent', 'timetracking'];
   if (storyPointsFieldId) fields.push(storyPointsFieldId);
+  if (epicLinkFieldId) fields.push(epicLinkFieldId);
 
   for (;;) {
     const body: Record<string, unknown> = { jql, maxResults: 100, fields };
@@ -324,6 +356,7 @@ export async function syncProduct(integration: Integration, product: Product): P
 
   const priorityOverrides = ((integration.externalMetadata as any)?.statusMap?.priority as Record<string, string>) ?? {};
   const storyPointsFieldId = await getStoryPointsFieldId(client, integration);
+  const epicLinkFieldId = await getEpicLinkFieldId(client, integration);
   const systemUserId = await integrationService.getOrCreateSystemUser(integration.tenantId);
 
   const sprints = await fetchSprintsForProject(client, product.jiraProjectId);
@@ -337,6 +370,10 @@ export async function syncProduct(integration: Integration, product: Product): P
   // not yet processed, or in a different (also-synced) product entirely
   // (cross-project links are common), so resolution can't happen inline.
   const collectedLinks: Array<{ sourceExternalId: string; targetExternalId: string; linkType: string }> = [];
+  // Collected for EVERY issue each run (not just ones with a parent) — see
+  // persistWorkItemParents's doc comment for why omitting parent-less issues
+  // here would leave un-parented items with a stale parentId forever.
+  const collectedParents: Array<{ childExternalId: string; parentExternalId: string | null; epicKey: string | null }> = [];
   // Built progressively as issues are processed across this whole sync run
   // (not reset per page) — see syncStatusActivity's doc comment.
   const accountIdToEmail = new Map<string, string>();
@@ -346,7 +383,7 @@ export async function syncProduct(integration: Integration, product: Product): P
   // next sync onward, same as any other incremental signal.
   const changelogWatermark = integration.lastSyncedAt;
 
-  for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId)) {
+  for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId, epicLinkFieldId)) {
     // Batched once per page (not per issue) so reopen/status-change detection
     // doesn't turn into an extra ~2500 findUnique calls at full-tenant scale —
     // this stays the same order of magnitude as the existing pagination cost.
@@ -390,15 +427,24 @@ export async function syncProduct(integration: Integration, product: Product): P
     // source->target row instead of two differently-worded duplicates.
     for (const issue of issues) {
       const links = issue.fields?.issuelinks;
-      if (!Array.isArray(links)) continue;
-      for (const link of links) {
-        const linkType = link.type?.outward ?? link.type?.name ?? 'related to';
-        if (link.outwardIssue) {
-          collectedLinks.push({ sourceExternalId: String(issue.id), targetExternalId: String(link.outwardIssue.id), linkType });
-        } else if (link.inwardIssue) {
-          collectedLinks.push({ sourceExternalId: String(link.inwardIssue.id), targetExternalId: String(issue.id), linkType });
+      if (Array.isArray(links)) {
+        for (const link of links) {
+          const linkType = link.type?.outward ?? link.type?.name ?? 'related to';
+          if (link.outwardIssue) {
+            collectedLinks.push({ sourceExternalId: String(issue.id), targetExternalId: String(link.outwardIssue.id), linkType });
+          } else if (link.inwardIssue) {
+            collectedLinks.push({ sourceExternalId: String(link.inwardIssue.id), targetExternalId: String(issue.id), linkType });
+          }
         }
       }
+
+      // Modern hierarchy (`fields.parent`, numeric id) takes priority over the
+      // legacy Epic Link custom field (issue KEY, not id) in persistWorkItemParents
+      // when a site somehow has both populated.
+      const parentField = issue.fields?.parent;
+      const parentExternalId = parentField?.id ? String(parentField.id) : null;
+      const epicKey = epicLinkFieldId ? (issue.fields?.[epicLinkFieldId] as string | undefined) ?? null : null;
+      collectedParents.push({ childExternalId: String(issue.id), parentExternalId, epicKey });
     }
 
     const toEmbed = mapped.filter((m) => m.contentChanged);
@@ -423,6 +469,9 @@ export async function syncProduct(integration: Integration, product: Product): P
       const { issue, f, workItemType, status, priority, labels, rawStatusName, title, description, existing } = m;
       const assigneeId = await resolveAssigneeId(f.assignee?.emailAddress);
       const storyPoints = storyPointsFieldId ? (f[storyPointsFieldId] ?? null) : null;
+      const originalEstimateSeconds = f.timetracking?.originalEstimateSeconds ?? null;
+      const remainingEstimateSeconds = f.timetracking?.remainingEstimateSeconds ?? null;
+      const timeSpentSeconds = f.timetracking?.timeSpentSeconds ?? null;
 
       if (f.assignee?.accountId && f.assignee?.emailAddress) accountIdToEmail.set(f.assignee.accountId, f.assignee.emailAddress);
       if (f.reporter?.accountId && f.reporter?.emailAddress) accountIdToEmail.set(f.reporter.accountId, f.reporter.emailAddress);
@@ -465,6 +514,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           type: workItemType, status, priority,
           title, description,
           assigneeId, sprintId, storyPoints, labels, embedding,
+          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           externalStatusName: rawStatusName, statusChangedAt: new Date(), reopenCount: 0,
           createdBy: systemUserId,
           // Jira's real creation date, not Prisma's now()-on-insert default —
@@ -479,6 +529,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           type: workItemType, status, priority,
           title, description,
           assigneeId, sprintId, storyPoints, labels, embedding,
+          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           externalStatusName: rawStatusName,
           // Only touch these when something actually changed, so an
           // unrelated field update doesn't reset "days in current status" or
@@ -501,6 +552,7 @@ export async function syncProduct(integration: Integration, product: Product): P
   }
 
   await persistWorkItemLinks(integration.tenantId, collectedLinks);
+  await persistWorkItemParents(product.id, collectedParents);
   await reconcileMissingWorkItems(product.id, runStartedAt);
 }
 
@@ -542,6 +594,75 @@ async function persistWorkItemLinks(
 }
 
 /**
+ * Resolves collected epic-parent references (both the modern `parent.id` and
+ * the legacy Epic Link key) to internal WorkItem ids and writes them onto
+ * WorkItem.parentId. Scoped to a single product — a cross-project parent
+ * (rare, mostly a classic-Jira edge case) is left unresolved rather than
+ * searching the whole tenant, since the rollups this feeds are product-scoped
+ * anyway.
+ *
+ * Unlike persistWorkItemLinks, this writes an entry for every issue,
+ * including a `parentExternalId: null, epicKey: null` one — an issue that
+ * previously had a parent and no longer does (un-parented in Jira, not
+ * re-parented to a different epic) must have its stored parentId explicitly
+ * cleared here, or it stays stale forever. Re-parenting between two epics
+ * self-corrects on its own since the new non-null value simply overwrites
+ * the old one.
+ */
+async function persistWorkItemParents(
+  productId: string,
+  entries: Array<{ childExternalId: string; parentExternalId: string | null; epicKey: string | null }>
+): Promise<void> {
+  if (entries.length === 0) return;
+
+  const numericParentIds = Array.from(new Set(entries.map((e) => e.parentExternalId).filter((v): v is string => !!v)));
+  const childExternalIds = entries.map((e) => e.childExternalId);
+
+  const [parentsByNumericId, epics, children] = await Promise.all([
+    numericParentIds.length
+      ? prisma.workItem.findMany({
+          where: { productId, externalSystem: 'jira', externalId: { in: numericParentIds } },
+          select: { id: true, externalId: true },
+        })
+      : Promise.resolve([]),
+    prisma.workItem.findMany({
+      where: { productId, externalSystem: 'jira', type: 'epic' },
+      select: { id: true, externalMetadata: true },
+    }),
+    prisma.workItem.findMany({
+      where: { productId, externalSystem: 'jira', externalId: { in: childExternalIds } },
+      select: { id: true, externalId: true, parentId: true },
+    }),
+  ]);
+
+  const idByNumericExternalId = new Map(parentsByNumericId.map((r) => [r.externalId as string, r.id]));
+  const epicIdByKey = new Map<string, string>();
+  for (const epic of epics) {
+    const jiraKey = (epic.externalMetadata as Record<string, unknown> | null)?.jiraKey;
+    if (typeof jiraKey === 'string') epicIdByKey.set(jiraKey, epic.id);
+  }
+  const childByExternalId = new Map(children.map((c) => [c.externalId as string, c]));
+
+  for (const entry of entries) {
+    const child = childByExternalId.get(entry.childExternalId);
+    if (!child) continue;
+
+    let resolvedParentId: string | null = null;
+    if (entry.parentExternalId) {
+      resolvedParentId = idByNumericExternalId.get(entry.parentExternalId) ?? null;
+    }
+    if (!resolvedParentId && entry.epicKey) {
+      resolvedParentId = epicIdByKey.get(entry.epicKey) ?? null;
+    }
+
+    if (resolvedParentId === child.id) continue; // guard against self-parent
+    if (resolvedParentId === child.parentId) continue; // no-op, already correct
+
+    await prisma.workItem.update({ where: { id: child.id }, data: { parentId: resolvedParentId } });
+  }
+}
+
+/**
  * A JQL query alone can't detect an issue that moved out of the tracked
  * project — it just stops matching. Anything active-but-untouched this run
  * gets its miss count bumped in externalMetadata; only soft-flagged inactive
@@ -567,6 +688,137 @@ async function reconcileMissingWorkItems(productId: string, runStartedAt: Date):
   }
 }
 
+const WORKLOG_LIST_CHUNK = 1000; // Atlassian's documented cap on /worklog/list's ids array per request
+const MAX_WORKLOG_PAGES = 1000; // safety cap against an unexpected pagination contract, not a realistic ceiling
+
+interface JiraWorklogIdPage {
+  values: Array<{ worklogId: number }>;
+  until: number;
+  lastPage: boolean;
+  nextPage?: string;
+}
+
+async function* fetchWorklogIdPages(client: JiraClient, endpoint: 'updated' | 'deleted', since: number): AsyncGenerator<number[]> {
+  let path: string | undefined = `/rest/api/3/worklog/${endpoint}?since=${since}`;
+  for (let pageCount = 0; path && pageCount < MAX_WORKLOG_PAGES; pageCount++) {
+    const page: JiraWorklogIdPage = await jiraFetch(client, path);
+    yield (page.values ?? []).map((v) => v.worklogId);
+    path = page.lastPage ? undefined : page.nextPage;
+  }
+}
+
+/**
+ * Site-wide, not per-project — Jira's worklog-sync endpoints (/worklog/
+ * updated, /worklog/list, /worklog/deleted) have no project filter, unlike
+ * issue search. Runs once per integration after every mapped product has
+ * synced (see syncAllProductsForIntegration's call site), not once per
+ * product, to avoid re-fetching and re-processing the same site-wide
+ * worklog set once per mapped project.
+ *
+ * Full backfill on first-ever sync (since=0), deliberately unlike the
+ * changelog watermark's "skip on first sync" posture elsewhere in this file
+ * — worklogs already sitting in Jira are the actual point of this feature,
+ * not a supplementary signal to accumulate going forward only.
+ *
+ * Re-reads Integration.externalMetadata fresh from the DB rather than
+ * trusting the `integration` param: getStoryPointsFieldId/getEpicLinkFieldId
+ * write to that same JSON column *during* the just-settled per-product
+ * syncProduct calls, and this function runs after all of them — merging the
+ * new watermark onto the caller's stale in-memory snapshot would silently
+ * erase those writes.
+ */
+async function syncWorklogs(integration: Integration): Promise<void> {
+  const accessToken = await ensureValidToken(integration);
+  const client: JiraClient = { cloudId: (integration.externalMetadata as any)?.cloudId, accessToken };
+  if (!client.cloudId) return;
+
+  const fresh = await prisma.integration.findUniqueOrThrow({ where: { id: integration.id } });
+  const metadata = (fresh.externalMetadata as Record<string, unknown>) ?? {};
+  const since = typeof metadata.worklogSyncWatermark === 'number' ? metadata.worklogSyncWatermark : 0;
+  // Captured before any fetches, not after — a watermark taken at completion
+  // would create a gap for anything logged in Jira while this run was in flight.
+  const syncStartedAt = Date.now();
+
+  const updatedIds: number[] = [];
+  for await (const ids of fetchWorklogIdPages(client, 'updated', since)) {
+    updatedIds.push(...ids);
+  }
+
+  const deletedIds: number[] = [];
+  for await (const ids of fetchWorklogIdPages(client, 'deleted', since)) {
+    deletedIds.push(...ids);
+  }
+
+  for (let i = 0; i < updatedIds.length; i += WORKLOG_LIST_CHUNK) {
+    const chunk = updatedIds.slice(i, i + WORKLOG_LIST_CHUNK);
+    const worklogs = await jiraFetch(client, '/rest/api/3/worklog/list', {
+      method: 'POST',
+      body: JSON.stringify({ ids: chunk }),
+    });
+    await persistWorklogs(integration.tenantId, Array.isArray(worklogs) ? worklogs : []);
+  }
+
+  if (deletedIds.length > 0) {
+    await prisma.workLog.deleteMany({
+      where: { externalSystem: 'jira', externalId: { in: deletedIds.map(String) } },
+    });
+  }
+
+  await prisma.integration.update({
+    where: { id: integration.id },
+    data: { externalMetadata: { ...metadata, worklogSyncWatermark: syncStartedAt } },
+  });
+}
+
+/**
+ * Resolves each worklog's issueId to an internal WorkItem tenant-wide (not
+ * product-scoped like persistWorkItemParents) — worklogs aren't fetched
+ * per-project, so an issue outside every mapped product is simply
+ * unresolvable here. Silently skipped, same best-effort posture as
+ * persistWorkItemLinks.
+ *
+ * authorEmail is taken only directly from the worklog payload, never
+ * looked up separately — Jira's per-user email-visibility privacy setting
+ * means even a dedicated /rest/api/3/user(/bulk) lookup can return no email
+ * for some real, active users (verified live against this integration), so
+ * paying for that extra call would be pure waste. authorName is always
+ * available and always stored; authorEmail is null for privacy-restricted
+ * authors, same accepted gap Commit.authorEmail already has elsewhere.
+ */
+async function persistWorklogs(tenantId: string, worklogs: any[]): Promise<void> {
+  if (worklogs.length === 0) return;
+
+  const issueIds = Array.from(new Set(worklogs.map((w) => String(w.issueId))));
+  const items = await prisma.workItem.findMany({
+    where: { tenantId, externalSystem: 'jira', externalId: { in: issueIds } },
+    select: { id: true, externalId: true },
+  });
+  const workItemIdByExternalId = new Map(items.map((i) => [i.externalId, i.id]));
+
+  for (const w of worklogs) {
+    const workItemId = workItemIdByExternalId.get(String(w.issueId));
+    if (!workItemId) continue;
+
+    const authorName = w.author?.displayName ?? null;
+    const authorEmail = w.author?.emailAddress ?? null;
+
+    await prisma.workLog.upsert({
+      where: { externalSystem_externalId: { externalSystem: 'jira', externalId: String(w.id) } },
+      create: {
+        tenantId, workItemId, authorName, authorEmail,
+        timeSpentSeconds: w.timeSpentSeconds,
+        startedAt: new Date(w.started),
+        externalSystem: 'jira', externalId: String(w.id),
+      },
+      update: {
+        authorName, authorEmail,
+        timeSpentSeconds: w.timeSpentSeconds,
+        startedAt: new Date(w.started),
+      },
+    });
+  }
+}
+
 export async function syncAllProductsForIntegration(integration: Integration): Promise<void> {
   await integrationService.recordSyncStart(integration.id);
 
@@ -585,6 +837,15 @@ export async function syncAllProductsForIntegration(integration: Integration): P
   });
 
   const results = await Promise.allSettled(products.map((p) => syncProduct(integration, p)));
+
+  try {
+    await syncWorklogs(integration);
+  } catch (err) {
+    // Worklogs are a secondary, additive signal — same resilience posture as
+    // embeddings/board-lookup elsewhere in this file — never fail the whole
+    // integration sync over it.
+    console.error(`Worklog sync failed for integration ${integration.id}, continuing:`, err);
+  }
 
   const errors = results
     .map((r, i) => (r.status === 'rejected' ? `${products[i].name}: ${r.reason}` : null))

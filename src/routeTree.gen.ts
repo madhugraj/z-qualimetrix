@@ -15,6 +15,7 @@ import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as BacklogRouteImport } from './routes/backlog'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
+import { Route as EpicsRouteImport } from './routes/epics'
 import { Route as InfraSpendRouteImport } from './routes/infra-spend'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -54,6 +55,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
   id: '/engineering-health',
   path: '/engineering-health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EpicsRoute = EpicsRouteImport.update({
+  id: '/epics',
+  path: '/epics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InfraSpendRoute = InfraSpendRouteImport.update({
@@ -114,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/epics': typeof EpicsRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -132,6 +139,7 @@ export interface FileRoutesByTo {
   '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/epics': typeof EpicsRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -151,6 +159,7 @@ export interface FileRoutesById {
   '/backlog': typeof BacklogRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
+  '/epics': typeof EpicsRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -171,6 +180,7 @@ export interface FileRouteTypes {
     | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/epics'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -189,6 +199,7 @@ export interface FileRouteTypes {
     | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/epics'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -207,6 +218,7 @@ export interface FileRouteTypes {
     | '/backlog'
     | '/dashboard'
     | '/engineering-health'
+    | '/epics'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -226,6 +238,7 @@ export interface RootRouteChildren {
   BacklogRoute: typeof BacklogRoute
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
+  EpicsRoute: typeof EpicsRoute
   InfraSpendRoute: typeof InfraSpendRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -280,6 +293,13 @@ declare module '@tanstack/react-router' {
       path: '/engineering-health'
       fullPath: '/engineering-health'
       preLoaderRoute: typeof EngineeringHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/epics': {
+      id: '/epics'
+      path: '/epics'
+      fullPath: '/epics'
+      preLoaderRoute: typeof EpicsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/infra-spend': {
@@ -362,6 +382,7 @@ const rootRouteChildren: RootRouteChildren = {
   BacklogRoute: BacklogRoute,
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
+  EpicsRoute: EpicsRoute,
   InfraSpendRoute: InfraSpendRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,

@@ -67,7 +67,7 @@ export class WorkItemController extends BaseController {
     else if (scope.tenantId) where.tenantId = scope.tenantId;
 
     // Add filters (productId already resolved above via resolveWorkItemScope)
-    const filters = this.getFilters(req, ['type', 'priority', 'sprintId', 'assigneeId']);
+    const filters = this.getFilters(req, ['type', 'priority', 'sprintId', 'assigneeId', 'parentId']);
     Object.assign(where, filters);
 
     // Labels use Prisma's array-contains-any, not the plain-equality

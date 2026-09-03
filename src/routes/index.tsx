@@ -7,6 +7,7 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/qm/ThemeToggle";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -196,7 +197,7 @@ function DashboardMockup() {
 
 function Landing() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background">
+    <div className="qm-page-canvas relative min-h-screen overflow-hidden bg-background transition-colors duration-300">
       <div
         className="gloss-bloom -top-40 -left-32 h-[34rem] w-[34rem]"
         style={{ background: "radial-gradient(circle, oklch(0.82 0.11 70 / 45%), transparent 70%)" }}
@@ -233,6 +234,7 @@ function Landing() {
             >
               Results
             </a>
+            <ThemeToggle />
             <Link
               to="/login"
               className="gloss-cta inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold"

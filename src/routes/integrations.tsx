@@ -507,6 +507,10 @@ function Integrations() {
                     {selectedJiraUsers.length === jiraUsers.length && jiraUsers.length ? "Clear all" : "Select all"}
                   </button>
                 </div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Selected users' activity is included in per-person analytics like Engineering Health — deselecting
+                  someone doesn't remove their synced work items anywhere else.
+                </p>
                 <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
                   {jiraUsers.map((jiraUser) => (
                     <label key={jiraUser.accountId} className="flex cursor-pointer items-center gap-3 rounded-xl border border-glass-border/60 p-3 text-sm">

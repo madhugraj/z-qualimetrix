@@ -123,6 +123,109 @@
 
 
 
+/* ---------------------------------------------------------------
+ * Yavar brand theme — flat, clean look matching yavar.ai (white
+ * canvas, near-black ink, indigo/violet #584DFF accent). Applied as
+ * `.qm-yavar` on <html> app-wide (marketing pages and the signed-in
+ * product) via the Glass/Yavar toggle in ThemeToggle. Both the
+ * landing/login `.gloss*` utilities and the app shell's `.glass*`
+ * utilities are flattened underneath this scope to match yavar.ai's
+ * flat cards.
+ * --------------------------------------------------------------- */
+.qm-yavar {
+  --background: oklch(1 0 0);
+  --gradient-aurora: none;
+  --foreground: oklch(0.24 0.006 255);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.006 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.006 255);
+  --primary: oklch(0.55 0.25 277);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.97 0.003 255);
+  --secondary-foreground: oklch(0.24 0.006 255);
+  --muted: oklch(0.96 0.003 255);
+  --muted-foreground: oklch(0.55 0.006 255);
+  --accent: oklch(0.94 0.03 277);
+  --accent-foreground: oklch(0.32 0.08 277);
+  --good: oklch(0.55 0.055 195);
+  --warning: oklch(0.72 0.085 88);
+  --critical: oklch(0.44 0.075 35);
+  --ops: oklch(0.42 0.045 255);
+  --border: oklch(0.24 0.006 255 / 10%);
+  --input: oklch(0.24 0.006 255 / 14%);
+  --ring: oklch(0.55 0.25 277 / 45%);
+  --glass: oklch(1 0 0 / 96%);
+  --glass-border: oklch(0.24 0.006 255 / 9%);
+  --shadow-glass: 0 1px 2px oklch(0.24 0.006 255 / 6%);
+  background-color: var(--background);
+  background-image: none;
+  color: var(--foreground);
+}
+
+/* Mild dot-grid texture, like yavar.ai's hero canvas — sits on `body` so it
+ * shows through the open space around cards on every page, and stays put
+ * (not swapped per-route) since `body` is shared across the whole app. */
+.qm-yavar body,
+.qm-yavar .qm-page-canvas {
+  background-image: radial-gradient(circle, oklch(0.24 0.006 255 / 22%) 1.4px, transparent 1.6px);
+  background-size: 24px 24px;
+  background-position: 0 0;
+}
+
+.qm-yavar .gloss-bloom {
+  opacity: 0;
+}
+
+.qm-yavar .gloss,
+.qm-yavar .gloss-hover {
+  backdrop-filter: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px oklch(0.24 0.006 255 / 5%);
+}
+
+.qm-yavar .gloss::before {
+  content: none;
+}
+
+.qm-yavar .gloss-hover:hover {
+  transform: translateY(-2px);
+  background: var(--card);
+  border-color: var(--border);
+  box-shadow: 0 10px 24px -8px oklch(0.24 0.006 255 / 12%);
+}
+
+.qm-yavar .gloss-cta {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  box-shadow: none;
+}
+
+.qm-yavar .gloss-cta:hover {
+  background: color-mix(in oklab, var(--primary) 88%, black);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.qm-yavar .text-gradient {
+  background: none;
+  -webkit-background-clip: unset;
+  background-clip: unset;
+  color: var(--primary);
+}
+
+.qm-yavar .glass,
+.qm-yavar .glass-hover {
+  backdrop-filter: none;
+  background: var(--card);
+  box-shadow: 0 1px 2px oklch(0.24 0.006 255 / 5%);
+}
+
+.qm-yavar .glass-hover:hover {
+  background: var(--muted);
+}
+
 .light {
   --background: oklch(0.96 0.012 210);
   --foreground: oklch(0.24 0.035 230);

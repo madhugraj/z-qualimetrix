@@ -11,11 +11,13 @@ import {
   FolderKanban,
   ListTodo,
   Cpu,
+  Layers,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { GlobalSearch } from "@/components/qm/GlobalSearch";
 import { NotificationsBell } from "@/components/qm/NotificationsBell";
 import { AssistantWidget } from "@/components/qm/AssistantWidget";
+import { ThemeToggle } from "@/components/qm/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 
@@ -26,6 +28,7 @@ import { useAuth } from "@/lib/auth-context";
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/projects", label: "Projects", icon: FolderKanban, roles: ["pm", "executive"] },
+  { to: "/epics", label: "Epics", icon: Layers, roles: ["pm", "executive"] },
   { to: "/backlog", label: "Backlog", icon: ListTodo },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
@@ -86,7 +89,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="glass sticky top-0 z-20 flex items-center gap-2 rounded-none border-x-0 border-t-0 px-3 py-2 md:px-7 md:py-3">
           <GlobalSearch />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             <NotificationsBell />
           </div>
         </div>

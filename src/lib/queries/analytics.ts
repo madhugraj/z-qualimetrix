@@ -200,6 +200,51 @@ export function useRequirementTraceability(productId?: string, enabled: boolean 
   });
 }
 
+export type EpicHealth = "on_track" | "at_risk" | "blocked";
+
+export interface EpicRollupRow {
+  id: string;
+  externalId: string | null;
+  title: string;
+  status: string;
+  externalStatusName: string | null;
+  productId: string;
+  productName: string;
+  updatedAt: string;
+  totalChildren: number;
+  childCounts: Record<string, number>;
+  percentComplete: number | null;
+  pointsComplete: { done: number; total: number; percent: number } | null;
+  timeComplete: { spentSeconds: number; estimateSeconds: number; percent: number } | null;
+  health: EpicHealth;
+}
+
+export interface EpicRollupsSummary {
+  totalEpics: number;
+  epicsWithNoChildren: number;
+  avgPercentComplete: number | null;
+  byHealth: Record<EpicHealth, number>;
+  byStatus: Record<string, number>;
+  byProgressBucket: { no_data: number; "0-25": number; "25-50": number; "50-75": number; "75-100": number };
+}
+
+export interface EpicRollupsResult {
+  epics: EpicRollupRow[];
+  summary: EpicRollupsSummary;
+  hasData: boolean;
+}
+
+export function useEpicRollups(productId?: string, enabled: boolean = true, limit?: number) {
+  return useQuery({
+    queryKey: ["analytics-epic-rollups", productId, limit],
+    queryFn: () =>
+      fetchAnalytics<EpicRollupsResult>(
+        withParams("/analytics/epics", { productId, limit: limit?.toString() })
+      ),
+    enabled,
+  });
+}
+
 export interface ReleaseReadinessResult {
   overallScore: number;
   components: {

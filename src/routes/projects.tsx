@@ -3,7 +3,7 @@ import { useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { useCurrentProduct } from "@/lib/product-context";
-import { useProjectsOverview, type ProjectOverviewRow } from "@/lib/queries/analytics";
+import { useProjectsOverview, useEpicRollups, type ProjectOverviewRow } from "@/lib/queries/analytics";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/projects")({
@@ -91,6 +91,7 @@ function ProjectsPage() {
   const navigate = useNavigate();
   const { setCurrentProductId } = useCurrentProduct();
   const overview = useProjectsOverview();
+  const epicRollups = useEpicRollups(undefined, true, 5);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
@@ -254,6 +255,46 @@ function ProjectsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </GlassPanel>
+
+      <GlassPanel title="Epic progress" subtitle="Most recently updated epics, across every project" className="mt-5">
+        {epicRollups.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading epics…</p>
+        ) : epicRollups.isError ? (
+          <div className="text-sm text-muted-foreground">
+            Couldn't load epic progress.{" "}
+            <button type="button" className="text-primary hover:underline" onClick={() => epicRollups.refetch()}>
+              Retry
+            </button>
+          </div>
+        ) : !epicRollups.data?.epics.length ? (
+          <p className="text-sm text-muted-foreground">No epics synced yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {epicRollups.data.epics.map((epic) => (
+              <div key={epic.id} className="flex items-center justify-between gap-4 border-t border-glass-border/60 pt-3 first:border-t-0 first:pt-0">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">
+                    {epic.externalId ?? epic.id} · {epic.title}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {epic.productName} · {epic.totalChildren} {epic.totalChildren === 1 ? "child item" : "child items"}
+                  </p>
+                </div>
+                {epic.percentComplete === null ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">—</span>
+                ) : (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="h-1.5 w-16 overflow-hidden rounded-full bg-border">
+                      <span className="block h-full rounded-full bg-primary" style={{ width: `${epic.percentComplete}%` }} />
+                    </span>
+                    <span className="text-xs text-muted-foreground">{epic.percentComplete}%</span>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </GlassPanel>

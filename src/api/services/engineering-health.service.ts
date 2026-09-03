@@ -39,6 +39,16 @@ export interface DeveloperHealthProfile {
   p0p1Load: number;
   /** null when hasActivityData is false — never a silently-healthy-looking 0. */
   burnoutIndex: number | null;
+  /**
+   * Real Jira worklog seconds (jira-sync.service.ts's syncWorklogs), matched
+   * to this developer by case-insensitive email — same join style as the
+   * commits query above, and the same accepted gap: a worklog author whose
+   * Jira account has its email set private never matches here. Independent
+   * of hasActivityData on purpose — a developer can log real worklog hours
+   * directly without a matching commit or Jira status transition in the
+   * window, so gating this behind that flag would hide real data.
+   */
+  hoursLoggedSeconds: number;
 }
 
 export const BURNOUT_FORMULA_LABEL =
@@ -60,8 +70,23 @@ export async function getDeveloperHealthProfiles(tenantId: string): Promise<Deve
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
   const timeZone = (tenant?.settings as { timezone?: string } | null)?.timezone || 'UTC';
 
+  // Jira's "Choose Jira analytics scope" picker (Integrations page) lets a PM
+  // narrow which people show up in per-person analytics like this roster —
+  // deliberately independent of what's synced (Backlog/Bug Intelligence/
+  // Projects always show everything). Absent or empty selection = no
+  // restriction; an empty selection must never silently hide every
+  // developer, which would look identical to a regression.
+  const jiraIntegration = await prisma.integration.findFirst({
+    where: { tenantId, provider: 'jira' },
+    select: { externalMetadata: true },
+  });
+  const selectedUserEmails = (jiraIntegration?.externalMetadata as { selectedUserEmails?: string[] } | null)?.selectedUserEmails ?? [];
+
   const developers = await prisma.user.findMany({
-    where: { tenantId, role: 'developer', isActive: true },
+    where: {
+      tenantId, role: 'developer', isActive: true,
+      ...(selectedUserEmails.length > 0 ? { email: { in: selectedUserEmails } } : {}),
+    },
     select: { id: true, name: true, email: true, squad: true, role: true },
   });
 
@@ -69,7 +94,7 @@ export async function getDeveloperHealthProfiles(tenantId: string): Promise<Deve
 
   return Promise.all(
     developers.map(async (dev): Promise<DeveloperHealthProfile> => {
-      const [commits, jiraActivity, p0p1Load] = await Promise.all([
+      const [commits, jiraActivity, p0p1Load, worklogAgg] = await Promise.all([
         prisma.commit.findMany({
           where: { tenantId, authoredAt: { gte: since }, authorEmail: { equals: dev.email, mode: 'insensitive' } },
           select: { authoredAt: true },
@@ -88,7 +113,12 @@ export async function getDeveloperHealthProfiles(tenantId: string): Promise<Deve
             status: { in: ['open', 'in_progress'] },
           },
         }),
+        prisma.workLog.aggregate({
+          where: { tenantId, authorEmail: { equals: dev.email, mode: 'insensitive' }, startedAt: { gte: since } },
+          _sum: { timeSpentSeconds: true },
+        }),
       ]);
+      const hoursLoggedSeconds = worklogAgg._sum.timeSpentSeconds ?? 0;
 
       const events = [...commits.map((c) => c.authoredAt), ...jiraActivity.map((a) => a.occurredAt)];
       const hasActivityData = events.length > 0;
@@ -126,6 +156,7 @@ export async function getDeveloperHealthProfiles(tenantId: string): Promise<Deve
         weekendActivityPct,
         p0p1Load,
         burnoutIndex,
+        hoursLoggedSeconds,
       };
     })
   );

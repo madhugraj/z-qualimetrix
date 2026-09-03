@@ -17,6 +17,10 @@ const bandStyle: Record<HealthBand, string> = {
   "at-risk": "text-critical border-critical/40 bg-critical/10",
 };
 
+function formatHours(seconds: number): string {
+  return `${(seconds / 3600).toFixed(1)}h`;
+}
+
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-glass-border px-3 py-2">
@@ -74,10 +78,11 @@ export function DeveloperProfileCard({ dev, burnoutFormula }: { dev: DeveloperHe
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3 grid grid-cols-4 gap-2">
             <Stat label="After hours" value={`${dev.afterHoursPct}%`} />
             <Stat label="P0/P1 held" value={String(dev.p0p1Load)} />
             <Stat label="Weekend activity" value={String(dev.weekendActivityCount)} />
+            <Stat label="Hours logged" value={formatHours(dev.hoursLoggedSeconds)} />
           </div>
           <p className="mt-2 text-[10px] text-muted-foreground">
             Based on the last 30 days:{" "}
@@ -92,8 +97,9 @@ export function DeveloperProfileCard({ dev, burnoutFormula }: { dev: DeveloperHe
         </>
       ) : (
         <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-1 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <Stat label="P0/P1 held" value={String(dev.p0p1Load)} />
+            <Stat label="Hours logged" value={formatHours(dev.hoursLoggedSeconds)} />
           </div>
           <p className="rounded-xl bg-accent/30 p-2.5 text-[11px] leading-relaxed text-muted-foreground">
             No activity data — this account's email doesn't match any GitHub commit author or Jira changelog entry in the last
