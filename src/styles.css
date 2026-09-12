@@ -168,7 +168,7 @@
  * (not swapped per-route) since `body` is shared across the whole app. */
 .qm-yavar body,
 .qm-yavar .qm-page-canvas {
-  background-image: radial-gradient(circle, oklch(0.24 0.006 255 / 22%) 1.4px, transparent 1.6px);
+  background-image: radial-gradient(circle, oklch(0.24 0.006 255 / 8%) 1px, transparent 1px);
   background-size: 24px 24px;
   background-position: 0 0;
 }

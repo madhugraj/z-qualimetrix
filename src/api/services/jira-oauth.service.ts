@@ -10,6 +10,29 @@
  * must be added as a permission for this app at
  * developer.atlassian.com/console/myapps, and every tenant with an existing
  * Jira connection must re-authorize — old tokens won't carry the new scopes.
+ *
+ * read:project:jira is required *in addition to* read:board-scope:jira-software
+ * for GET /rest/agile/1.0/board specifically (confirmed against Atlassian's
+ * own API reference — board-scope alone 401s with "scope does not match"
+ * even though token introspection shows board-scope/sprint present).
+ *
+ * The two read:*:confluence scopes below piggyback Confluence Cloud access
+ * onto this SAME app/consent screen (deliberate — see
+ * confluence-sync.service.ts's file comment for why) rather than a second,
+ * independently-registered Atlassian app. This requires "Confluence API" to
+ * also be added as a permission for this app at
+ * developer.atlassian.com/console/myapps, and every tenant with an existing
+ * Jira connection must re-authorize once more to pick these up — same
+ * one-time cost as the board/sprint scopes above.
+ *
+ * These are GRANULAR scopes (read:space:confluence, read:page:confluence),
+ * not the classic read:confluence-space.summary/read:confluence-content.all
+ * this file originally shipped with — confirmed live against a real site
+ * that Confluence's classic-scoped v1 REST API (/wiki/rest/api/space,
+ * /wiki/rest/api/content) returns 410 Gone (retired by Atlassian), and its
+ * replacement v2 API (/wiki/api/v2/...) 401s ("scope does not match") on
+ * the classic scopes — it only accepts the granular ones. Must be selected
+ * under the Developer Console's "Granular scopes" tab, not "Classic scopes".
  */
 
 const AUTHORIZE_URL = 'https://auth.atlassian.com/authorize';
@@ -19,8 +42,11 @@ const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessib
 const SCOPES = [
   'read:jira-work',
   'read:jira-user',
+  'read:project:jira',
   'read:board-scope:jira-software',
   'read:sprint:jira-software',
+  'read:space:confluence',
+  'read:page:confluence',
   'offline_access',
 ].join(' ');
 
@@ -36,6 +62,11 @@ export interface JiraTokenResult {
   accessToken: string;
   refreshToken: string | null;
   expiresAt: Date;
+  /** Atlassian can silently grant a subset of the requested `SCOPES` (e.g. if
+   * the Developer Console app lacks the Jira Software API permission) — this
+   * is the space-separated `scope` the token response actually returned, not
+   * an assumption of what was requested. Empty if Atlassian omits the field. */
+  scope: string[];
 }
 
 export interface JiraAccessibleResource {
@@ -84,6 +115,7 @@ class JiraOAuthService {
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? null,
       expiresAt: new Date(Date.now() + data.expires_in * 1000),
+      scope: typeof data.scope === 'string' ? data.scope.split(' ').filter(Boolean) : [],
     };
   }
 
@@ -113,6 +145,7 @@ class JiraOAuthService {
       // only if the response omits a new one (shouldn't normally happen).
       refreshToken: data.refresh_token ?? refreshToken,
       expiresAt: new Date(Date.now() + data.expires_in * 1000),
+      scope: typeof data.scope === 'string' ? data.scope.split(' ').filter(Boolean) : [],
     };
   }
 

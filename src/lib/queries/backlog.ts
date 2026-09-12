@@ -15,6 +15,10 @@ export interface BacklogListParams {
   productId?: string;
   type?: string;
   priority?: string;
+  /** Defaults to "open,in_progress" (the whole backlog) when omitted — pass a single status to narrow to just that one. */
+  status?: string;
+  /** Real Jira accountId / Azure DevOps identity id, or the literal "unassigned" for no assignee. */
+  externalAssigneeId?: string;
   search?: string;
   page?: number;
   limit?: number;
@@ -28,10 +32,11 @@ export interface BacklogListResponse {
 }
 
 function buildBacklogPath(params: BacklogListParams): string {
-  const q = new URLSearchParams({ status: "open,in_progress" });
+  const q = new URLSearchParams({ status: params.status ?? "open,in_progress" });
   if (params.productId) q.set("productId", params.productId);
   if (params.type) q.set("type", params.type);
   if (params.priority) q.set("priority", params.priority);
+  if (params.externalAssigneeId) q.set("externalAssigneeId", params.externalAssigneeId);
   if (params.search) q.set("search", params.search);
   if (params.page) q.set("page", String(params.page));
   if (params.limit) q.set("limit", String(params.limit));
@@ -52,7 +57,9 @@ export interface BacklogSummary {
   total: number;
   byPriority: Record<string, number>;
   byType: Record<string, number>;
+  byStatus: Record<string, number>;
   oldestCreatedAt: string | null;
+  unassignedCriticalHigh: number;
   hasData: boolean;
 }
 

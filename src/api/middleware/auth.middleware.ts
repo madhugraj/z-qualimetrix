@@ -21,6 +21,7 @@ export interface AuthenticatedUser {
   tenantId: string | null;
   role: string;
   email: string;
+  name: string | null;
   isActive: boolean;
 }
 
@@ -59,7 +60,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ success: false, error: 'Account not found or deactivated' });
     }
 
-    req.user = { id: user.id, tenantId: user.tenantId, role: user.role, email: user.email, isActive: user.isActive };
+    req.user = { id: user.id, tenantId: user.tenantId, role: user.role, email: user.email, name: user.name, isActive: user.isActive };
     next();
   } catch (error) {
     console.error('Error in requireAuth:', error);

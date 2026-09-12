@@ -40,16 +40,25 @@ interface GitHubRepo {
 
 interface ProviderStatus {
   isConnected: boolean;
+  status?: string;
   connectedAccountLabel?: string | null;
   lastSyncedAt?: string | null;
   externalMetadata?: {
     selectedProjectIds?: string[];
     selectedUserAccountIds?: string[];
   };
+  scopes?: string[];
 }
+
+// Confluence rides Jira's OAuth consent screen (jira-oauth.service.ts's
+// SCOPES comment) — a Jira connection made before Confluence's scopes were
+// added simply won't have any of these in its stored `scopes`, which is the
+// only way to tell "needs one more re-auth" apart from "never connected".
+const CONFLUENCE_SCOPE_MARKER = "read:page:confluence";
 
 interface JiraProject { id: string; key: string; name: string }
 interface JiraUser { accountId: string; displayName: string; emailAddress: string | null; avatarUrl: string | null }
+interface AdoProject { id: string; key: string; name: string }
 
 function timeAgo(iso?: string | null): string {
   if (!iso) return '—';
@@ -72,6 +81,12 @@ function Integrations() {
   const [connectingGithub, setConnectingGithub] = useState(false);
   const [jiraStatus, setJiraStatus] = useState<ProviderStatus>({ isConnected: false });
   const [adoStatus, setAdoStatus] = useState<ProviderStatus>({ isConnected: false });
+  const [confluenceStatus, setConfluenceStatus] = useState<ProviderStatus>({ isConnected: false });
+  const [syncingConfluence, setSyncingConfluence] = useState(false);
+  const [confluenceSpaces, setConfluenceSpaces] = useState<Array<{ key: string; name: string; spaceType: string | null; isSelected: boolean }>>([]);
+  const [selectedConfluenceSpaces, setSelectedConfluenceSpaces] = useState<string[]>([]);
+  const [loadingConfluenceSpaces, setLoadingConfluenceSpaces] = useState(false);
+  const [savingConfluenceSelection, setSavingConfluenceSelection] = useState(false);
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
   const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
   const [jiraUsers, setJiraUsers] = useState<JiraUser[]>([]);
@@ -79,6 +94,10 @@ function Integrations() {
   const [selectedJiraUsers, setSelectedJiraUsers] = useState<string[]>([]);
   const [loadingJiraDiscovery, setLoadingJiraDiscovery] = useState(false);
   const [savingJiraSelection, setSavingJiraSelection] = useState(false);
+  const [adoProjects, setAdoProjects] = useState<AdoProject[]>([]);
+  const [selectedAdoProjects, setSelectedAdoProjects] = useState<string[]>([]);
+  const [loadingAdoDiscovery, setLoadingAdoDiscovery] = useState(false);
+  const [savingAdoSelection, setSavingAdoSelection] = useState(false);
 
   // GitHub credential lives server-side only now — never synced into
   // localStorage or read directly from the browser (see github.controller.ts
@@ -133,8 +152,76 @@ function Integrations() {
       .finally(() => setLoadingJiraDiscovery(false));
   }, [jiraStatus.isConnected, tenantId]);
 
+  useEffect(() => {
+    if (!adoStatus.isConnected) {
+      setAdoProjects([]);
+      return;
+    }
+
+    setSelectedAdoProjects(adoStatus.externalMetadata?.selectedProjectIds ?? []);
+    setLoadingAdoDiscovery(true);
+    fetch(`${API_V1_URL}/integrations/azure_devops/projects`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((projectsData) => {
+        if (projectsData.success) setAdoProjects(projectsData.data);
+        else toast.error("Azure DevOps projects could not be loaded");
+      })
+      .catch((error) => {
+        console.error("Failed to discover Azure DevOps projects:", error);
+        toast.error("Couldn't load Azure DevOps projects");
+      })
+      .finally(() => setLoadingAdoDiscovery(false));
+  }, [adoStatus.isConnected, tenantId]);
+
   function toggleSelection(id: string, selected: string[], setter: (value: string[]) => void) {
     setter(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+  }
+
+  const confluenceScopesReady = jiraStatus.isConnected && !!jiraStatus.scopes?.includes(CONFLUENCE_SCOPE_MARKER);
+
+  useEffect(() => {
+    if (!confluenceScopesReady) {
+      setConfluenceSpaces([]);
+      return;
+    }
+
+    setLoadingConfluenceSpaces(true);
+    fetch(`${API_V1_URL}/integrations/confluence/spaces`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setConfluenceSpaces(data.data);
+          setSelectedConfluenceSpaces(data.data.filter((s: { isSelected: boolean }) => s.isSelected).map((s: { key: string }) => s.key));
+        } else {
+          toast.error("Confluence spaces could not be loaded");
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to discover Confluence spaces:", error);
+        toast.error("Couldn't load Confluence spaces");
+      })
+      .finally(() => setLoadingConfluenceSpaces(false));
+  }, [confluenceScopesReady]);
+
+  async function saveConfluenceSpaceSelection() {
+    setSavingConfluenceSelection(true);
+    try {
+      const response = await fetch(`${API_V1_URL}/integrations/confluence/selection`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ spaceKeys: selectedConfluenceSpaces }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Failed to save Confluence space selection");
+      toast.success("Confluence spaces saved — the next sync will pick up their pages");
+    } catch (error) {
+      toast.error("Couldn't save Confluence space selection", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSavingConfluenceSelection(false);
+    }
   }
 
   async function saveJiraConfiguration() {
@@ -156,7 +243,17 @@ function Integrations() {
           selectedUserAccountIds: selectedJiraUsers,
         },
       }));
-      toast.success("Jira analytics scope saved");
+      const unresolved = data.data?.unresolvedUsers as Array<{ accountId: string; displayName: string }> | undefined;
+      if (unresolved?.length) {
+        // Not a transient failure — that person's Jira account has email
+        // visibility set to private, which Jira's API has no way to
+        // override, so retrying or reselecting won't change this.
+        toast.warning(`Saved, but ${unresolved.length} selected user${unresolved.length === 1 ? "" : "s"} won't appear in analytics`, {
+          description: `${unresolved.map((u) => u.displayName).join(", ")} — their email is hidden by Jira's privacy setting, not an error on this end.`,
+        });
+      } else {
+        toast.success("Jira analytics scope saved");
+      }
     } catch (error) {
       toast.error("Couldn't save Jira analytics scope", {
         description: error instanceof Error ? error.message : undefined,
@@ -166,8 +263,33 @@ function Integrations() {
     }
   }
 
+  async function saveAdoConfiguration() {
+    setSavingAdoSelection(true);
+    try {
+      const response = await fetch(`${API_V1_URL}/integrations/azure_devops/selection`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ projectIds: selectedAdoProjects }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Failed to save Azure DevOps selection");
+      setAdoStatus((current) => ({
+        ...current,
+        externalMetadata: { ...current.externalMetadata, selectedProjectIds: selectedAdoProjects },
+      }));
+      toast.success("Azure DevOps projects saved");
+    } catch (error) {
+      toast.error("Couldn't save Azure DevOps projects", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSavingAdoSelection(false);
+    }
+  }
+
   useEffect(() => {
-    const fetchProviderStatus = async (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) => {
+    const fetchProviderStatus = async (provider: "jira" | "azure_devops" | "confluence", setter: (s: ProviderStatus) => void) => {
       try {
         const response = await fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" });
         const data = await response.json();
@@ -179,6 +301,7 @@ function Integrations() {
 
     fetchProviderStatus("jira", setJiraStatus);
     fetchProviderStatus("azure_devops", setAdoStatus);
+    fetchProviderStatus("confluence", setConfluenceStatus);
   }, [tenantId]);
 
   // Connect opens the OAuth flow in a separate tab (see handleProviderAction) —
@@ -186,17 +309,53 @@ function Integrations() {
   // signal we get about what happened in the other tab.
   useEffect(() => {
     function onFocus() {
-      const refetch = (provider: "jira" | "azure_devops", setter: (s: ProviderStatus) => void) =>
+      const refetch = (provider: "jira" | "azure_devops" | "confluence", setter: (s: ProviderStatus) => void) =>
         fetch(`${API_V1_URL}/integrations/${provider}/status`, { credentials: "include" })
           .then((r) => r.json())
           .then((d) => { if (d.success) setter(d.data); })
           .catch((error) => console.error(`Failed to check ${provider} status:`, error));
       refetch("jira", setJiraStatus);
       refetch("azure_devops", setAdoStatus);
+      refetch("confluence", setConfluenceStatus);
     }
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [tenantId]);
+
+  async function handleConfluenceSync() {
+    setSyncingConfluence(true);
+    try {
+      const response = await fetch(`${API_V1_URL}/integrations/confluence/sync`, { method: "POST", credentials: "include" });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Sync failed to start");
+      toast.success("Confluence sync started");
+      setTimeout(() => {
+        fetch(`${API_V1_URL}/integrations/confluence/status`, { credentials: "include" })
+          .then((r) => r.json())
+          .then((d) => { if (d.success) setConfluenceStatus(d.data); });
+      }, 2000);
+    } catch (error) {
+      toast.error("Couldn't sync Confluence", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSyncingConfluence(false);
+    }
+  }
+
+  async function handleConfluenceDisconnect() {
+    try {
+      const response = await fetch(`${API_V1_URL}/integrations/confluence`, { method: "DELETE", credentials: "include" });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error ?? "Failed to disconnect");
+      setConfluenceStatus({ isConnected: false });
+      toast.success("Confluence disconnected");
+    } catch (error) {
+      toast.error("Couldn't disconnect Confluence", {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
 
   async function handleProviderAction(provider: "jira" | "azure_devops", isConnected: boolean) {
     const providerLabel = provider === "jira" ? "Jira" : "Azure DevOps";
@@ -330,6 +489,7 @@ function Integrations() {
     if (integration.name === "Jira Cloud") {
       return {
         ...integration,
+        detail: "OAuth 2.0 · REST API v3 · scheduled sync · also connects Confluence Cloud read access",
         status: jiraStatus.isConnected ? "Connected" : "Not configured",
         synced: jiraStatus.isConnected ? timeAgo(jiraStatus.lastSyncedAt) : "—",
       };
@@ -533,6 +693,160 @@ function Integrations() {
           )}
         </GlassPanel>
       )}
+
+      {adoStatus.isConnected && (
+        <GlassPanel
+          title="Choose Azure DevOps projects to sync"
+          subtitle="Projects are discovered automatically from the connected organization. Each selected project becomes a product, synced in full by default."
+          className="mt-4"
+        >
+          {loadingAdoDiscovery ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading Azure DevOps projects…
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold"><FolderKanban className="h-4 w-4 text-primary" /> Projects</div>
+                  <button type="button" className="text-xs text-primary" onClick={() => setSelectedAdoProjects(selectedAdoProjects.length === adoProjects.length ? [] : adoProjects.map((p) => p.id))}>
+                    {selectedAdoProjects.length === adoProjects.length && adoProjects.length ? "Clear all" : "Select all"}
+                  </button>
+                </div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  A selected project syncs its entire work-item tree (all area paths) by default. To scope a product
+                  to one specific team's area path instead, edit that product's Azure DevOps mapping afterward.
+                </p>
+                <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+                  {adoProjects.map((project) => (
+                    <label key={project.id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-glass-border/60 p-3 text-sm">
+                      <input type="checkbox" checked={selectedAdoProjects.includes(project.id)} onChange={() => toggleSelection(project.id, selectedAdoProjects, setSelectedAdoProjects)} className="accent-primary" />
+                      <span className="font-medium">{project.name}</span>
+                    </label>
+                  ))}
+                  {!adoProjects.length && <p className="text-sm text-muted-foreground">No accessible Azure DevOps projects found.</p>}
+                </div>
+              </section>
+
+              <p className="text-xs text-muted-foreground">
+                Azure DevOps doesn't expose a per-person time-log API like Jira's, so per-person cost and utilization
+                tracking isn't available for projects synced from here — everything else (backlog, bugs, epics, cycle
+                time) works the same as Jira.
+              </p>
+
+              <div className="flex items-center justify-between border-t border-glass-border/60 pt-4">
+                <p className="text-xs text-muted-foreground">{selectedAdoProjects.length} projects selected</p>
+                <button type="button" onClick={saveAdoConfiguration} disabled={savingAdoSelection} className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60">
+                  {savingAdoSelection && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save selection
+                </button>
+              </div>
+            </div>
+          )}
+        </GlassPanel>
+      )}
+
+      <GlassPanel
+        title="Confluence Cloud"
+        subtitle="Connects via your Jira sign-in — no separate OAuth step"
+        className="mt-4"
+      >
+        {!jiraStatus.isConnected ? (
+          <p className="text-sm text-muted-foreground">Connect Jira above to enable Confluence.</p>
+        ) : !jiraStatus.scopes?.includes(CONFLUENCE_SCOPE_MARKER) ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm">
+            <p>
+              Confluence sync isn&apos;t enabled yet — your Jira connection predates it. Re-authorize to add
+              Confluence (no data is lost).
+            </p>
+            <button
+              type="button"
+              onClick={() => handleProviderAction("jira", false)}
+              className="shrink-0 rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
+            >
+              Re-authorize Jira
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Status: <span className="font-medium text-foreground">{confluenceStatus.isConnected ? "Connected" : "Not yet synced"}</span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Last sync: {timeAgo(confluenceStatus.lastSyncedAt)}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleConfluenceSync}
+                  className="flex items-center gap-1.5 rounded-full bg-primary/15 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/25"
+                >
+                  {syncingConfluence ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.8} /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.8} />}
+                  Sync now
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfluenceDisconnect}
+                  className="rounded-full px-3 py-1.5 text-xs font-medium text-critical transition-colors hover:bg-critical/10"
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t border-glass-border/60 pt-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold">Spaces to sync</p>
+                {confluenceSpaces.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-primary"
+                    onClick={() => setSelectedConfluenceSpaces(selectedConfluenceSpaces.length === confluenceSpaces.length ? [] : confluenceSpaces.map((s) => s.key))}
+                  >
+                    {selectedConfluenceSpaces.length === confluenceSpaces.length ? "Clear all" : "Select all"}
+                  </button>
+                )}
+              </div>
+              {loadingConfluenceSpaces ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading Confluence spaces…
+                </div>
+              ) : (
+                <>
+                  <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+                    {confluenceSpaces.map((space) => (
+                      <label key={space.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-glass-border/60 p-3 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedConfluenceSpaces.includes(space.key)}
+                          onChange={() => toggleSelection(space.key, selectedConfluenceSpaces, setSelectedConfluenceSpaces)}
+                          className="accent-primary"
+                        />
+                        <span>
+                          <span className="font-medium">{space.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{space.key}</span>
+                        </span>
+                      </label>
+                    ))}
+                    {!confluenceSpaces.length && <p className="text-sm text-muted-foreground">No accessible Confluence spaces found.</p>}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">{selectedConfluenceSpaces.length} space(s) selected</p>
+                    <button
+                      type="button"
+                      onClick={saveConfluenceSpaceSelection}
+                      disabled={savingConfluenceSelection}
+                      className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                    >
+                      {savingConfluenceSelection && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save selection
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </GlassPanel>
 
       {/* Connected GitHub Repositories */}
       {isGitHubConnected && githubRepos.length > 0 && (

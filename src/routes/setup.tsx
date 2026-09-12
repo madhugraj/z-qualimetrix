@@ -4,6 +4,9 @@ import { useState, useEffect } from "react";
 import { CheckCircle2, CircleDashed, ArrowRight, ArrowLeft, Building, Users, Shield, CreditCard, Sparkles } from "lucide-react";
 import { API_V1_URL } from "@/lib/api-config";
 
+// Deliberately ungated — this is the public "create a new organization"
+// bootstrap flow (see admin.routes.ts's setup-organization comment): a
+// brand-new customer has no account yet, so there's no role to check.
 export const Route = createFileRoute("/setup")({
   head: () => ({
     meta: [
@@ -128,8 +131,7 @@ function SetupWizard() {
           organizationName: setupData.organizationName,
           domain: setupData.domain,
           timezone: setupData.timezone,
-          adminUser: setupData.adminUser,
-          budgetSettings: setupData.budget
+          adminUser: setupData.adminUser
         })
       });
 
@@ -208,7 +210,23 @@ function SetupWizard() {
   const handleBudgetSetup = async () => {
     setLoading(true);
     try {
-      // Budget would be saved here when the endpoint is implemented
+      const response = await fetch(`${API_V1_URL}/admin/budget-configuration`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          orgSprintBudget: setupData.budget.orgSprintBudget,
+          defaultSeatBudget: setupData.budget.defaultSeatBudget,
+          alertThresholds: { warning: 75, critical: 90 }
+        })
+      });
+
+      const data = await response.json();
+      if (!data.success) {
+        setError(data.error || 'Failed to save budget configuration');
+        return;
+      }
+
       goToNextStep();
     } catch (err) {
       setError('Failed to save budget configuration');

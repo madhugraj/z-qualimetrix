@@ -9,6 +9,7 @@ export interface AuthUser {
   tenantId: string | null;
   role: string;
   email: string;
+  name: string | null;
   isActive: boolean;
 }
 

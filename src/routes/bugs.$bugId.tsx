@@ -140,6 +140,21 @@ function BugDetail() {
             <Field label="Status" value={bug.externalStatusName ?? STATUS_LABEL[bug.status]} />
             <Field label="Reported" value={formatDate(bug.createdAt)} />
           </div>
+          <div className="mt-2">
+            {bug.parent ? (
+              <Link
+                to="/epics/$epicId"
+                params={{ epicId: bug.parent.id }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-glass-border px-3 py-2 text-xs text-primary hover:underline"
+              >
+                Part of epic: {bug.parent.externalId ?? bug.parent.id} · {bug.parent.title}
+              </Link>
+            ) : (
+              <p className="rounded-xl border border-glass-border px-3 py-2 text-xs text-muted-foreground">
+                Not linked to any epic in Jira/Azure DevOps.
+              </p>
+            )}
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <Tag className="h-3.5 w-3.5" /> {bug.labels.length > 0 ? bug.labels.join(", ") : "No labels"}

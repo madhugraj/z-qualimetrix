@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
 import { GlassPanel } from "@/components/qm/GlassPanel";
@@ -10,7 +10,7 @@ import { BacklogFlowChart, PriorityBreakdownChart, AgeDistributionChart } from "
 import { cn } from "@/lib/utils";
 import { useCurrentProduct } from "@/lib/product-context";
 import { useDateRange } from "@/lib/date-range-context";
-import { useBugLabelDistribution, useSimilarBugs, useVelocityTrend } from "@/lib/queries/analytics";
+import { useBugLabelDistribution, useSimilarBugs, useVelocityTrend, useEpicRollups } from "@/lib/queries/analytics";
 import { useBugsList } from "@/lib/queries/bugs";
 import { useBacklogSummary, useAgeDistribution } from "@/lib/queries/backlog";
 
@@ -41,7 +41,15 @@ const STATUS_LABEL: Record<string, string> = {
   completed: "Completed",
 };
 
+const PRIORITY_TONE: Record<string, string> = {
+  critical: "text-critical",
+  high: "text-warning",
+  medium: "text-muted-foreground",
+  low: "text-muted-foreground",
+};
+
 const PAGE_SIZE = 20;
+const EPIC_PICKER_LIMIT = 300;
 
 const STATUS_FILTERS: Array<{ key: string; label: string }> = [
   { key: "open", label: "Open" },
@@ -50,10 +58,23 @@ const STATUS_FILTERS: Array<{ key: string; label: string }> = [
   { key: "completed", label: "Completed" },
 ];
 
+type SortableField = "createdAt" | "updatedAt";
+const SORT_OPTIONS: Array<{ key: SortableField; label: string }> = [
+  { key: "createdAt", label: "Age" },
+  { key: "updatedAt", label: "Last updated" },
+];
+
+function daysSince(dateStr: string): number {
+  return Math.max(0, Math.round((Date.now() - new Date(dateStr).getTime()) / 86_400_000));
+}
+
 function BugsPage() {
   const { currentProduct, canViewPortfolio, isLoading: productsLoading } = useCurrentProduct();
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string | null>(null);
+  const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortableField>("updatedAt");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [selectedBugId, setSelectedBugId] = useState<string | null>(null);
 
@@ -63,15 +84,26 @@ function BugsPage() {
   const labelDist = useBugLabelDistribution(currentProduct?.id, queryEnabled, startDate, endDate);
   const chips = labelDist.data?.distribution.slice(0, 6) ?? [];
 
+  // Reused for two things: the Epic filter picker, and the orphan-bug
+  // callout below — both are "how does the bug backlog relate to epics"
+  // questions, same real parent-child data getEpicRollups already computes.
+  const epicRollups = useEpicRollups(currentProduct?.id, queryEnabled, EPIC_PICKER_LIMIT);
+  const epicsWithBugs = useMemo(
+    () => (epicRollups.data?.epics ?? []).filter((e) => e.bugSummary.totalBugs > 0)
+      .sort((a, b) => b.bugSummary.openBugs - a.bugSummary.openBugs),
+    [epicRollups.data]
+  );
+
   const bugsList = useBugsList(
     {
       productId: currentProduct?.id,
       labels: selectedLabel ? [selectedLabel] : undefined,
       status: selectedStatus ? [selectedStatus] : undefined,
+      parentId: selectedEpicId === "none" ? "none" : selectedEpicId ?? undefined,
       page,
       limit: PAGE_SIZE,
-      sortBy: "updatedAt",
-      sortOrder: "desc",
+      sortBy,
+      sortOrder,
     },
     { enabled: queryEnabled }
   );
@@ -96,6 +128,10 @@ function BugsPage() {
   }));
 
   const pagination = bugsList.data?.pagination;
+  const orphanPercent =
+    epicRollups.data?.summary.totalBugCount
+      ? Math.round((epicRollups.data.summary.orphanBugCount / epicRollups.data.summary.totalBugCount) * 100)
+      : null;
 
   const selectLabel = (label: string | null) => {
     setSelectedLabel(label);
@@ -107,6 +143,20 @@ function BugsPage() {
     setPage(1);
   };
 
+  const selectEpic = (epicId: string | null) => {
+    setSelectedEpicId(epicId);
+    setPage(1);
+  };
+
+  const toggleSort = (field: SortableField) => {
+    if (sortBy === field) {
+      setSortOrder((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder("desc");
+    }
+  };
+
   return (
     <AppShell>
       <header className="mb-6">
@@ -114,6 +164,13 @@ function BugsPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Real synced defects grouped by Jira label, with duplicate screening for the selected bug.
         </p>
+        {orphanPercent !== null && orphanPercent > 0 && (
+          <p className="mt-3 rounded-xl border border-glass-border bg-accent/20 px-3 py-2 text-[11px] text-muted-foreground">
+            {orphanPercent}% of synced bugs ({epicRollups.data!.summary.orphanBugCount} of{" "}
+            {epicRollups.data!.summary.totalBugCount}) aren&apos;t linked to any epic in Jira/Azure DevOps —
+            not an error here, just a real gap in how the backlog is organized upstream.
+          </p>
+        )}
       </header>
 
       <div className="mb-5">
@@ -123,10 +180,10 @@ function BugsPage() {
       {productsLoading ? (
         <p className="text-sm text-muted-foreground">Loading your workspace…</p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           <GlassPanel
             title="Bug label distribution"
-            subtitle="Which Jira label is generating defects"
+            subtitle="Which label is generating defects"
             action={!labelDist.data?.hasData ? <DemoDataBadge /> : undefined}
           >
             <BugDomainDonut distribution={labelDist.data?.distribution} hasData={labelDist.data?.hasData} />
@@ -198,6 +255,24 @@ function BugsPage() {
                     </button>
                   ))}
                 </div>
+                {epicsWithBugs.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="pr-0.5 text-[10px] text-muted-foreground">Epic:</span>
+                    <select
+                      value={selectedEpicId ?? ""}
+                      onChange={(e) => selectEpic(e.target.value || null)}
+                      className="rounded-full border border-glass-border bg-transparent px-2 py-1 text-[11px]"
+                    >
+                      <option value="">All</option>
+                      <option value="none">No epic ({epicRollups.data?.summary.orphanBugCount ?? 0})</option>
+                      {epicsWithBugs.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.title} ({e.bugSummary.openBugs} open)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             }
           >
@@ -212,44 +287,78 @@ function BugsPage() {
               </div>
             ) : rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                {selectedLabel || selectedStatus
+                {selectedLabel || selectedStatus || selectedEpicId
                   ? "No bugs match the selected filters."
                   : "No bugs synced for this product yet."}
               </p>
             ) : (
               <>
-                <ul className="space-y-2">
-                  {rows.map((bug) => (
-                    <li key={bug.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedBugId(bug.id)}
-                        className={cn(
-                          "w-full rounded-xl border p-3 text-left transition-colors",
-                          bug.id === effectiveSelectedId
-                            ? "border-primary/50 bg-primary/10"
-                            : "border-glass-border hover:bg-accent/30"
-                        )}
-                      >
-                        <span className="truncate text-xs font-medium">
-                          {bug.externalId ?? bug.id} · {bug.title}
-                        </span>
-                        <p className="mt-1 text-[11px] text-muted-foreground">
-                          {bug.labels.length > 0 ? bug.labels.join(", ") : "No labels"} ·{" "}
-                          {bug.priority ?? "unset"} · {bug.externalStatusName ?? STATUS_LABEL[bug.status]} ·{" "}
-                          {bug.externalMetadata?.assigneeName ?? "Unassigned"}
-                        </p>
-                      </button>
-                      <Link
-                        to="/bugs/$bugId"
-                        params={{ bugId: bug.id }}
-                        className="mt-1 ml-3 inline-block text-[11px] text-primary hover:underline"
-                      >
-                        Open bug detail →
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-glass-border/60 text-left text-[10px] text-muted-foreground">
+                        <th className="py-1.5 pr-3 font-medium">Bug</th>
+                        <th className="py-1.5 pr-3 font-medium">Priority</th>
+                        <th className="py-1.5 pr-3 font-medium">Status</th>
+                        <th className="py-1.5 pr-3 font-medium">Epic</th>
+                        <th className="py-1.5 pr-3 font-medium">Assignee</th>
+                        {SORT_OPTIONS.map((opt) => (
+                          <th key={opt.key} className="py-1.5 pr-3 font-medium">
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(opt.key)}
+                              className={cn("flex items-center gap-1 hover:text-foreground", sortBy === opt.key && "text-foreground")}
+                            >
+                              {opt.label}
+                              {sortBy === opt.key && <span className="text-[9px]">{sortOrder === "asc" ? "▲" : "▼"}</span>}
+                            </button>
+                          </th>
+                        ))}
+                        <th className="py-1.5 pr-1 font-medium" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((bug) => (
+                        <tr
+                          key={bug.id}
+                          onClick={() => setSelectedBugId(bug.id)}
+                          className={cn(
+                            "cursor-pointer border-b border-glass-border/30 last:border-0 hover:bg-accent/20",
+                            bug.id === effectiveSelectedId && "bg-primary/10"
+                          )}
+                        >
+                          <td className="max-w-[220px] truncate py-2 pr-3 font-medium">
+                            {bug.externalId ?? bug.id} · {bug.title}
+                          </td>
+                          <td className={cn("py-2 pr-3", PRIORITY_TONE[bug.priority ?? ""] ?? "text-muted-foreground")}>
+                            {bug.priority ?? "unset"}
+                          </td>
+                          <td className="py-2 pr-3 text-muted-foreground">
+                            {bug.externalStatusName ?? STATUS_LABEL[bug.status]}
+                          </td>
+                          <td className="max-w-[160px] truncate py-2 pr-3 text-muted-foreground">
+                            {bug.parent?.title ?? "—"}
+                          </td>
+                          <td className="max-w-[140px] truncate py-2 pr-3 text-muted-foreground">
+                            {bug.externalAssigneeName ?? bug.externalMetadata?.assigneeName ?? "Unassigned"}
+                          </td>
+                          <td className="py-2 pr-3 text-muted-foreground">{daysSince(bug.createdAt)}d</td>
+                          <td className="py-2 pr-3 text-muted-foreground">{daysSince(bug.updatedAt)}d ago</td>
+                          <td className="py-2 pr-1 text-right">
+                            <Link
+                              to="/bugs/$bugId"
+                              params={{ bugId: bug.id }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-primary hover:underline"
+                            >
+                              Open →
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 {pagination && pagination.totalPages > 1 && (
                   <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
                     <span>
@@ -307,6 +416,43 @@ function BugsPage() {
           >
             <AgeDistributionChart data={bugAging.data?.buckets} />
           </GlassPanel>
+
+          {epicsWithBugs.length > 0 && (
+            <GlassPanel
+              title="Bugs by epic"
+              subtitle="Which epics are carrying the most open defects, and for how long"
+              className="xl:col-span-3"
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-glass-border/60 text-left text-[10px] text-muted-foreground">
+                      <th className="py-1.5 pr-3 font-medium">Epic</th>
+                      <th className="py-1.5 pr-3 font-medium">Open bugs</th>
+                      <th className="py-1.5 pr-3 font-medium">Total bugs</th>
+                      <th className="py-1.5 pr-3 font-medium">Oldest open bug</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {epicsWithBugs.slice(0, 10).map((e) => (
+                      <tr key={e.id} className="border-b border-glass-border/30 last:border-0">
+                        <td className="max-w-[280px] truncate py-2 pr-3 font-medium">
+                          {e.externalId ?? e.id} · {e.title}
+                        </td>
+                        <td className={cn("py-2 pr-3", e.bugSummary.openBugs > 0 ? "text-critical" : "text-muted-foreground")}>
+                          {e.bugSummary.openBugs}
+                        </td>
+                        <td className="py-2 pr-3 text-muted-foreground">{e.bugSummary.totalBugs}</td>
+                        <td className="py-2 pr-3 text-muted-foreground">
+                          {e.bugSummary.oldestOpenBugAgeDays !== null ? `${e.bugSummary.oldestOpenBugAgeDays}d` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </GlassPanel>
+          )}
 
           <GlassPanel
             title="Related / similar bugs"

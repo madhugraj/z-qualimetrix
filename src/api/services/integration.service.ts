@@ -6,7 +6,13 @@ import { encrypt, decrypt } from '../../lib/encryption';
 // wired up) — Vertex AI/Gemini now goes through the generic
 // provider-connection.service.ts path instead, alongside GPU-compute
 // providers, not this OAuth-token-pair-shaped Integration model.
-export type IntegrationProvider = 'jira' | 'azure_devops' | 'openai';
+//
+// 'confluence' never goes through its own OAuth round-trip (see
+// jira-oauth.service.ts's SCOPES comment) — its Integration row is created
+// alongside 'jira''s from the same token response in handleCallback, but it
+// still gets its own row/status/sync-frequency/disconnect lifecycle like any
+// other provider here.
+export type IntegrationProvider = 'jira' | 'azure_devops' | 'openai' | 'confluence';
 export type IntegrationStatus = 'connected' | 'error' | 'reauth_required' | 'disconnected';
 
 export const MIN_SYNC_FREQUENCY_MINUTES = 5;
@@ -32,6 +38,11 @@ export interface IntegrationStatusView {
   lastSyncedAt?: string | null;
   lastSyncError?: string | null;
   externalMetadata?: Record<string, unknown>;
+  /** Whatever Atlassian's token response actually granted (see JiraTokenResult's
+   * comment) — the frontend uses this on the 'jira' row to detect a connection
+   * that predates Confluence's scopes being added, so it can prompt a re-auth
+   * instead of Confluence silently never syncing. */
+  scopes?: string[];
 }
 
 class IntegrationService {
@@ -130,6 +141,7 @@ class IntegrationService {
       lastSyncedAt: integration.lastSyncedAt?.toISOString() ?? null,
       lastSyncError: integration.lastSyncError,
       externalMetadata: (integration.externalMetadata as Record<string, unknown>) ?? {},
+      scopes: integration.scopes,
     };
   }
 

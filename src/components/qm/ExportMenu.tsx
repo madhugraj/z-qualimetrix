@@ -9,33 +9,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { exportCsv, exportJson, exportPdf, type Row } from "@/lib/qm-export";
-import { EXECUTION_TREND, MTTR_TREND, RTM, VELOCITY_TREND, BOTTLENECKS } from "@/lib/qm-data";
-import { BUGS } from "@/lib/qm-bugs";
 
-const DATASETS: { key: string; label: string; rows: () => Row[] }[] = [
-  { key: "test-execution", label: "Test execution outcomes", rows: () => EXECUTION_TREND as Row[] },
-  { key: "mttr", label: "Resolution efficiency (MTTR)", rows: () => MTTR_TREND as Row[] },
-  { key: "velocity", label: "Quality velocity", rows: () => VELOCITY_TREND as Row[] },
-  { key: "rtm", label: "Requirements traceability", rows: () => RTM as unknown as Row[] },
-  { key: "bottlenecks", label: "QA bottlenecks", rows: () => BOTTLENECKS as unknown as Row[] },
-  {
-    key: "bugs",
-    label: "Classified defects",
-    rows: () =>
-      BUGS.map((b) => ({
-        id: b.id,
-        title: b.title,
-        domain: b.domain ?? "",
-        confidence: Math.round((b.confidence ?? 0) * 100),
-        severity: b.severity,
-        status: b.status,
-        module: b.module,
-        assignee: b.assignee,
-      })),
-  },
-];
+export interface ExportDataset {
+  key: string;
+  label: string;
+  rows: Row[];
+}
 
-export function ExportMenu() {
+/**
+ * Takes the caller's already-fetched rows as a prop rather than importing
+ * any data itself — this used to read from src/lib/qm-data.ts's mock
+ * arrays regardless of what the page actually rendered, so "Export report"
+ * silently downloaded fake numbers. Now it can only export what's on screen.
+ */
+export function ExportMenu({ datasets }: { datasets: ExportDataset[] }) {
+  const nonEmpty = datasets.filter((d) => d.rows.length > 0);
+
   const csv = (key: string, label: string, rows: Row[]) => {
     exportCsv(key, rows);
     toast.success(`${label} exported as CSV`);
@@ -53,17 +42,22 @@ export function ExportMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="text-[11px]">Download CSV</DropdownMenuLabel>
-        {DATASETS.map((d) => (
-          <DropdownMenuItem key={d.key} onSelect={() => csv(d.key, d.label, d.rows())}>
-            <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> {d.label}
-          </DropdownMenuItem>
-        ))}
+        {nonEmpty.length === 0 ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">Nothing to export yet.</div>
+        ) : (
+          nonEmpty.map((d) => (
+            <DropdownMenuItem key={d.key} onSelect={() => csv(d.key, d.label, d.rows)}>
+              <FileSpreadsheet className="mr-2 h-3.5 w-3.5" /> {d.label}
+            </DropdownMenuItem>
+          ))
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
+          disabled={nonEmpty.length === 0}
           onSelect={() => {
             exportJson(
               "qualimetrix-report",
-              Object.fromEntries(DATASETS.map((d) => [d.key, d.rows()])),
+              Object.fromEntries(nonEmpty.map((d) => [d.key, d.rows])),
             );
             toast.success("Full report bundle exported as JSON");
           }}

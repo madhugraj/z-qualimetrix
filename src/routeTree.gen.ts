@@ -13,9 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AiUsageRouteImport } from './routes/ai-usage'
 import { Route as BacklogRouteImport } from './routes/backlog'
+import { Route as ComplianceRouteImport } from './routes/compliance'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EngineeringHealthRouteImport } from './routes/engineering-health'
-import { Route as EpicsRouteImport } from './routes/epics'
+import { Route as HelpRouteImport } from './routes/help'
 import { Route as InfraSpendRouteImport } from './routes/infra-spend'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as LoginRouteImport } from './routes/login'
@@ -26,6 +27,8 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as BugsIndexRouteImport } from './routes/bugs.index'
 import { Route as BugsBugIdRouteImport } from './routes/bugs.$bugId'
+import { Route as EpicsIndexRouteImport } from './routes/epics.index'
+import { Route as EpicsEpicIdRouteImport } from './routes/epics.$epicId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,6 +50,11 @@ const BacklogRoute = BacklogRouteImport.update({
   path: '/backlog',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ComplianceRoute = ComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -57,9 +65,9 @@ const EngineeringHealthRoute = EngineeringHealthRouteImport.update({
   path: '/engineering-health',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EpicsRoute = EpicsRouteImport.update({
-  id: '/epics',
-  path: '/epics',
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InfraSpendRoute = InfraSpendRouteImport.update({
@@ -112,15 +120,26 @@ const BugsBugIdRoute = BugsBugIdRouteImport.update({
   path: '/bugs/$bugId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EpicsIndexRoute = EpicsIndexRouteImport.update({
+  id: '/epics/',
+  path: '/epics/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EpicsEpicIdRoute = EpicsEpicIdRouteImport.update({
+  id: '/epics/$epicId',
+  path: '/epics/$epicId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/backlog': typeof BacklogRoute
+  '/compliance': typeof ComplianceRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
-  '/epics': typeof EpicsRoute
+  '/help': typeof HelpRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -130,16 +149,19 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
+  '/epics/$epicId': typeof EpicsEpicIdRoute
   '/bugs/': typeof BugsIndexRoute
+  '/epics/': typeof EpicsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/backlog': typeof BacklogRoute
+  '/compliance': typeof ComplianceRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
-  '/epics': typeof EpicsRoute
+  '/help': typeof HelpRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -149,7 +171,9 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
+  '/epics/$epicId': typeof EpicsEpicIdRoute
   '/bugs': typeof BugsIndexRoute
+  '/epics': typeof EpicsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -157,9 +181,10 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/ai-usage': typeof AiUsageRoute
   '/backlog': typeof BacklogRoute
+  '/compliance': typeof ComplianceRoute
   '/dashboard': typeof DashboardRoute
   '/engineering-health': typeof EngineeringHealthRoute
-  '/epics': typeof EpicsRoute
+  '/help': typeof HelpRoute
   '/infra-spend': typeof InfraSpendRoute
   '/integrations': typeof IntegrationsRoute
   '/login': typeof LoginRoute
@@ -169,7 +194,9 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/bugs/$bugId': typeof BugsBugIdRoute
+  '/epics/$epicId': typeof EpicsEpicIdRoute
   '/bugs/': typeof BugsIndexRoute
+  '/epics/': typeof EpicsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -178,9 +205,10 @@ export interface FileRouteTypes {
     | '/admin'
     | '/ai-usage'
     | '/backlog'
+    | '/compliance'
     | '/dashboard'
     | '/engineering-health'
-    | '/epics'
+    | '/help'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -190,16 +218,19 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/bugs/$bugId'
+    | '/epics/$epicId'
     | '/bugs/'
+    | '/epics/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
     | '/ai-usage'
     | '/backlog'
+    | '/compliance'
     | '/dashboard'
     | '/engineering-health'
-    | '/epics'
+    | '/help'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -209,16 +240,19 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/bugs/$bugId'
+    | '/epics/$epicId'
     | '/bugs'
+    | '/epics'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/ai-usage'
     | '/backlog'
+    | '/compliance'
     | '/dashboard'
     | '/engineering-health'
-    | '/epics'
+    | '/help'
     | '/infra-spend'
     | '/integrations'
     | '/login'
@@ -228,7 +262,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/bugs/$bugId'
+    | '/epics/$epicId'
     | '/bugs/'
+    | '/epics/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -236,9 +272,10 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AiUsageRoute: typeof AiUsageRoute
   BacklogRoute: typeof BacklogRoute
+  ComplianceRoute: typeof ComplianceRoute
   DashboardRoute: typeof DashboardRoute
   EngineeringHealthRoute: typeof EngineeringHealthRoute
-  EpicsRoute: typeof EpicsRoute
+  HelpRoute: typeof HelpRoute
   InfraSpendRoute: typeof InfraSpendRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LoginRoute: typeof LoginRoute
@@ -248,7 +285,9 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   BugsBugIdRoute: typeof BugsBugIdRoute
+  EpicsEpicIdRoute: typeof EpicsEpicIdRoute
   BugsIndexRoute: typeof BugsIndexRoute
+  EpicsIndexRoute: typeof EpicsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -281,6 +320,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BacklogRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/compliance': {
+      id: '/compliance'
+      path: '/compliance'
+      fullPath: '/compliance'
+      preLoaderRoute: typeof ComplianceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -295,11 +341,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EngineeringHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/epics': {
-      id: '/epics'
-      path: '/epics'
-      fullPath: '/epics'
-      preLoaderRoute: typeof EpicsRouteImport
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/infra-spend': {
@@ -372,6 +418,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BugsBugIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/epics/': {
+      id: '/epics/'
+      path: '/epics'
+      fullPath: '/epics/'
+      preLoaderRoute: typeof EpicsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/epics/$epicId': {
+      id: '/epics/$epicId'
+      path: '/epics/$epicId'
+      fullPath: '/epics/$epicId'
+      preLoaderRoute: typeof EpicsEpicIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -380,9 +440,10 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AiUsageRoute: AiUsageRoute,
   BacklogRoute: BacklogRoute,
+  ComplianceRoute: ComplianceRoute,
   DashboardRoute: DashboardRoute,
   EngineeringHealthRoute: EngineeringHealthRoute,
-  EpicsRoute: EpicsRoute,
+  HelpRoute: HelpRoute,
   InfraSpendRoute: InfraSpendRoute,
   IntegrationsRoute: IntegrationsRoute,
   LoginRoute: LoginRoute,
@@ -392,7 +453,9 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   BugsBugIdRoute: BugsBugIdRoute,
+  EpicsEpicIdRoute: EpicsEpicIdRoute,
   BugsIndexRoute: BugsIndexRoute,
+  EpicsIndexRoute: EpicsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -27,6 +27,20 @@ import { recordExactCommitAttribution } from '../services/commit-attribution.ser
  * Requires requireAuth. Get AI usage analytics for the requested visibility
  * level, scoped to the authenticated user's own tenant.
  */
+/**
+ * "team"/"org"/"finance" visibility exposes colleagues' individual usage,
+ * rework rate, and (for org/finance) real dollar cost — data this page's own
+ * copy calls "a coaching signal, not a leaderboard," and "org"/"finance"
+ * apply NO per-caller filtering at all (see ai-usage.server.ts's
+ * scopeEvents — only "self" and "team" scope the event list). Only pm/
+ * executive may request anything above "self", matching the same tier
+ * already gating Infra Spend, Engineering Health, Admin, Settings and
+ * Integrations elsewhere in this app.
+ */
+function isPortfolioRole(role?: string): boolean {
+  return role === 'pm' || role === 'executive';
+}
+
 export async function getAiUsageAnalyticsHandler(req: Request, res: Response) {
   try {
     if (!req.user!.tenantId) {
@@ -37,7 +51,14 @@ export async function getAiUsageAnalyticsHandler(req: Request, res: Response) {
     }
 
     const { visibility, sprints, enhanced } = req.query;
-    const visibilityLevel = (visibility as string) || 'self';
+    const requestedVisibility = (visibility as string) || 'self';
+    // Clamp rather than reject: a non-portfolio role's client is only ever
+    // built to offer these buttons if it already checks the same role (see
+    // ai-usage.tsx), so this path is a defense-in-depth backstop against a
+    // direct API call, not an expected user-facing error state.
+    const visibilityLevel = requestedVisibility === 'self' || isPortfolioRole(req.user!.role)
+      ? requestedVisibility
+      : 'self';
     const sprintsCount = sprints ? parseInt(sprints as string, 10) : undefined;
     const enhancedAnalytics = enhanced === 'true';
 

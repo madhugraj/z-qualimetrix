@@ -67,8 +67,21 @@ export class WorkItemController extends BaseController {
     else if (scope.tenantId) where.tenantId = scope.tenantId;
 
     // Add filters (productId already resolved above via resolveWorkItemScope)
-    const filters = this.getFilters(req, ['type', 'priority', 'sprintId', 'assigneeId', 'parentId']);
+    const filters = this.getFilters(req, ['type', 'priority', 'sprintId', 'assigneeId', 'parentId', 'externalAssigneeId']);
     Object.assign(where, filters);
+
+    // getFilters only does plain equality, which can't express "no epic at
+    // all" — the literal value "none" is a client-side convention for that,
+    // not a real id, so it needs translating to an actual null check.
+    if (req.query.parentId === 'none') {
+      where.parentId = null;
+    }
+
+    // Same convention as parentId=none above — "unassigned" isn't a real
+    // Jira accountId/ADO identity id, it's a client-side stand-in for null.
+    if (req.query.externalAssigneeId === 'unassigned') {
+      where.externalAssigneeId = null;
+    }
 
     // Labels use Prisma's array-contains-any, not the plain-equality
     // semantics getFilters provides, so they're handled separately.
@@ -107,7 +120,8 @@ export class WorkItemController extends BaseController {
           product: { select: { id: true, name: true, key: true } },
           sprint: { select: { id: true, name: true } },
           creator: { select: { id: true, name: true, email: true } },
-          updater: { select: { id: true, name: true, email: true } }
+          updater: { select: { id: true, name: true, email: true } },
+          parent: { select: { id: true, title: true, externalId: true, type: true } }
         }
       }),
       this.prisma.workItem.count({ where })
@@ -146,7 +160,8 @@ export class WorkItemController extends BaseController {
           select: { id: true, name: true, status: true, startDate: true, endDate: true }
         },
         creator: { select: { id: true, name: true, email: true } },
-        updater: { select: { id: true, name: true, email: true } }
+        updater: { select: { id: true, name: true, email: true } },
+        parent: { select: { id: true, title: true, externalId: true, type: true } }
       }
     });
 

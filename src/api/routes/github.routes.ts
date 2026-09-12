@@ -26,8 +26,12 @@ router.use(requireAuth);
 // tenant member should be able to probe it.
 router.post('/validate-token', requireAdmin, validateToken);
 router.post('/multi-repo/status', getMultiRepoStatus);
-router.get('/user-repositories', getUserRepositories);
-router.get('/token-status', getTokenStatus);
+// Full list of repos in the org's connected GitHub account — integration
+// setup detail (used to pick which repo to map to a product), only ever
+// called from the PM-gated integrations.tsx UI. requireAdmin closes that
+// gap rather than changing any real behavior.
+router.get('/user-repositories', requireAdmin, getUserRepositories);
+router.get('/token-status', requireAdmin, getTokenStatus);
 router.post('/clear-cache', clearCache);
 
 // Dynamic routes with parameters

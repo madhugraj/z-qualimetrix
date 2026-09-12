@@ -132,13 +132,6 @@ export const BAND_LABEL: Record<HealthBand, string> = {
   "at-risk": "Support needed",
 };
 
-export const ALLOCATION = DEVELOPERS.map((d) => ({
-  name: d.name.split(" ")[0],
-  Feature: d.featurePct,
-  Fix: d.fixPct,
-  Maintenance: d.maintenancePct,
-}));
-
 export interface SiloAlert {
   module: string;
   owner: string;
@@ -189,16 +182,6 @@ export const TRAINING: TrainingSuggestion[] = [
     audience: "Squad Vertex",
     signal: "Hallucination and embedding defects recur across two releases.",
   },
-];
-
-export const CONSISTENCY_TREND = [
-  { sprint: "S6", output: 128, quality: 88 },
-  { sprint: "S7", output: 149, quality: 90 },
-  { sprint: "S8", output: 112, quality: 79 },
-  { sprint: "S9", output: 152, quality: 91 },
-  { sprint: "S10", output: 112, quality: 78 },
-  { sprint: "S11", output: 152, quality: 92 },
-  { sprint: "S12", output: 123, quality: 81 },
 ];
 
 export const HR_KPIS = [

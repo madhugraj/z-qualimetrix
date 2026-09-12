@@ -6,7 +6,7 @@ import {
   getConfigurationStatus,
   updateBudgetConfiguration
 } from '../controllers/admin.controller';
-import { requireAuth, requireAdmin } from '../middleware/auth.middleware';
+import { requireAdmin } from '../middleware/auth.middleware';
 
 const router = Router();
 
@@ -17,7 +17,7 @@ router.post('/setup-organization', setupOrganization);
 // Everything below manages an existing org and is PM-only.
 router.post('/users/bulk-import', requireAdmin, bulkImportUsers);
 router.post('/teams', requireAdmin, configureTeams);
-router.get('/configuration-status', requireAuth, getConfigurationStatus);
+router.get('/configuration-status', requireAdmin, getConfigurationStatus);
 router.put('/budget-configuration', requireAdmin, updateBudgetConfiguration);
 
 export default router;

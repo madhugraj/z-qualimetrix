@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
 import { GlassPanel } from "@/components/qm/GlassPanel";
@@ -8,6 +8,7 @@ import { BacklogFlowChart, PriorityBreakdownChart, AgeDistributionChart } from "
 import { useCurrentProduct } from "@/lib/product-context";
 import { useDateRange } from "@/lib/date-range-context";
 import { useBacklogList, useBacklogSummary, useBacklogFlow, useAgeDistribution } from "@/lib/queries/backlog";
+import { useAssigneeWorkload } from "@/lib/queries/analytics";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/backlog")({
@@ -39,6 +40,10 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const PRIORITY_ORDER = ["critical", "high", "medium", "low"];
+const STATUS_FILTERS: Array<{ key: string; label: string }> = [
+  { key: "open", label: "Open" },
+  { key: "in_progress", label: "In Progress" },
+];
 
 const PRIORITY_TONE: Record<string, string> = {
   critical: "text-critical",
@@ -58,6 +63,8 @@ function BacklogPage() {
   const { currentProduct, canViewPortfolio, isLoading: productsLoading } = useCurrentProduct();
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
   const queryEnabled = !productsLoading && (!!currentProduct || canViewPortfolio);
@@ -66,11 +73,29 @@ function BacklogPage() {
   const summary = useBacklogSummary(currentProduct?.id, queryEnabled);
   const flow = useBacklogFlow(currentProduct?.id, queryEnabled, startDate, endDate);
   const aging = useAgeDistribution(currentProduct?.id, queryEnabled);
+  // Reused as the assignee picker's data source — same real per-assignee
+  // counts Engineering Health's workload table uses, just narrowed to the
+  // open/in-progress slice for this backlog view.
+  const workload = useAssigneeWorkload(currentProduct?.id, queryEnabled);
+  const assigneeOptions = useMemo(
+    () =>
+      (workload.data?.assignees ?? [])
+        .map((a) => ({
+          id: a.externalAssigneeId,
+          name: a.displayName,
+          openCount: (a.itemsByStatus.open ?? 0) + (a.itemsByStatus.in_progress ?? 0),
+        }))
+        .filter((a) => a.openCount > 0)
+        .sort((a, b) => b.openCount - a.openCount),
+    [workload.data]
+  );
   const list = useBacklogList(
     {
       productId: currentProduct?.id,
       type: typeFilter ?? undefined,
       priority: priorityFilter ?? undefined,
+      status: statusFilter ?? undefined,
+      externalAssigneeId: assigneeFilter ?? undefined,
       page,
       limit: PAGE_SIZE,
     },
@@ -81,6 +106,7 @@ function BacklogPage() {
   const pagination = list.data?.pagination;
   const byType = summary.data?.byType ?? {};
   const byPriority = summary.data?.byPriority ?? {};
+  const byStatus = summary.data?.byStatus ?? {};
   const typeKeys = Object.keys(byType).sort((a, b) => byType[b] - byType[a]);
 
   const selectType = (t: string | null) => {
@@ -89,6 +115,14 @@ function BacklogPage() {
   };
   const selectPriority = (p: string | null) => {
     setPriorityFilter(p);
+    setPage(1);
+  };
+  const selectStatus = (s: string | null) => {
+    setStatusFilter(s);
+    setPage(1);
+  };
+  const selectAssignee = (a: string | null) => {
+    setAssigneeFilter(a);
     setPage(1);
   };
 
@@ -111,7 +145,7 @@ function BacklogPage() {
       ) : (
         <>
           {summary.data && (
-            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <GlassPanel>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Total backlog</p>
                 <p className="mt-1 text-2xl font-semibold">{summary.data.total}</p>
@@ -127,6 +161,18 @@ function BacklogPage() {
                 <p className="mt-1 text-2xl font-semibold">
                   {summary.data.oldestCreatedAt ? formatAge(summary.data.oldestCreatedAt) : "—"}
                 </p>
+              </GlassPanel>
+              <GlassPanel>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Unassigned critical/high</p>
+                <p
+                  className={cn(
+                    "mt-1 text-2xl font-semibold",
+                    summary.data.unassignedCriticalHigh > 0 && "text-critical"
+                  )}
+                >
+                  {summary.data.unassignedCriticalHigh}
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Nobody's picked these up yet</p>
               </GlassPanel>
             </div>
           )}
@@ -218,6 +264,54 @@ function BacklogPage() {
                     </button>
                   ))}
                 </div>
+                <div className="flex flex-wrap justify-end gap-1">
+                  <span className="self-center pr-1 text-[10px] text-muted-foreground">Status:</span>
+                  <button
+                    type="button"
+                    onClick={() => selectStatus(null)}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      statusFilter === null
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    All
+                  </button>
+                  {STATUS_FILTERS.map((s) => (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => selectStatus(s.key)}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                        statusFilter === s.key
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {s.label} ({byStatus[s.key] ?? 0})
+                    </button>
+                  ))}
+                </div>
+                {(assigneeOptions.length > 0 || (summary.data?.unassignedCriticalHigh ?? 0) > 0) && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="pr-0.5 text-[10px] text-muted-foreground">Assignee:</span>
+                    <select
+                      value={assigneeFilter ?? ""}
+                      onChange={(e) => selectAssignee(e.target.value || null)}
+                      className="rounded-full border border-glass-border bg-transparent px-2 py-1 text-[11px]"
+                    >
+                      <option value="">All</option>
+                      <option value="unassigned">Unassigned</option>
+                      {assigneeOptions.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.openCount})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             }
           >
@@ -232,7 +326,7 @@ function BacklogPage() {
               </div>
             ) : rows.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                {typeFilter || priorityFilter
+                {typeFilter || priorityFilter || statusFilter || assigneeFilter
                   ? "No open items match the selected filters."
                   : "Nothing open right now — backlog is clear for this scope."}
               </p>
@@ -274,7 +368,7 @@ function BacklogPage() {
                             {item.externalStatusName ?? STATUS_LABEL[item.status] ?? item.status}
                           </td>
                           <td className="py-2.5 pr-3 text-xs text-muted-foreground">
-                            {item.externalMetadata?.assigneeName ?? "Unassigned"}
+                            {item.externalAssigneeName ?? item.externalMetadata?.assigneeName ?? "Unassigned"}
                           </td>
                           <td className="py-2.5 pr-3 text-xs text-muted-foreground">{formatAge(item.createdAt)}</td>
                         </tr>

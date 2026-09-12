@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/qm/AppShell";
 import { FilterBar } from "@/components/qm/FilterBar";
@@ -6,6 +6,7 @@ import { GlassPanel } from "@/components/qm/GlassPanel";
 import { KpiMetricCard } from "@/components/qm/KpiMetricCard";
 import { CircularProgress } from "@/components/qm/CircularProgress";
 import { useAuth } from "@/lib/auth-context";
+import { getTimeOfDayGreeting } from "@/lib/greeting";
 import { useCurrentProduct } from "@/lib/product-context";
 import { useDateRange } from "@/lib/date-range-context";
 import { getWorkflowRuns } from "@/lib/github-data.service";
@@ -18,6 +19,8 @@ import { ProductHealthList } from "@/components/qm/ProductHealthList";
 import { SimilarBugs } from "@/components/qm/SimilarBugs";
 import { BugDomainDonut } from "@/components/qm/BugDomainDonut";
 import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
+import { PortfolioInsights, buildPortfolioInsights } from "@/components/qm/PortfolioInsights";
+import { DataTable, BarCell } from "@/components/qm/DataTable";
 import { KPIS, ROLES, type Kpi } from "@/lib/qm-data";
 import { liveKpi } from "@/lib/kpi-utils";
 import {
@@ -35,7 +38,17 @@ import {
   useMostRecentBugId,
   useSimilarBugs,
   useRequirementTraceability,
+  useEpicRollups,
+  useCycleTimeByStage,
+  useTeamUtilization,
+  useTeamCost,
+  useProjectsOverview,
+  useWorklogAuthors,
+  useSetWorklogAuthorRate,
 } from "@/lib/queries/analytics";
+import { useBacklogSummary } from "@/lib/queries/backlog";
+import { useState } from "react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
@@ -59,6 +72,7 @@ export const Route = createFileRoute("/dashboard")({
 
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const hrs = (n: number) => `${n.toFixed(1)} hrs`;
+const dollars = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 interface KpiTile {
   kpi: Kpi;
@@ -82,6 +96,12 @@ function Dashboard() {
   // backend rejects an omitted productId for any other role.
   const queryEnabled = !productsLoading && (!!productId || isPortfolioView);
   const { startDate, endDate } = useDateRange();
+  // Team cost/utilization and tenant-wide analytics are pm/executive-only
+  // server-side (analytics.controller.ts) — gate the queries the same way
+  // projectsOverview/worklogAuthors already are below, or a tester/developer/
+  // po loading this page gets a needless 403 for data never even rendered
+  // to them.
+  const canViewPortfolio = current?.id === "pm" || current?.id === "executive";
 
   const mttr = useMttr(productId, queryEnabled, startDate, endDate);
   const defectLeakage = useDefectLeakage(productId, queryEnabled, startDate, endDate);
@@ -89,7 +109,7 @@ function Dashboard() {
   const velocityTrend = useVelocityTrend(productId, queryEnabled, startDate, endDate);
   const releaseReadiness = useReleaseReadiness(productId);
   const deliverables = useProductDeliverables(productId);
-  const tenantAnalytics = useTenantAnalytics(user?.tenantId ?? undefined);
+  const tenantAnalytics = useTenantAnalytics(user?.tenantId ?? undefined, canViewPortfolio);
   const bugLabelDistribution = useBugLabelDistribution(productId, queryEnabled, startDate, endDate);
   const openP0P1 = useOpenP0P1Count(productId, queryEnabled);
   const reopenMetrics = useReopenMetrics(productId, queryEnabled, startDate, endDate);
@@ -97,6 +117,23 @@ function Dashboard() {
   const mostRecentBugId = useMostRecentBugId(productId);
   const similarBugs = useSimilarBugs(productId, mostRecentBugId.data);
   const requirementTraceability = useRequirementTraceability(productId, queryEnabled);
+  // Portfolio-level insight feed — pm/executive only, but fetched
+  // unconditionally alongside everything else above rather than gated
+  // behind role, since hooks can't be called conditionally.
+  const backlogSummary = useBacklogSummary(productId, queryEnabled);
+  const epicRollups = useEpicRollups(productId, queryEnabled, 500);
+  const cycleTimeByStage = useCycleTimeByStage(productId, queryEnabled);
+  const portfolioInsights = buildPortfolioInsights({
+    backlogSummary: backlogSummary.data,
+    epicSummary: epicRollups.data?.summary,
+    cycleTime: cycleTimeByStage.data,
+  });
+  const teamUtilization = useTeamUtilization(productId, queryEnabled && canViewPortfolio, startDate, endDate);
+  const teamCost = useTeamCost(productId, queryEnabled && canViewPortfolio, startDate, endDate);
+  const projectsOverview = useProjectsOverview(queryEnabled && canViewPortfolio);
+  const worklogAuthors = useWorklogAuthors(queryEnabled && current?.id === "pm");
+  const setWorklogAuthorRate = useSetWorklogAuthorRate();
+  const [rateDrafts, setRateDrafts] = useState<Record<string, string>>({});
 
   // Same source FilterBar's GitHubRepoPill reads — the current product's
   // mapped ProductRepository row(s) — instead of the old localStorage
@@ -113,6 +150,39 @@ function Dashboard() {
   const completedRuns = (workflowRuns.data ?? []).filter((r) => r.status === "completed");
   const passedRuns = completedRuns.filter((r) => r.conclusion === "success");
   const ciPassRate = completedRuns.length > 0 ? Math.round((passedRuns.length / completedRuns.length) * 100) : null;
+
+  // Plain-language reads on two of the charts below — a raw chart shows
+  // what happened, these say what it means, so the panel doesn't require
+  // the viewer to do the arithmetic themselves.
+  const bugLabelSorted = bugLabelDistribution.data?.distribution ?? [];
+  const bugLabelTotal = bugLabelSorted.reduce((sum, d) => sum + d.count, 0);
+  const topBugLabel = bugLabelSorted[0];
+  const topBugLabelInsight = (() => {
+    if (!topBugLabel || bugLabelTotal === 0) return null;
+    const topPercent = Math.round((topBugLabel.count / bugLabelTotal) * 100);
+    // "Unlabeled" being the top slice isn't an actionable module to go fix
+    // — it's a tagging-discipline gap, and pretending otherwise would point
+    // a PM at a fake lever. Say so plainly instead.
+    if (topBugLabel.label === "Unlabeled") {
+      return `${topPercent}% of open defects (${topBugLabel.count} of ${bugLabelTotal}) have no label at all, so this chart can't yet tell you where they concentrate. Fixing bug-tagging discipline at triage is the actual first lever here — once labeled, this same panel will show exactly where to focus.`;
+    }
+    const top3 = bugLabelSorted.slice(0, 3);
+    const top3Count = top3.reduce((sum, d) => sum + d.count, 0);
+    const top3Percent = Math.round((top3Count / bugLabelTotal) * 100);
+    return `"${topBugLabel.label}" alone is ${topPercent}% of open defects (${topBugLabel.count} of ${bugLabelTotal}). Your top ${top3.length} labels together account for ${top3Percent}% — a focused regression pass on just those areas would move the portfolio number more than spreading QA effort evenly across everything.`;
+  })();
+
+  const velocityWindow = velocityTrend.data ?? [];
+  const velocityCreated = velocityWindow.reduce((sum, p) => sum + p.created, 0);
+  const velocityResolved = velocityWindow.reduce((sum, p) => sum + p.resolved, 0);
+  const velocityInsight =
+    velocityWindow.length > 0
+      ? velocityCreated > velocityResolved
+        ? `Bugs are arriving faster than they're being resolved over this window (${velocityCreated} created vs ${velocityResolved} resolved) — the open queue is growing.`
+        : velocityResolved > velocityCreated
+          ? `Resolving faster than new bugs arrive over this window (${velocityResolved} resolved vs ${velocityCreated} created) — the open queue is shrinking.`
+          : `Created and resolved are roughly balanced over this window (${velocityCreated} vs ${velocityResolved}).`
+      : null;
 
   if (isLoading) {
     return (
@@ -199,11 +269,17 @@ function Dashboard() {
 
   const deliverableItems = deliverables.data?.map(deliverableRecordToItem);
   const risks = releaseReadiness.data?.risks ?? [];
+  const displayName = user?.name?.split(" ")[0] || user?.email?.split("@")[0];
 
   return (
     <AppShell>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
+          {displayName && (
+            <p className="text-sm font-medium text-muted-foreground">
+              {getTimeOfDayGreeting()}, {displayName}
+            </p>
+          )}
           <h1 className="text-gradient text-2xl font-semibold md:text-3xl">
             Quality &amp; Performance Hub
           </h1>
@@ -224,7 +300,7 @@ function Dashboard() {
       </div>
 
       {role === "tester" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           <GlassPanel
             title="Test execution trend"
             subtitle="Daily pass rate"
@@ -279,7 +355,7 @@ function Dashboard() {
       )}
 
       {role === "developer" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           <GlassPanel
             title="MTTR trend"
             subtitle={currentProduct ? `${currentProduct.name} · recent sprints or weeks` : "Recent sprints or weeks"}
@@ -335,7 +411,7 @@ function Dashboard() {
       )}
 
       {role === "po" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           <GlassPanel title="Release readiness" subtitle={currentProduct?.name ?? "Select a product"}>
             <div className="flex flex-wrap items-center justify-around gap-4 py-2">
               <CircularProgress
@@ -381,60 +457,435 @@ function Dashboard() {
       )}
 
       {(role === "executive" || role === "pm") && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
           <GlassPanel
-            title="Portfolio quality health"
-            subtitle="Health score per active product"
+            title="Needs attention — Portfolio"
+            subtitle="Plain-language findings from real backlog and epic data, most urgent first"
+            className="xl:col-span-3"
           >
-            <ProductHealthList products={tenantAnalytics.data?.products ?? []} />
+            <PortfolioInsights insights={portfolioInsights} />
           </GlassPanel>
+          {/* Two independent stacked columns (not a shared grid row) — a
+              product-count-driven list and a fixed-height chart can't share
+              a row height without one of them leaving a ragged gap. */}
+          <div className="grid grid-cols-1 gap-4 xl:col-span-3 xl:grid-cols-3">
+            <div className="flex flex-col gap-4 xl:col-span-1">
+              <GlassPanel
+                title="Portfolio quality health"
+                subtitle="Health score per active product"
+              >
+                <ProductHealthList products={tenantAnalytics.data?.products ?? []} />
+              </GlassPanel>
+              <GlassPanel
+                title="CI test automation"
+                subtitle={selectedRepo ? `GitHub Actions · ${selectedRepo}` : "Select a repository to see CI activity"}
+                action={ciPassRate === null ? <DemoDataBadge /> : undefined}
+              >
+                {!selectedRepo ? (
+                  <p className="text-sm text-muted-foreground">
+                    Pick a repository from the Repository filter above.
+                  </p>
+                ) : workflowRuns.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : ciPassRate === null ? (
+                  <p className="text-sm text-muted-foreground">
+                    No completed runs yet for {selectedRepo}. No Xray/Zephyr/TestRail connected, so this reflects
+                    CI activity only, not test-management coverage.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-around gap-4 py-2">
+                    <CircularProgress value={ciPassRate} label="CI pass rate" caption={`last ${completedRuns.length} runs`} tone="ops" />
+                    <div className="text-center">
+                      <p className="text-3xl font-semibold">{completedRuns.length}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Automated runs (recent)</p>
+                    </div>
+                  </div>
+                )}
+              </GlassPanel>
+            </div>
+            <div className="flex flex-col gap-4 xl:col-span-2">
+              <GlassPanel
+                title="Quality velocity trend"
+                subtitle={currentProduct ? `${currentProduct.name} · issues completed vs defect flow` : "Portfolio · issues completed vs defect flow"}
+              >
+                <VelocityChart
+                  data={velocityTrend.data}
+                  emptyMessage={
+                    currentProduct
+                      ? `No completed work yet for ${currentProduct.name}.`
+                      : "No completed work yet across your portfolio."
+                  }
+                />
+                {velocityInsight && <p className="mt-3 text-xs text-muted-foreground">{velocityInsight}</p>}
+              </GlassPanel>
+              <GlassPanel
+                title="Portfolio defect heatmap"
+                subtitle="Open defects per label"
+                action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
+              >
+                <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
+                {topBugLabelInsight && <p className="mt-3 text-xs text-muted-foreground">{topBugLabelInsight}</p>}
+              </GlassPanel>
+            </div>
+          </div>
           <GlassPanel
-            title="Quality velocity trend"
-            subtitle={currentProduct ? `${currentProduct.name} · issues completed vs defect flow` : "Portfolio · issues completed vs defect flow"}
-            className="xl:col-span-2"
+            title="Where work gets stuck"
+            subtitle="Real dwell time per workflow stage, from Jira status history"
+            className="xl:col-span-3"
+            action={!cycleTimeByStage.data?.hasData ? <DemoDataBadge /> : undefined}
           >
-            <VelocityChart
-              data={velocityTrend.data}
-              emptyMessage={
-                currentProduct
-                  ? `No completed work yet for ${currentProduct.name}.`
-                  : "No completed work yet across your portfolio."
-              }
-            />
-          </GlassPanel>
-          <GlassPanel
-            title="Portfolio defect heatmap"
-            subtitle="Aggregate open defects per Jira label"
-            className="xl:col-span-2"
-            action={!bugLabelDistribution.data?.hasData ? <DemoDataBadge /> : undefined}
-          >
-            <DefectHeatmap distribution={bugLabelDistribution.data?.distribution} hasData={bugLabelDistribution.data?.hasData} />
-          </GlassPanel>
-          <GlassPanel
-            title="CI test automation"
-            subtitle={selectedRepo ? `GitHub Actions · ${selectedRepo}` : "Select a repository to see CI activity"}
-            action={ciPassRate === null ? <DemoDataBadge /> : undefined}
-          >
-            {!selectedRepo ? (
-              <p className="text-sm text-muted-foreground">
-                Pick a repository from the Repository filter above to see its automated test-run history.
-              </p>
-            ) : workflowRuns.isLoading ? (
+            {cycleTimeByStage.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : ciPassRate === null ? (
+            ) : !cycleTimeByStage.data?.hasData ? (
               <p className="text-sm text-muted-foreground">
-                No completed GitHub Actions runs yet for {selectedRepo}. This reflects real CI activity, not a
-                test-management tool — there's no connected Xray/Zephyr/TestRail integration, so "% of test cases
-                automated" isn't something this app can measure yet.
+                Not enough status-transition history synced yet for this scope to compute stage-by-stage timing.
               </p>
             ) : (
-              <div className="flex flex-wrap items-center justify-around gap-4 py-2">
-                <CircularProgress value={ciPassRate} label="CI pass rate" caption={`last ${completedRuns.length} runs`} tone="ops" />
-                <div className="text-center">
-                  <p className="text-3xl font-semibold">{completedRuns.length}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Automated runs (recent)</p>
+              <>
+                {(() => {
+                  const stages = cycleTimeByStage.data.stages.slice(0, 8);
+                  const maxTotalDays = Math.max(...stages.map((s) => s.totalDays), 1);
+                  return (
+                    <DataTable
+                      rows={stages}
+                      rowKey={(s) => s.status}
+                      defaultSortKey="total"
+                      defaultSortDir="desc"
+                      columns={[
+                        {
+                          key: "stage",
+                          label: "Stage",
+                          sortValue: (s) => s.status.toLowerCase(),
+                          className: "w-32",
+                          render: (s) => <span className="font-medium">{s.status}</span>,
+                        },
+                        {
+                          key: "total",
+                          label: "Total lost",
+                          align: "right",
+                          sortValue: (s) => s.totalDays,
+                          render: (s) => (
+                            <BarCell
+                              value={s.totalDays}
+                              max={maxTotalDays}
+                              label={`${Math.round(s.totalDays)}d`}
+                              tone={s.status === cycleTimeByStage.data!.bottleneckStage ? "bg-critical" : "bg-primary"}
+                              labelClassName={s.status === cycleTimeByStage.data!.bottleneckStage ? "font-semibold text-critical" : undefined}
+                            />
+                          ),
+                        },
+                        {
+                          key: "avg",
+                          label: "Avg/item",
+                          align: "right",
+                          sortValue: (s) => s.avgDays,
+                          render: (s) => <span className="text-muted-foreground">{s.avgDays}d</span>,
+                        },
+                        {
+                          key: "count",
+                          label: "Items",
+                          align: "right",
+                          sortValue: (s) => s.transitionCount,
+                          render: (s) => <span className="text-muted-foreground">{s.transitionCount}</span>,
+                        },
+                      ]}
+                    />
+                  );
+                })()}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Sorted by total team-days lost by default (average x volume) — click any header to re-sort.
+                  A rare slow outlier can't outrank the real bottleneck this way.
+                </p>
+              </>
+            )}
+          </GlassPanel>
+
+          <GlassPanel
+            title="Team"
+            subtitle="Real logged hours — utilization against an assumed capacity, and cost against a rate you set"
+            className="xl:col-span-3"
+          >
+            <p className="-mt-2 mb-4 text-[11px] text-muted-foreground">
+              Also see:{" "}
+              <Link to="/engineering-health" className="text-primary hover:underline">
+                Developer health profiles &amp; Assignee workload → Engineering Health
+              </Link>
+            </p>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Utilization</h3>
+                  {!teamUtilization.data?.hasData && <DemoDataBadge />}
                 </div>
+                {teamUtilization.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : !teamUtilization.data?.hasData ? (
+                  <p className="text-sm text-muted-foreground">No worklog hours synced yet.</p>
+                ) : (
+                  <>
+                    <DataTable
+                      dense
+                      rows={teamUtilization.data.people.slice(0, 6)}
+                      rowKey={(p) => p.authorAccountId ?? p.name}
+                      defaultSortKey="utilization"
+                      defaultSortDir="desc"
+                      columns={[
+                        {
+                          key: "name",
+                          label: "Person",
+                          sortValue: (p) => p.name.toLowerCase(),
+                          render: (p) => <span className="font-medium">{p.name}</span>,
+                        },
+                        {
+                          key: "utilization",
+                          label: "Utilization",
+                          align: "right",
+                          sortValue: (p) => p.utilizationPercent,
+                          render: (p) => {
+                            // 3-tier so a real 256% overload reads
+                            // differently from a mild 105% — a flat
+                            // over/under-100% split can't tell "slightly
+                            // busy" from "logging 2.5x a normal week"
+                            // (likely multi-project double counting, or a
+                            // real burnout risk either way).
+                            const tone = p.utilizationPercent >= 150 ? "bg-critical" : p.utilizationPercent > 100 ? "bg-warning" : "bg-primary";
+                            const toneText = p.utilizationPercent >= 150 ? "font-semibold text-critical" : undefined;
+                            return (
+                              <BarCell value={p.utilizationPercent} max={150} label={pct(p.utilizationPercent)} tone={tone} labelClassName={toneText} />
+                            );
+                          },
+                        },
+                      ]}
+                    />
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Portfolio average {pct(teamUtilization.data.avgUtilizationPercent ?? 0)} of an assumed
+                      8h/business-day capacity — a stated assumption (no Jira leave/PTO calendar exists), not
+                      measured availability.
+                    </p>
+                  </>
+                )}
               </div>
+
+              <div className="lg:border-l lg:border-glass-border/50 lg:pl-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Cost</h3>
+                  {!teamCost.data?.hasData && <DemoDataBadge />}
+                </div>
+                {teamCost.isLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading…</p>
+                ) : !teamCost.data?.hasData ? (
+                  <p className="text-sm text-muted-foreground">No worklog hours synced yet.</p>
+                ) : (
+                  <>
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-2xl font-semibold">{dollars(teamCost.data.totalCostCents)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        across {teamCost.data.people.length} rated {teamCost.data.people.length === 1 ? "person" : "people"}
+                      </p>
+                    </div>
+                    {teamCost.data.people.length > 0 && (
+                      <DataTable
+                        dense
+                        rows={teamCost.data.people.slice(0, 6)}
+                        rowKey={(p) => p.name}
+                        defaultSortKey="cost"
+                        defaultSortDir="desc"
+                        columns={[
+                          {
+                            key: "name",
+                            label: "Person",
+                            sortValue: (p) => p.name.toLowerCase(),
+                            render: (p) => <span className="font-medium">{p.name}</span>,
+                          },
+                          {
+                            key: "cost",
+                            label: "Cost",
+                            align: "right",
+                            sortValue: (p) => p.costCents,
+                            render: (p) => (
+                              <BarCell
+                                value={p.costCents}
+                                max={Math.max(...teamCost.data!.people.map((x) => x.costCents), 1)}
+                                label={dollars(p.costCents)}
+                                tone="bg-good"
+                              />
+                            ),
+                          },
+                          {
+                            key: "hours",
+                            label: "Hours",
+                            align: "right",
+                            sortValue: (p) => p.loggedHours,
+                            render: (p) => <span className="text-muted-foreground">{p.loggedHours}h</span>,
+                          },
+                        ]}
+                      />
+                    )}
+                    {(teamCost.data.hoursWithoutRate > 0 || teamCost.data.unmatchedHours > 0) && (
+                      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                        +{Math.round(teamCost.data.hoursWithoutRate + teamCost.data.unmatchedHours)}h logged by
+                        people with no rate set or an unmatched account — not included above. This total is a floor.
+                      </p>
+                    )}
+                    {current?.id === "pm" && worklogAuthors.data && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-[11px] font-medium text-primary">
+                          Set hourly rates
+                        </summary>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Every name below is a real Jira/ADO worklog author — keyed by their account, not a
+                          QualiMetrix login, so this works even where Jira hides their email.
+                        </p>
+                        <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+                          {worklogAuthors.data.authors.map((a) => {
+                            const currentValue = a.hourlyRateCents != null ? String(a.hourlyRateCents / 100) : "";
+                            const draftValue = rateDrafts[a.authorAccountId] ?? currentValue;
+                            const isDirty = draftValue !== currentValue;
+                            return (
+                              <li
+                                key={a.authorAccountId}
+                                className="flex items-center gap-2 rounded-lg border border-glass-border/50 bg-accent/10 px-2.5 py-1.5 text-xs"
+                              >
+                                <span className="flex-1 truncate font-medium">{a.authorName ?? a.authorAccountId}</span>
+                                <span className="shrink-0 text-muted-foreground">{a.totalHours}h logged</span>
+                                <span className="flex items-center gap-1 rounded-md border border-glass-border bg-background/60 px-1.5 py-0.5">
+                                  <span className="text-muted-foreground">$</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={1}
+                                    value={draftValue}
+                                    onChange={(e) => setRateDrafts((d) => ({ ...d, [a.authorAccountId]: e.target.value }))}
+                                    className="w-12 bg-transparent text-right outline-none"
+                                    placeholder="0"
+                                  />
+                                  <span className="text-muted-foreground">/hr</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={setWorklogAuthorRate.isPending || !isDirty}
+                                  onClick={() => {
+                                    const raw = rateDrafts[a.authorAccountId];
+                                    const cents = raw === undefined || raw === "" ? null : Math.round(Number(raw) * 100);
+                                    if (cents !== null && (Number.isNaN(cents) || cents < 0)) return;
+                                    setWorklogAuthorRate.mutate({ authorAccountId: a.authorAccountId, authorName: a.authorName, hourlyRateCents: cents });
+                                  }}
+                                  className={cn(
+                                    "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                                    isDirty ? "bg-primary text-primary-foreground hover:opacity-90" : "text-muted-foreground/40"
+                                  )}
+                                >
+                                  Save
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </details>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            <p className="mt-4 border-t border-glass-border/60 pt-3 text-[11px] text-muted-foreground">
+              This is logged-hours utilization and cost — not a wellbeing or ticket-load signal.{" "}
+              <Link to="/engineering-health" className="text-primary hover:underline">
+                See Developer health profiles &amp; Assignee workload →
+              </Link>
+            </p>
+          </GlassPanel>
+
+          <GlassPanel
+            title="Project portfolio"
+            subtitle="Per-project status and team size"
+            className="xl:col-span-3"
+            action={!projectsOverview.data?.hasData ? <DemoDataBadge /> : undefined}
+          >
+            {projectsOverview.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : !projectsOverview.data?.projects.length ? (
+              <p className="text-sm text-muted-foreground">No products yet.</p>
+            ) : (
+              (() => {
+                const synced = projectsOverview.data.projects
+                  .filter((p) => p.lastSyncedAt)
+                  .sort((a, b) => (b.hasData ? b.healthScore : -1) - (a.hasData ? a.healthScore : -1));
+                const unsynced = projectsOverview.data.projects.filter((p) => !p.lastSyncedAt);
+                return (
+                  <>
+                    {synced.length > 0 && (
+                      <DataTable
+                        rows={synced}
+                        rowKey={(p) => p.productId}
+                        defaultSortKey="health"
+                        defaultSortDir="desc"
+                        columns={[
+                          {
+                            key: "project",
+                            label: "Project",
+                            sortValue: (p) => p.productName.toLowerCase(),
+                            render: (p) => <span className="font-medium">{p.productName}</span>,
+                          },
+                          {
+                            key: "synced",
+                            label: "Synced",
+                            sortValue: (p) => new Date(p.lastSyncedAt!).getTime(),
+                            render: (p) => (
+                              <span className="text-muted-foreground">{new Date(p.lastSyncedAt!).toLocaleDateString()}</span>
+                            ),
+                          },
+                          {
+                            key: "items",
+                            label: "Items",
+                            align: "right",
+                            sortValue: (p) => p.totalWorkItems,
+                            render: (p) => <span className="text-muted-foreground">{p.totalWorkItems}</span>,
+                          },
+                          {
+                            key: "openBugs",
+                            label: "Open bugs",
+                            align: "right",
+                            sortValue: (p) => p.openBugs,
+                            render: (p) => (
+                              <span className={p.openBugs > 0 ? "text-critical" : "text-muted-foreground"}>{p.openBugs}</span>
+                            ),
+                          },
+                          {
+                            key: "teamSize",
+                            label: "Team size",
+                            align: "right",
+                            sortValue: (p) => p.teamSize || 0,
+                            render: (p) => <span className="text-muted-foreground">{p.teamSize || "—"}</span>,
+                          },
+                          {
+                            key: "health",
+                            label: "Health",
+                            align: "right",
+                            sortValue: (p) => (p.hasData ? p.healthScore : -1),
+                            render: (p) =>
+                              p.hasData ? (
+                                <BarCell
+                                  value={p.healthScore}
+                                  max={100}
+                                  label={String(p.healthScore)}
+                                  tone={p.healthScore >= 60 ? "bg-good" : "bg-critical"}
+                                />
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              ),
+                          },
+                        ]}
+                      />
+                    )}
+                    {unsynced.length > 0 && (
+                      <p className="mt-3 text-[11px] text-muted-foreground">
+                        {unsynced.length} more product{unsynced.length === 1 ? "" : "s"} not connected yet:{" "}
+                        {unsynced.map((p) => p.productName).join(", ")}
+                      </p>
+                    )}
+                  </>
+                );
+              })()
             )}
           </GlassPanel>
         </div>

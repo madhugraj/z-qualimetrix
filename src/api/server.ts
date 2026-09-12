@@ -7,6 +7,7 @@ import apiRoutes from './routes'
 import { assertJwtSecretConfigured } from '../lib/jwt'
 import { startScheduler, registerAiProviderSyncHandler, registerSyncHandler, registerGithubCommitSyncHandler } from '../lib/scheduler'
 import { syncAllProductsForIntegration as syncAllJira } from './services/jira-sync.service'
+import { syncAllConfluence } from './services/confluence-sync.service'
 import { syncAllProductsForIntegration as syncAllAdo } from './services/azure-devops-sync.service'
 import { syncOpenAiUsage } from './services/openai-usage-sync.service'
 import { syncAnthropicConnection } from './services/anthropic-usage-sync.service'
@@ -113,6 +114,7 @@ app.listen(PORT, () => {
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`)
 
   registerSyncHandler('jira', syncAllJira)
+  registerSyncHandler('confluence', syncAllConfluence)
   registerSyncHandler('azure_devops', syncAllAdo)
   registerSyncHandler('openai', syncOpenAiUsage)
   registerAiProviderSyncHandler('anthropic', syncAnthropicConnection)

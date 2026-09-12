@@ -30,33 +30,39 @@ model Tenant {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  products                  Product[]
-  tenantMemberships         TenantMembership[]
-  users                     User[]
-  workItems                 WorkItem[]
-  workItemLinks             WorkItemLink[]
-  testCases                 TestCase[]
-  deliverables              ManualDeliverable[]
-  sprints                   Sprint[]
-  githubIntegrations        GitHubIntegration[]
-  aiUsageEvents             AiUsageEvent[]
-  aiModelCatalogs           AiModelCatalog[]
-  integrations              Integration[]
-  integrationDelegations    IntegrationDelegation[]
-  aiProviderKeyMappings     AiProviderKeyMapping[]
-  aiProviderConnections     AiProviderConnection[]
-  gpuComputeUsageEvents     GpuComputeUsageEvent[]
-  aiProviderIdentities      AiProviderIdentity[]
-  aiProviderRawEvents       AiProviderRawEvent[]
-  aiProviderDailyActivities AiProviderDailyActivity[]
-  aiProviderDeletionAudits  AiProviderDeletionAudit[]
-  commits                   Commit[]
-  commitAttributions        CommitAttribution[]
-  chatConversations         ChatConversation[]
-  chatMessages              ChatMessage[]
+  products                     Product[]
+  tenantMemberships            TenantMembership[]
+  users                        User[]
+  workItems                    WorkItem[]
+  workItemLinks                WorkItemLink[]
+  testCases                    TestCase[]
+  deliverables                 ManualDeliverable[]
+  sprints                      Sprint[]
+  githubIntegrations           GitHubIntegration[]
+  aiUsageEvents                AiUsageEvent[]
+  aiModelCatalogs              AiModelCatalog[]
+  integrations                 Integration[]
+  integrationDelegations       IntegrationDelegation[]
+  aiProviderKeyMappings        AiProviderKeyMapping[]
+  aiProviderConnections        AiProviderConnection[]
+  gpuComputeUsageEvents        GpuComputeUsageEvent[]
+  aiProviderIdentities         AiProviderIdentity[]
+  aiProviderRawEvents          AiProviderRawEvent[]
+  aiProviderDailyActivities    AiProviderDailyActivity[]
+  aiProviderDeletionAudits     AiProviderDeletionAudit[]
+  commits                      Commit[]
+  commitAttributions           CommitAttribution[]
+  chatConversations            ChatConversation[]
+  chatMessages                 ChatMessage[]
   assistantProviderConnections AssistantProviderConnection[]
   workItemActivities           WorkItemActivity[]
   workLogs                     WorkLog[]
+  worklogAuthorRates           WorklogAuthorRate[]
+  confluenceSpaces             ConfluenceSpace[]
+  confluencePages              ConfluencePage[]
+  confluencePageChunks         ConfluencePageChunk[]
+  workItemDocumentLinks        WorkItemDocumentLink[]
+  notificationReads            NotificationRead[]
 
   @@index([slug])
   @@index([domain])
@@ -79,27 +85,29 @@ model User {
   aiIngestTokenCreatedAt DateTime? @map("ai_ingest_token_created_at") @db.Timestamptz
   passwordHash           String?   @map("password_hash") @db.VarChar(60)
 
-  tenant                       Tenant?                   @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  tenantMemberships            TenantMembership[]
-  createdWorkItems             WorkItem[]                @relation("WorkItemCreator")
-  updatedWorkItems             WorkItem[]                @relation("WorkItemUpdater")
-  createdTestCases             TestCase[]                @relation("TestCaseCreator")
-  updatedTestCases             TestCase[]                @relation("TestCaseUpdater")
-  createdDeliverables          ManualDeliverable[]       @relation("DeliverableCreator")
-  refreshTokens                RefreshToken[]
-  githubIntegrations           GitHubIntegration[]
-  aiUsageEvents                AiUsageEvent[]
-  integrations                 Integration[]
-  delegationsGranted           IntegrationDelegation[]   @relation("DelegationGrantedBy")
-  delegationsReceived          IntegrationDelegation[]   @relation("DelegationGrantee")
-  aiProviderKeyMappings        AiProviderKeyMapping[]
-  aiProviderConnectionsCreated AiProviderConnection[]    @relation("AiProviderConnectionCreator")
-  aiProviderIdentities         AiProviderIdentity[]
-  aiProviderDeletionAudits     AiProviderDeletionAudit[] @relation("AiProviderDeletionRequester")
-  chatConversationsStarted     ChatConversation[]
-  chatMessages                 ChatMessage[]
+  tenant                              Tenant?                       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  tenantMemberships                   TenantMembership[]
+  createdWorkItems                    WorkItem[]                    @relation("WorkItemCreator")
+  updatedWorkItems                    WorkItem[]                    @relation("WorkItemUpdater")
+  createdTestCases                    TestCase[]                    @relation("TestCaseCreator")
+  updatedTestCases                    TestCase[]                    @relation("TestCaseUpdater")
+  createdDeliverables                 ManualDeliverable[]           @relation("DeliverableCreator")
+  refreshTokens                       RefreshToken[]
+  githubIntegrations                  GitHubIntegration[]
+  aiUsageEvents                       AiUsageEvent[]
+  integrations                        Integration[]
+  workItemDocumentLinks               WorkItemDocumentLink[]
+  delegationsGranted                  IntegrationDelegation[]       @relation("DelegationGrantedBy")
+  delegationsReceived                 IntegrationDelegation[]       @relation("DelegationGrantee")
+  aiProviderKeyMappings               AiProviderKeyMapping[]
+  aiProviderConnectionsCreated        AiProviderConnection[]        @relation("AiProviderConnectionCreator")
+  aiProviderIdentities                AiProviderIdentity[]
+  aiProviderDeletionAudits            AiProviderDeletionAudit[]     @relation("AiProviderDeletionRequester")
+  chatConversationsStarted            ChatConversation[]
+  chatMessages                        ChatMessage[]
   assistantProviderConnectionsCreated AssistantProviderConnection[]
   workItemActivities                  WorkItemActivity[]
+  notificationReads                   NotificationRead[]
 
   @@index([email])
   @@index([tenantId])
@@ -182,62 +190,74 @@ model Product {
 // ============================================================================
 
 model WorkItem {
-  id                 String    @id @default(uuid()) @db.Uuid
-  tenantId           String    @map("tenant_id") @db.Uuid
-  productId          String    @map("product_id") @db.Uuid
-  externalId         String?   @map("external_id") @db.VarChar(100)
-  type               String    @db.VarChar(50)
-  status             String    @db.VarChar(50)
-  priority           String?   @db.VarChar(20)
-  title              String    @db.VarChar(500)
-  description        String?   @db.Text
-  assigneeId         String?   @map("assignee_id") @db.Uuid
-  sprintId           String?   @map("sprint_id") @db.Uuid
-  storyPoints        Int?      @map("story_points")
+  id                       String    @id @default(uuid()) @db.Uuid
+  tenantId                 String    @map("tenant_id") @db.Uuid
+  productId                String    @map("product_id") @db.Uuid
+  externalId               String?   @map("external_id") @db.VarChar(100)
+  type                     String    @db.VarChar(50)
+  status                   String    @db.VarChar(50)
+  priority                 String?   @db.VarChar(20)
+  title                    String    @db.VarChar(500)
+  description              String?   @db.Text
+  assigneeId               String?   @map("assignee_id") @db.Uuid
+  /// Jira accountId / Azure DevOps identity id of the assignee, straight from
+  /// the source system — set whenever an assignee exists, independent of
+  /// whether assigneeId above could be resolved. assigneeId requires a
+  /// matching QualiMetrix User row AND (for Jira) that person's email being
+  /// visible via the API; this doesn't, since accountId/identity id and
+  /// displayName are always returned regardless of Jira's per-user email-
+  /// visibility privacy setting. The only reliable key for "workload by
+  /// assignee" metrics that don't depend on someone having logged into
+  /// QualiMetrix at all.
+  externalAssigneeId       String?   @map("external_assignee_id")
+  externalAssigneeName     String?   @map("external_assignee_name")
+  sprintId                 String?   @map("sprint_id") @db.Uuid
+  storyPoints              Int?      @map("story_points")
   /// Seconds, from Jira's `fields.timetracking` or Azure DevOps's
   /// OriginalEstimate/RemainingWork/CompletedWork (hours, converted at sync
   /// time). timeSpentSeconds is the source system's own rollup — Jira
   /// maintains it directly; it is NOT computed by summing this app's WorkLog
   /// rows and must never be reconciled against that sum as if required to match.
-  originalEstimateSeconds  Int? @map("original_estimate_seconds")
-  remainingEstimateSeconds Int? @map("remaining_estimate_seconds")
-  timeSpentSeconds         Int? @map("time_spent_seconds")
-  createdBy          String    @map("created_by") @db.Uuid
-  updatedBy          String?   @map("updated_by") @db.Uuid
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  resolvedAt         DateTime? @map("resolved_at") @db.Timestamptz
-  closedAt           DateTime? @map("closed_at") @db.Timestamptz
-  externalSystem     String    @default("manual") @map("external_system") @db.VarChar(20)
-  isActive           Boolean   @default(true) @map("is_active")
-  lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
-  externalMetadata   Json?     @default("{}") @map("external_metadata")
-  labels             String[]  @default([])
-  externalStatusName String?   @map("external_status_name") @db.VarChar(100)
-  statusChangedAt    DateTime? @map("status_changed_at") @db.Timestamptz
-  reopenCount        Int       @default(0) @map("reopen_count")
+  originalEstimateSeconds  Int?      @map("original_estimate_seconds")
+  remainingEstimateSeconds Int?      @map("remaining_estimate_seconds")
+  timeSpentSeconds         Int?      @map("time_spent_seconds")
+  createdBy                String    @map("created_by") @db.Uuid
+  updatedBy                String?   @map("updated_by") @db.Uuid
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  resolvedAt               DateTime? @map("resolved_at") @db.Timestamptz
+  closedAt                 DateTime? @map("closed_at") @db.Timestamptz
+  externalSystem           String    @default("manual") @map("external_system") @db.VarChar(20)
+  isActive                 Boolean   @default(true) @map("is_active")
+  lastSeenAtSourceAt       DateTime? @map("last_seen_at_source_at") @db.Timestamptz
+  externalMetadata         Json?     @default("{}") @map("external_metadata")
+  labels                   String[]  @default([])
+  externalStatusName       String?   @map("external_status_name") @db.VarChar(100)
+  statusChangedAt          DateTime? @map("status_changed_at") @db.Timestamptz
+  reopenCount              Int       @default(0) @map("reopen_count")
   /// text-embedding-3-small (1536 dims) over title+description, generated at sync time when
   /// content changes. Prisma list fields can't be nullable, so an empty array (the default)
   /// IS the "not embedded yet" sentinel — getSimilarBugs checks .length, never treats it as
   /// a real zero vector to compare against.
-  embedding          Float[]   @default([])
+  embedding                Float[]   @default([])
   /// Direct parent (epic) for a story/task, or a story for a subtask — one level,
   /// not transitive. Populated from Jira's `parent` field / classic Epic Link
   /// custom field, or Azure DevOps's System.Parent. Sync always writes this
   /// explicitly (including back to null on un-parenting), never leaves it stale.
-  parentId           String?   @map("parent_id") @db.Uuid
+  parentId                 String?   @map("parent_id") @db.Uuid
 
-  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sprint    Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
-  creator   User           @relation("WorkItemCreator", fields: [createdBy], references: [id])
-  updater   User?          @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
-  parent    WorkItem?          @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children  WorkItem[]         @relation("WorkItemHierarchy")
-  linksFrom  WorkItemLink[]     @relation("LinkSource")
-  linksTo    WorkItemLink[]     @relation("LinkTarget")
-  activities WorkItemActivity[]
-  workLogs   WorkLog[]
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product       Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sprint        Sprint?                @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  creator       User                   @relation("WorkItemCreator", fields: [createdBy], references: [id])
+  updater       User?                  @relation("WorkItemUpdater", fields: [updatedBy], references: [id])
+  parent        WorkItem?              @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children      WorkItem[]             @relation("WorkItemHierarchy")
+  linksFrom     WorkItemLink[]         @relation("LinkSource")
+  linksTo       WorkItemLink[]         @relation("LinkTarget")
+  activities    WorkItemActivity[]
+  workLogs      WorkLog[]
+  documentLinks WorkItemDocumentLink[]
 
   @@unique([productId, externalSystem, externalId])
   @@index([tenantId])
@@ -245,6 +265,7 @@ model WorkItem {
   @@index([externalId])
   @@index([status])
   @@index([assigneeId])
+  @@index([externalAssigneeId])
   @@index([externalSystem])
   @@index([parentId])
   @@map("work_items")
@@ -296,6 +317,10 @@ model WorkLog {
   workItemId       String   @map("work_item_id") @db.Uuid
   authorName       String?  @map("author_name") @db.VarChar(255)
   authorEmail      String?  @map("author_email") @db.VarChar(255)
+  /// Jira accountId, straight from the worklog's own author payload — always
+  /// present (unlike authorEmail, which Jira's per-user privacy setting can
+  /// hide) since it's the same object issue.fields.assignee comes from.
+  authorAccountId  String?  @map("author_account_id")
   timeSpentSeconds Int      @map("time_spent_seconds")
   startedAt        DateTime @map("started_at") @db.Timestamptz
   externalSystem   String   @default("jira") @map("external_system") @db.VarChar(20)
@@ -311,8 +336,34 @@ model WorkLog {
 
   @@unique([externalSystem, externalId])
   @@index([tenantId, authorEmail, startedAt])
+  @@index([tenantId, authorAccountId])
   @@index([workItemId])
   @@map("work_logs")
+}
+
+/// PM/Admin-entered $/hr rate for a real worklog author, keyed by Jira
+/// accountId rather than a QualiMetrix User/email — Jira's per-user privacy
+/// setting hides most people's email from the API entirely, so an
+/// email-keyed rate (the first version of this feature) could only ever be
+/// set for the handful of people whose email happens to be visible. Keying
+/// on accountId (always present on a worklog's author) lets a PM rate any
+/// real contributor, whether or not they even have a QualiMetrix login.
+model WorklogAuthorRate {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  authorAccountId String   @map("author_account_id")
+  /// Denormalized display name at time of last set, purely so the rate
+  /// editor can show a name without a second round-trip — the source of
+  /// truth for "who is this" is still the WorkLog rows themselves.
+  authorName      String?  @map("author_name") @db.VarChar(255)
+  hourlyRateCents Int      @map("hourly_rate_cents")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, authorAccountId])
+  @@map("worklog_author_rates")
 }
 
 /// Native issue-link graph from the source system (Jira "relates to"/"is
@@ -437,6 +488,11 @@ model Sprint {
   isActive           Boolean   @default(true) @map("is_active")
   lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
   externalMetadata   Json?     @default("{}") @map("external_metadata")
+  /// Jira Agile board this sprint was fetched from (`/rest/agile/1.0/board/{id}/sprint`).
+  /// Null for Azure DevOps sprints and any Jira sprint synced before this field existed
+  /// (backfills automatically on the next sync).
+  externalBoardId    String?   @map("external_board_id") @db.VarChar(100)
+  boardName          String?   @map("board_name") @db.VarChar(255)
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -571,16 +627,16 @@ model CommitAttribution {
 // A tenant-wide, shared conversation history — visible to any pm/executive in the
 // tenant (an audit trail of what's been asked), not private per-user.
 model ChatConversation {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @map("tenant_id") @db.Uuid
-  startedByUserId String  @map("started_by_user_id") @db.Uuid
-  title          String?  @db.VarChar(255)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  startedByUserId String   @map("started_by_user_id") @db.Uuid
+  title           String?  @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  startedBy   User          @relation(fields: [startedByUserId], references: [id], onDelete: Cascade)
-  messages    ChatMessage[]
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startedBy User          @relation(fields: [startedByUserId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
 
   @@index([tenantId, updatedAt])
   @@map("chat_conversations")
@@ -982,6 +1038,141 @@ model Integration {
   @@index([tenantId])
   @@index([isActive])
   @@map("integrations")
+}
+
+// ============================================================================
+// CONFLUENCE CLOUD (real integration — connects via Jira's OAuth grant, see
+// jira-oauth.service.ts's SCOPES comment; tracked as its own `Integration`
+// row with provider='confluence')
+// ============================================================================
+
+model ConfluenceSpace {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  externalSystem     String    @default("confluence") @map("external_system") @db.VarChar(20)
+  externalId         String    @map("external_id") @db.VarChar(100) // Confluence space id
+  key                String    @db.VarChar(100) // space key, e.g. "ENG"
+  name               String    @db.VarChar(255)
+  spaceType          String?   @map("space_type") @db.VarChar(50)
+  // A tenant picks which spaces to actually sync (mirrors Integration.
+  // externalMetadata.selectedProjectIds for Jira) — every space this
+  // Atlassian site has is listed here once discovered, but only selected
+  // ones get their pages synced.
+  isSelected         Boolean   @default(false) @map("is_selected")
+  isActive           Boolean   @default(true) @map("is_active")
+  lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
+  externalMetadata   Json?     @default("{}") @map("external_metadata")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pages  ConfluencePage[]
+
+  @@unique([tenantId, externalSystem, externalId])
+  @@index([tenantId])
+  @@map("confluence_spaces")
+}
+
+model ConfluencePage {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  spaceId            String    @map("space_id") @db.Uuid
+  externalSystem     String    @default("confluence") @map("external_system") @db.VarChar(20)
+  externalId         String    @map("external_id") @db.VarChar(100) // Confluence content id
+  title              String    @db.VarChar(500)
+  // Plain-text extraction of Confluence's `body.storage` value (see
+  // confluence-storage-to-text.ts) — used for display and as the ILIKE
+  // fallback search path when a page has no embeddings yet.
+  bodyText           String?   @map("body_text") @db.Text
+  // Confluence's own version.number — cheap, authoritative change detection.
+  // A bump means the page changed since the last sync; no content diffing needed.
+  version            Int       @default(0)
+  webUrl             String?   @map("web_url") @db.VarChar(1000)
+  isActive           Boolean   @default(true) @map("is_active")
+  lastSeenAtSourceAt DateTime? @map("last_seen_at_source_at") @db.Timestamptz
+  externalMetadata   Json?     @default("{}") @map("external_metadata")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  space  ConfluenceSpace        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  chunks ConfluencePageChunk[]
+  links  WorkItemDocumentLink[]
+
+  @@unique([spaceId, externalSystem, externalId])
+  @@index([tenantId])
+  @@index([spaceId])
+  @@map("confluence_pages")
+}
+
+// A page's body text split into ~800-char windows (see chunkPageText in
+// confluence-sync.service.ts) so each piece stays within MiniLM's effective
+// input length (local-embeddings.service.ts's MAX_INPUT_CHARS=1000) — a
+// single embedding over a whole page would silently ignore most of it.
+// Re-chunked from scratch (delete + reinsert) whenever ConfluencePage.version
+// changes; no incremental diffing.
+model ConfluencePageChunk {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  pageId     String   @map("page_id") @db.Uuid
+  chunkIndex Int      @map("chunk_index")
+  text       String   @db.Text
+  embedding  Float[]  @default([])
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  page   ConfluencePage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, chunkIndex])
+  @@index([tenantId])
+  @@index([pageId])
+  @@map("confluence_page_chunks")
+}
+
+// A manual (or suggestion-accepted) link between a work item — typically an
+// epic — and a Confluence page treated as its documentation. New table
+// rather than reusing WorkItemLink: that model's relations are hard-typed
+// WorkItem<->WorkItem via named Prisma relations, so it can't represent a
+// WorkItem<->ConfluencePage edge as-is.
+model WorkItemDocumentLink {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  workItemId String   @map("work_item_id") @db.Uuid
+  pageId     String   @map("page_id") @db.Uuid
+  linkType   String   @default("related") @map("link_type") @db.VarChar(50)
+  createdBy  String   @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workItem WorkItem       @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  page     ConfluencePage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  creator  User           @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
+  @@unique([workItemId, pageId])
+  @@index([tenantId])
+  @@index([workItemId])
+  @@index([pageId])
+  @@map("work_item_document_links")
+}
+
+// Notifications themselves are computed live at request time from real
+// WorkItem/developer-health/etc. data (see notification.service.ts), not
+// stored — this table only persists which of those (deterministically-id'd)
+// alerts a given user has already read, so "read" survives a reload instead
+// of resetting every time like the old client-only mock state did.
+model NotificationRead {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  notificationId String   @map("notification_id") @db.VarChar(120)
+  readAt         DateTime @default(now()) @map("read_at") @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, notificationId])
+  @@index([tenantId])
+  @@map("notification_reads")
 }
 
 // A PM-granted, revocable right for a PO to edit their own product's

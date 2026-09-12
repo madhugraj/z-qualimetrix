@@ -23,7 +23,6 @@ export async function setupOrganization(req: Request, res: Response) {
       timezone,
       workingDays,
       defaultSprintLength,
-      budgetSettings,
       adminUser
     } = req.body;
 
@@ -104,20 +103,6 @@ export async function setupOrganization(req: Request, res: Response) {
       }
     }
 
-    // Set up AI budget configuration if provided
-    let budgetConfig = null;
-    if (budgetSettings) {
-      // This would be stored in a separate budget configuration table
-      budgetConfig = {
-        orgSprintBudget: budgetSettings.orgSprintBudget || 3200,
-        defaultSeatBudget: budgetSettings.defaultSeatBudget || 400,
-        alertThresholds: budgetSettings.alertThresholds || {
-          warning: 75,
-          critical: 90
-        }
-      };
-    }
-
     res.json({
       success: true,
       data: {
@@ -132,7 +117,6 @@ export async function setupOrganization(req: Request, res: Response) {
           maxProducts: tenant.maxProducts
         },
         adminUser: adminUserResponse,
-        budgetConfiguration: budgetConfig,
         nextSteps: [
           'Import users via bulk import endpoint',
           'Configure teams and squads',
@@ -272,8 +256,16 @@ export async function configureTeams(req: Request, res: Response) {
       });
     }
 
-    // Get the tenant
-    const tenant = await prisma.tenant.findFirst();
+    // Scoped to the caller's own tenant — findFirst() would silently operate
+    // on whichever tenant was created first once more than one exists.
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({
+        success: false,
+        error: 'No tenant associated with this account'
+      });
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       return res.status(400).json({
         success: false,
@@ -317,8 +309,15 @@ export async function updateBudgetConfiguration(req: Request, res: Response) {
   try {
     const { orgSprintBudget, defaultSeatBudget, alertThresholds } = req.body;
 
-    // Get the tenant
-    const tenant = await prisma.tenant.findFirst();
+    // Scoped to the caller's own tenant — see configureTeams for why findFirst() is wrong here.
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({
+        success: false,
+        error: 'No tenant associated with this account'
+      });
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
       return res.status(400).json({
         success: false,
@@ -369,8 +368,13 @@ export async function updateBudgetConfiguration(req: Request, res: Response) {
  */
 export async function getConfigurationStatus(req: Request, res: Response) {
   try {
-    const tenant = await prisma.tenant.findFirst();
-    const userCount = await prisma.user.count();
+    // Scoped to the caller's own tenant — see configureTeams for why findFirst() is wrong here.
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ success: false, error: 'No tenant associated with this account' });
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const userCount = await prisma.user.count({ where: { tenantId } });
 
     // Get basic stats
     const stats = {
@@ -378,8 +382,8 @@ export async function getConfigurationStatus(req: Request, res: Response) {
       userCount,
       maxUsers: tenant?.maxUsers || 0,
       subscriptionTier: tenant?.subscriptionTier || 'none',
-      productsConfigured: await prisma.product.count(),
-      aiUsageEvents: await prisma.aiUsageEvent.count()
+      productsConfigured: await prisma.product.count({ where: { tenantId } }),
+      aiUsageEvents: await prisma.aiUsageEvent.count({ where: { tenantId } })
     };
 
     // Determine setup progress

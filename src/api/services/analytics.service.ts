@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { STALE_ITEM_THRESHOLD_DAYS } from '../../lib/qm-thresholds';
 
 /**
  * Buckets our normalized WorkItem.type into the 3 categories a PM actually
@@ -20,6 +21,36 @@ function emptyTypeBreakdown(): Record<WorkTypeCategory, number> {
 }
 
 /**
+ * Process/triage metadata Jira/ADO teams commonly encode as labels or tags
+ * (severity-2, sprint-aug-sprint-1, ...) — real values, but not a module or
+ * functional category, so they drown out actually-meaningful labels when
+ * every consumer of WorkItem.labels tries to show "what kind of work is
+ * this." Shared by every label-distribution view (defect heatmap, domain
+ * donut, knowledge-silo detection) so they all agree on what counts as noise
+ * instead of each hand-rolling a slightly different filter.
+ */
+const NOISE_LABEL = /^severity-|^sprint-/i;
+
+/** Meaningful labels on this item, or ['Unlabeled'] if it has none once noise is stripped out. */
+function meaningfulLabels(labels: string[]): string[] {
+  const real = labels.filter((l) => !NOISE_LABEL.test(l));
+  return real.length > 0 ? real : ['Unlabeled'];
+}
+
+/** Count of Mon-Fri days in [start, end] inclusive — the capacity baseline for getTeamUtilization, not a real leave/PTO-aware calendar. */
+function countBusinessDays(start: Date, end: Date): number {
+  let count = 0;
+  const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (cur <= last) {
+    const day = cur.getDay();
+    if (day !== 0 && day !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+/**
  * Analytics Engine Service
  * Calculates quality metrics, KPIs, and performance indicators
  */
@@ -34,7 +65,7 @@ export class AnalyticsService {
    * Calculate Mean Time To Resolve (MTTR) for bugs
    * MTTR = Total time to resolve bugs / Number of resolved bugs
    */
-  async calculateMTTR(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
+  async calculateMTTR(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string, assigneeId?: string): Promise<{
     overall: number;
     byPriority: Record<string, number>;
     bySprint: Record<string, number>;
@@ -54,6 +85,10 @@ export class AnalyticsService {
     else if (tenantId) where.tenantId = tenantId;
     if (startDate) where.createdAt = { ...where.createdAt, gte: startDate };
     if (endDate) where.createdAt = { ...where.createdAt, lte: endDate };
+    // Internal FK (populated at sync time), not externalAssigneeId/email —
+    // the latter is unreliable per getAssigneeWorkload's doc comment below
+    // (Jira's per-user email-visibility setting can hide it for real users).
+    if (assigneeId) where.assigneeId = assigneeId;
 
     const [resolvedBugs, trend] = await Promise.all([
       this.prisma.workItem.findMany({
@@ -67,7 +102,7 @@ export class AnalyticsService {
           product: { select: { id: true, name: true } }
         }
       }),
-      this.calculateMttrTrend(productId, tenantId, startDate, endDate)
+      this.calculateMttrTrend(productId, tenantId, startDate, endDate, assigneeId)
     ]);
 
     // A resolvedAt earlier than createdAt is a timestamp anomaly, not a bug
@@ -190,7 +225,7 @@ export class AnalyticsService {
    * MTTR trend over the most recent sprints, falling back to calendar weeks
    * when no Sprint data exists for this scope (see weekBuckets).
    */
-  private async calculateMttrTrend(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date): Promise<Array<{ period: string; mttr: number }>> {
+  private async calculateMttrTrend(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date, assigneeId?: string): Promise<Array<{ period: string; mttr: number }>> {
     const sprints = await this.getRecentSprints({ productId, tenantId, startDate, endDate });
 
     if (sprints.length > 0) {
@@ -198,7 +233,7 @@ export class AnalyticsService {
 
       for (const sprint of sprints) {
         const resolvedBugs = await this.prisma.workItem.findMany({
-          where: { sprintId: sprint.id, type: 'bug', status: 'resolved', resolvedAt: { not: null } },
+          where: { sprintId: sprint.id, type: 'bug', status: 'resolved', resolvedAt: { not: null }, ...(assigneeId ? { assigneeId } : {}) },
           select: { createdAt: true, resolvedAt: true }
         });
 
@@ -218,7 +253,8 @@ export class AnalyticsService {
         type: 'bug',
         status: 'resolved',
         resolvedAt: { not: null },
-        ...(productId ? { productId } : tenantId ? { tenantId } : {})
+        ...(productId ? { productId } : tenantId ? { tenantId } : {}),
+        ...(assigneeId ? { assigneeId } : {})
       },
       select: { createdAt: true, resolvedAt: true }
     });
@@ -477,7 +513,12 @@ export class AnalyticsService {
             _count: true
           }),
           this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug' } }),
-          this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug', status: 'resolved' } })
+          // 'completed' included alongside 'resolved' — every other bug
+          // aggregation in this file (getBacklogSummary, getProjectsOverview,
+          // getEpicRollups) treats them as the same "done" state; this one
+          // used to only match 'resolved', silently undercounting bugs
+          // closed via the 'completed' status.
+          this.prisma.workItem.count({ where: { sprintId: sprint.id, type: 'bug', status: { in: ['resolved', 'completed'] } } })
         ]);
 
         const byType = emptyTypeBreakdown();
@@ -519,7 +560,7 @@ export class AnalyticsService {
 
       const created = bugItems.filter((bug) => inBucket(bucket, new Date(bug.createdAt))).length;
       const resolved = bugItems.filter((bug) => {
-        if (bug.status !== 'resolved') return false;
+        if (bug.status !== 'resolved' && bug.status !== 'completed') return false;
         const at = bug.resolvedAt ?? bug.statusChangedAt;
         return at ? inBucket(bucket, new Date(at)) : false;
       }).length;
@@ -539,7 +580,7 @@ export class AnalyticsService {
    * above). This is the "what did the team actually fix last sprint"
    * question a PM asks in a status update.
    */
-  async getRecentHighPriorityFixes(productId?: string, tenantId?: string, limit: number = 20): Promise<{
+  async getRecentHighPriorityFixes(productId?: string, tenantId?: string, limit: number = 20, assigneeId?: string): Promise<{
     periodLabel: string;
     periodSource: 'sprint' | 'week';
     bugs: Array<{
@@ -559,7 +600,8 @@ export class AnalyticsService {
       status: 'resolved',
       priority: { in: ['critical', 'high'] },
       resolvedAt: { not: null },
-      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+      ...(productId ? { productId } : tenantId ? { tenantId } : {}),
+      ...(assigneeId ? { assigneeId } : {})
     };
 
     let periodLabel: string;
@@ -888,14 +930,27 @@ export class AnalyticsService {
     const productAnalytics = await Promise.all(
       products.map(async (product) => {
         try {
-          const [analytics, totalWorkItems] = await Promise.all([
+          const [analytics, totalWorkItems, epicRollups] = await Promise.all([
             this.getProductAnalytics(product.id, startDate, endDate),
-            this.prisma.workItem.count({ where: { productId: product.id } })
+            this.prisma.workItem.count({ where: { productId: product.id } }),
+            // defectLeakage/testMetrics/releaseReadiness are ALL gated on
+            // this product having real bug or test-execution data — a
+            // product with a healthy, progressing backlog but zero bugs
+            // (a real, good thing) previously scored as "no data" purely
+            // because the other three signals all happen to share that one
+            // gate. Epic completion is a genuinely independent signal that
+            // doesn't need bugs to exist at all, confirmed live: several
+            // real products here have real epics with real children but no
+            // bug-type work items yet.
+            this.getEpicRollups(product.id)
           ]);
           const parts: Array<{ value: number; weight: number }> = [];
-          if (analytics.defectLeakage.hasData) parts.push({ value: 100 - analytics.defectLeakage.rate, weight: 0.3 });
-          if (analytics.testMetrics.hasData) parts.push({ value: analytics.testMetrics.passRate, weight: 0.4 });
-          if (analytics.releaseReadiness.hasData) parts.push({ value: analytics.releaseReadiness.overallScore, weight: 0.3 });
+          if (analytics.defectLeakage.hasData) parts.push({ value: 100 - analytics.defectLeakage.rate, weight: 0.25 });
+          if (analytics.testMetrics.hasData) parts.push({ value: analytics.testMetrics.passRate, weight: 0.3 });
+          if (analytics.releaseReadiness.hasData) parts.push({ value: analytics.releaseReadiness.overallScore, weight: 0.25 });
+          if (epicRollups.summary.avgPercentComplete !== null) {
+            parts.push({ value: epicRollups.summary.avgPercentComplete, weight: 0.2 });
+          }
 
           const totalWeight = parts.reduce((sum, p) => sum + p.weight, 0);
           const hasData = totalWeight > 0;
@@ -927,10 +982,11 @@ export class AnalyticsService {
   }
 
   /**
-   * Real bug distribution by Jira label (e.g. UI-BUG, FUNC-BUG) — this org's
-   * Jira projects don't use Components, so labels are the only real
-   * categorical tag on a bug. Untagged bugs bucket into "Unlabeled" so the
-   * distribution's total still sums to the bug count.
+   * Real bug distribution by label/tag (Jira labels or Azure DevOps tags —
+   * whatever categorical tagging the connected tenant actually uses; there's
+   * no assumption here about which one, or that either is used at all).
+   * Untagged bugs bucket into "Unlabeled" so the distribution's total still
+   * sums to the bug count.
    */
   async calculateBugLabelDistribution(productId?: string, startDate?: Date, endDate?: Date, tenantId?: string): Promise<{
     distribution: Array<{ label: string; count: number }>;
@@ -947,8 +1003,7 @@ export class AnalyticsService {
 
     const counts = new Map<string, number>();
     for (const bug of bugs) {
-      const labels = bug.labels.length > 0 ? bug.labels : ['Unlabeled'];
-      for (const label of labels) {
+      for (const label of meaningfulLabels(bug.labels)) {
         counts.set(label, (counts.get(label) ?? 0) + 1);
       }
     }
@@ -1019,6 +1074,91 @@ export class AnalyticsService {
       firstTimeFixRate: Math.round((100 - reopenRate) * 10) / 10,
       hasData: denominator > 0
     };
+  }
+
+  /**
+   * Average real dwell time per raw workflow stage (e.g. "Code Review",
+   * "Ready for QA"), computed from WorkItemActivity's actual status-
+   * transition timestamps — not a point-in-time snapshot like
+   * getQaBottlenecks below (which only sees items stuck *right now*). This
+   * sees the systemic pattern across every item that has ever passed
+   * through a stage, whether or not it's currently sitting there, which is
+   * what actually answers "which stage of our process is slow."
+   *
+   * Only counts CLOSED intervals — the time between one transition and the
+   * next one on the same item — never "time since the last transition until
+   * now" for an item still sitting there, since mixing a completed
+   * measurement with an still-ongoing one would understate the real
+   * duration for whatever's currently fastest-moving through that stage.
+   * getQaBottlenecks already covers "what's stuck right now" separately.
+   *
+   * A stage needs at least `minTransitions` completed intervals before it's
+   * surfaced, so one slow ticket passing through a rarely-used status
+   * doesn't read as a systemic bottleneck.
+   */
+  async getCycleTimeByStage(productId?: string, tenantId?: string, minTransitions: number = 3): Promise<{
+    stages: Array<{ status: string; avgDays: number; medianDays: number; transitionCount: number; totalDays: number }>;
+    bottleneckStage: string | null;
+    hasData: boolean;
+  }> {
+    const rows = await this.prisma.workItemActivity.findMany({
+      where: {
+        eventType: 'status_transition',
+        ...(productId ? { workItem: { productId } } : tenantId ? { tenantId } : {})
+      },
+      orderBy: [{ workItemId: 'asc' }, { occurredAt: 'asc' }],
+      select: { workItemId: true, toStatus: true, occurredAt: true },
+      // Sanity ceiling on the unbounded scan, same posture as
+      // getEpicRollups's EPIC_SCAN_CAP — no tenant is near this today.
+      take: 50000
+    });
+
+    const durationsByStage = new Map<string, number[]>();
+    let prevItemId: string | null = null;
+    let prevStatus: string | null = null;
+    let prevAt: Date | null = null;
+
+    for (const row of rows) {
+      if (row.workItemId !== prevItemId) {
+        prevItemId = row.workItemId;
+        prevStatus = row.toStatus;
+        prevAt = row.occurredAt;
+        continue;
+      }
+      if (prevStatus && prevAt) {
+        const days = (row.occurredAt.getTime() - prevAt.getTime()) / (24 * 60 * 60 * 1000);
+        if (days >= 0) {
+          const list = durationsByStage.get(prevStatus) ?? [];
+          list.push(days);
+          durationsByStage.set(prevStatus, list);
+        }
+      }
+      prevStatus = row.toStatus;
+      prevAt = row.occurredAt;
+    }
+
+    const stages = Array.from(durationsByStage.entries())
+      .map(([status, days]) => {
+        const sorted = [...days].sort((a, b) => a - b);
+        const totalDays = days.reduce((sum, d) => sum + d, 0);
+        const medianDays = sorted[Math.floor(sorted.length / 2)];
+        return {
+          status,
+          avgDays: Math.round((totalDays / days.length) * 10) / 10,
+          medianDays: Math.round(medianDays * 10) / 10,
+          transitionCount: days.length,
+          totalDays: Math.round(totalDays)
+        };
+      })
+      .filter((s) => s.transitionCount >= minTransitions)
+      // Ranked by total portfolio-wide days lost (avg * volume), not raw
+      // average — a stage with a slightly higher average but 15x fewer
+      // transitions (e.g. a rare "Reopened" status hit 9 times) isn't a
+      // bigger systemic problem than one with a lower average but hundreds
+      // of transitions through it. Total time is what a team actually loses.
+      .sort((a, b) => b.totalDays - a.totalDays);
+
+    return { stages, bottleneckStage: stages[0]?.status ?? null, hasData: stages.length > 0 };
   }
 
   /**
@@ -1163,11 +1303,13 @@ export class AnalyticsService {
       /** resolvedBugs / (totalBugs - closedBugs). Null, not 0, when there's nothing to measure. */
       resolutionRate: number | null;
       healthScore: number;
+      /** Distinct real assignees (Jira accountId / ADO identity id) with at least one active item — not headcount, just who's actually touching this product's backlog. */
+      teamSize: number;
       hasData: boolean;
     }>;
     hasData: boolean;
   }> {
-    const [products, bugStatusCounts, totalCounts, lastSynced, systemRows, tenantAnalytics] = await Promise.all([
+    const [products, bugStatusCounts, totalCounts, lastSynced, systemRows, tenantAnalytics, assigneeRows] = await Promise.all([
       this.prisma.product.findMany({
         where: { tenantId, isActive: true },
         select: { id: true, name: true, jiraProjectId: true, azureDevopsAreaPath: true }
@@ -1192,12 +1334,21 @@ export class AnalyticsService {
         distinct: ['productId', 'externalSystem'],
         select: { productId: true, externalSystem: true }
       }),
-      this.getTenantAnalytics(tenantId)
+      this.getTenantAnalytics(tenantId),
+      this.prisma.workItem.findMany({
+        where: { tenantId, isActive: true, externalAssigneeId: { not: null } },
+        distinct: ['productId', 'externalAssigneeId'],
+        select: { productId: true, externalAssigneeId: true }
+      })
     ]);
 
     const healthByProduct = new Map(tenantAnalytics.products.map((p) => [p.productId, p]));
     const totalsByProduct = new Map(totalCounts.map((t) => [t.productId, t._count]));
     const lastSyncedByProduct = new Map(lastSynced.map((s) => [s.productId, s._max.lastSeenAtSourceAt]));
+    const teamSizeByProduct = new Map<string, number>();
+    for (const row of assigneeRows) {
+      teamSizeByProduct.set(row.productId, (teamSizeByProduct.get(row.productId) ?? 0) + 1);
+    }
 
     const systemsByProduct = new Map<string, Set<string>>();
     for (const row of systemRows) {
@@ -1233,6 +1384,7 @@ export class AnalyticsService {
         resolvedBugs: bugs.resolved,
         resolutionRate: measurableBugs > 0 ? Math.round((bugs.resolved / measurableBugs) * 1000) / 10 : null,
         healthScore: health?.healthScore ?? 0,
+        teamSize: teamSizeByProduct.get(product.id) ?? 0,
         hasData: health?.hasData ?? false
       };
     });
@@ -1253,7 +1405,12 @@ export class AnalyticsService {
     total: number;
     byPriority: Record<string, number>;
     byType: Record<string, number>;
+    byStatus: Record<string, number>;
     oldestCreatedAt: string | null;
+    /** Critical/high-priority open work with no real assignee — a real
+     * "who's picking this up" gap, not derivable from byPriority alone
+     * since that mixes assigned and unassigned items together. */
+    unassignedCriticalHigh: number;
     hasData: boolean;
   }> {
     const where: any = {
@@ -1262,11 +1419,15 @@ export class AnalyticsService {
       ...(productId ? { productId } : tenantId ? { tenantId } : {})
     };
 
-    const [total, byPriorityRows, byTypeRows, oldest] = await Promise.all([
+    const [total, byPriorityRows, byTypeRows, byStatusRows, oldest, unassignedCriticalHigh] = await Promise.all([
       this.prisma.workItem.count({ where }),
       this.prisma.workItem.groupBy({ by: ['priority'], where, _count: true }),
       this.prisma.workItem.groupBy({ by: ['type'], where, _count: true }),
-      this.prisma.workItem.findFirst({ where, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
+      this.prisma.workItem.groupBy({ by: ['status'], where, _count: true }),
+      this.prisma.workItem.findFirst({ where, orderBy: { createdAt: 'asc' }, select: { createdAt: true } }),
+      this.prisma.workItem.count({
+        where: { ...where, externalAssigneeId: null, priority: { in: ['critical', 'high'] } }
+      })
     ]);
 
     const byPriority: Record<string, number> = {};
@@ -1275,11 +1436,16 @@ export class AnalyticsService {
     const byType: Record<string, number> = {};
     for (const row of byTypeRows) byType[row.type] = row._count;
 
+    const byStatus: Record<string, number> = {};
+    for (const row of byStatusRows) byStatus[row.status] = row._count;
+
     return {
       total,
       byPriority,
       byType,
+      byStatus,
       oldestCreatedAt: oldest?.createdAt.toISOString() ?? null,
+      unassignedCriticalHigh,
       hasData: total > 0
     };
   }
@@ -1305,7 +1471,7 @@ export class AnalyticsService {
 
     const ranges = [
       { label: '0-7d', maxDays: 7 },
-      { label: '8-14d', maxDays: 14 },
+      { label: '8-14d', maxDays: STALE_ITEM_THRESHOLD_DAYS },
       { label: '15-30d', maxDays: 30 },
       { label: '31-60d', maxDays: 60 },
       { label: '60d+', maxDays: Infinity }
@@ -1397,7 +1563,18 @@ export class AnalyticsService {
   }> {
     const where: any = {
       type: { in: ['story', 'epic'] },
-      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+      ...(productId ? { productId } : tenantId ? { tenantId } : {}),
+      // Pre-filter to requirements that actually qualify for this matrix
+      // *before* applying `take` — ordering by recency and hoping some of
+      // the most-recently-touched stories/epics happen to have a linked bug
+      // left this permanently empty on real data (the requirements that DO
+      // have linked bugs are often old and no longer being edited, so they
+      // never made it into a recency-ordered top-`limit` candidate set).
+      OR: [
+        { children: { some: { type: 'bug' } } },
+        { linksFrom: { some: { targetItem: { type: 'bug' } } } },
+        { linksTo: { some: { sourceItem: { type: 'bug' } } } }
+      ]
     };
 
     const requirements = await this.prisma.workItem.findMany({
@@ -1407,14 +1584,23 @@ export class AnalyticsService {
       select: {
         id: true, externalId: true, title: true, type: true,
         linksFrom: { select: { targetItem: { select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } } } },
-        linksTo: { select: { sourceItem: { select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } } } }
+        linksTo: { select: { sourceItem: { select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } } } },
+        // Real-world bug-to-requirement association is overwhelmingly the
+        // parent-child hierarchy (a bug filed directly under a story/epic),
+        // not Jira's separate, optional "issue links" feature — WorkItemLink
+        // alone left this matrix permanently empty on real tenant data
+        // despite hundreds of bugs correctly rolled up via parentId. Direct
+        // children only, matching getEpicRollups' "direct children only,
+        // not transitive" convention.
+        children: { where: { type: 'bug' }, select: { id: true, externalId: true, title: true, status: true, priority: true, type: true } }
       }
     });
 
     const rows = requirements.map((req) => {
       const linked = [
         ...req.linksFrom.map((l) => l.targetItem),
-        ...req.linksTo.map((l) => l.sourceItem)
+        ...req.linksTo.map((l) => l.sourceItem),
+        ...req.children
       ].filter((item) => item.type === 'bug');
 
       const seen = new Set<string>();
@@ -1471,6 +1657,8 @@ export class AnalyticsService {
       externalStatusName: string | null;
       productId: string;
       productName: string;
+      externalAssigneeId: string | null;
+      externalAssigneeName: string | null;
       updatedAt: string;
       totalChildren: number;
       childCounts: Record<string, number>;
@@ -1478,6 +1666,14 @@ export class AnalyticsService {
       pointsComplete: { done: number; total: number; percent: number } | null;
       timeComplete: { spentSeconds: number; estimateSeconds: number; percent: number } | null;
       health: 'on_track' | 'at_risk' | 'blocked';
+      /** Bug-type children only — a sharper "is this epic on fire" signal
+       * than totalChildren, which mixes in stories/tasks/subtasks. */
+      bugSummary: { openBugs: number; totalBugs: number; oldestOpenBugAgeDays: number | null };
+      /** Jira board name(s) this epic is scheduled on — derived from the epic's own
+       * sprint (team-managed boards) union its children's sprints (classic
+       * company-managed boards, where only stories/tasks carry a sprint). Empty
+       * when nothing synced has board data yet (see Sprint.boardName). */
+      boardNames: string[];
     }>;
     summary: {
       totalEpics: number;
@@ -1486,10 +1682,15 @@ export class AnalyticsService {
       byHealth: { on_track: number; at_risk: number; blocked: number };
       byStatus: Record<string, number>;
       byProgressBucket: { no_data: number; '0-25': number; '25-50': number; '50-75': number; '75-100': number };
+      /** Active bugs in scope with no parent epic at all — a real backlog-
+       * hygiene signal, not fabricated: some teams never link bugs to
+       * epics, and this makes that visible instead of silently omitting it. */
+      orphanBugCount: number;
+      totalBugCount: number;
     };
     hasData: boolean;
   }> {
-    const STALE_DAYS = 14;
+    const STALE_DAYS = STALE_ITEM_THRESHOLD_DAYS;
     // Sanity ceiling on the unbounded portfolio scan, same "known v1
     // limitation at extreme scale" posture as azure-devops-sync.service.ts's
     // 20,000-result WIQL cap — no tenant is anywhere near this today.
@@ -1498,7 +1699,8 @@ export class AnalyticsService {
       totalEpics: 0, epicsWithNoChildren: 0, avgPercentComplete: null as number | null,
       byHealth: { on_track: 0, at_risk: 0, blocked: 0 },
       byStatus: {} as Record<string, number>,
-      byProgressBucket: { no_data: 0, '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 }
+      byProgressBucket: { no_data: 0, '0-25': 0, '25-50': 0, '50-75': 0, '75-100': 0 },
+      orphanBugCount: 0, totalBugCount: 0
     };
 
     const where: any = {
@@ -1506,6 +1708,12 @@ export class AnalyticsService {
       isActive: true,
       ...(productId ? { productId } : tenantId ? { tenantId } : {})
     };
+
+    const bugScopeWhere = { type: 'bug', isActive: true, ...(productId ? { productId } : tenantId ? { tenantId } : {}) };
+    const [orphanBugCount, totalBugCount] = await Promise.all([
+      this.prisma.workItem.count({ where: { ...bugScopeWhere, parentId: null } }),
+      this.prisma.workItem.count({ where: bugScopeWhere })
+    ]);
 
     const allEpics = await this.prisma.workItem.findMany({
       where,
@@ -1518,18 +1726,25 @@ export class AnalyticsService {
         // on real data), not just via its children — timeComplete below adds
         // this in on top of the children rollup, unlike pointsComplete
         // (epics essentially never carry their own story points).
-        originalEstimateSeconds: true, timeSpentSeconds: true
+        originalEstimateSeconds: true, timeSpentSeconds: true,
+        // Only populated on team-managed Jira boards, where an epic itself can
+        // sit in a sprint — see boardsByEpicId below for the more common
+        // (classic/company-managed) case of deriving board via children instead.
+        sprintId: true,
+        externalAssigneeId: true, externalAssigneeName: true
       }
     });
 
-    if (allEpics.length === 0) return { epics: [], summary: emptySummary, hasData: false };
+    if (allEpics.length === 0) {
+      return { epics: [], summary: { ...emptySummary, orphanBugCount, totalBugCount }, hasData: false };
+    }
 
     const allEpicIds = allEpics.map((e) => e.id);
 
     // Every epic's child counts/points, and its "blocked" signal, each in one
     // aggregate query regardless of portfolio size — same "one groupBy for
     // everything" shape as getProjectsOverview's bugStatusCounts above.
-    const [statusGroups, riskyGroups] = await Promise.all([
+    const [statusGroups, riskyGroups, bugStatusGroups, childSprintGroups] = await Promise.all([
       this.prisma.workItem.groupBy({
         by: ['parentId', 'status'],
         where: { parentId: { in: allEpicIds }, isActive: true },
@@ -1544,8 +1759,45 @@ export class AnalyticsService {
           priority: { in: ['critical', 'high'] }
         },
         _count: true
+      }),
+      // Bug-only breakdown, separate from the all-types statusGroups above —
+      // childCounts already sums every type together, and refactoring that
+      // to also split by type would be far more invasive than one extra
+      // narrow query for the one thing that actually needs it.
+      this.prisma.workItem.groupBy({
+        by: ['parentId', 'status'],
+        where: { parentId: { in: allEpicIds }, isActive: true, type: 'bug' },
+        _count: true,
+        _min: { createdAt: true }
+      }),
+      // Which sprints an epic's children are scheduled in — the only board
+      // signal available on classic/company-managed Jira, where the epic
+      // issue itself never carries a sprint (see epic.sprintId comment above).
+      this.prisma.workItem.groupBy({
+        by: ['parentId', 'sprintId'],
+        where: { parentId: { in: allEpicIds }, isActive: true, sprintId: { not: null } },
+        _count: true
       })
     ]);
+
+    const sprintIds = new Set<string>();
+    for (const epic of allEpics) if (epic.sprintId) sprintIds.add(epic.sprintId);
+    for (const row of childSprintGroups) if (row.sprintId) sprintIds.add(row.sprintId);
+    const sprintBoards = sprintIds.size > 0
+      ? await this.prisma.sprint.findMany({
+          where: { id: { in: Array.from(sprintIds) } },
+          select: { id: true, externalBoardId: true, boardName: true }
+        })
+      : [];
+    const boardBySprintId = new Map(sprintBoards.map((s) => [s.id, s]));
+
+    const childSprintIdsByEpicId = new Map<string, Set<string>>();
+    for (const row of childSprintGroups) {
+      if (!row.parentId || !row.sprintId) continue;
+      const set = childSprintIdsByEpicId.get(row.parentId) ?? new Set<string>();
+      set.add(row.sprintId);
+      childSprintIdsByEpicId.set(row.parentId, set);
+    }
 
     const groupsByEpicId = new Map<string, typeof statusGroups>();
     for (const row of statusGroups) {
@@ -1559,8 +1811,16 @@ export class AnalyticsService {
       if (!row.parentId) continue;
       riskyCountByEpicId.set(row.parentId, row._count as unknown as number);
     }
+    const bugGroupsByEpicId = new Map<string, typeof bugStatusGroups>();
+    for (const row of bugStatusGroups) {
+      if (!row.parentId) continue;
+      const list = bugGroupsByEpicId.get(row.parentId) ?? [];
+      list.push(row);
+      bugGroupsByEpicId.set(row.parentId, list);
+    }
 
     const staleThreshold = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000);
+    const now = Date.now();
 
     const allRows = allEpics.map((epic) => {
       const groups = groupsByEpicId.get(epic.id) ?? [];
@@ -1611,6 +1871,41 @@ export class AnalyticsService {
       const isStalledIncomplete = epic.updatedAt < staleThreshold && percentComplete !== null && percentComplete < 100;
       const health: 'on_track' | 'at_risk' | 'blocked' = isBlocked ? 'blocked' : isStalledIncomplete ? 'at_risk' : 'on_track';
 
+      const bugGroups = bugGroupsByEpicId.get(epic.id) ?? [];
+      let openBugs = 0;
+      let totalBugs = 0;
+      let oldestOpenBugCreatedAt: Date | null = null;
+      for (const g of bugGroups) {
+        const count = g._count as unknown as number;
+        totalBugs += count;
+        if (g.status === 'open' || g.status === 'in_progress') {
+          openBugs += count;
+          const min = g._min?.createdAt ?? null;
+          if (min && (!oldestOpenBugCreatedAt || min < oldestOpenBugCreatedAt)) oldestOpenBugCreatedAt = min;
+        }
+      }
+      const bugSummary = {
+        openBugs,
+        totalBugs,
+        oldestOpenBugAgeDays: oldestOpenBugCreatedAt
+          ? Math.floor((now - oldestOpenBugCreatedAt.getTime()) / (24 * 60 * 60 * 1000))
+          : null
+      };
+
+      const epicSprintIds = new Set<string>(childSprintIdsByEpicId.get(epic.id) ?? []);
+      if (epic.sprintId) epicSprintIds.add(epic.sprintId);
+      const boardKeys = new Set<string>();
+      const boardNames: string[] = [];
+      for (const sprintId of epicSprintIds) {
+        const board = boardBySprintId.get(sprintId);
+        if (!board?.boardName) continue;
+        const key = board.externalBoardId ?? board.boardName;
+        if (boardKeys.has(key)) continue;
+        boardKeys.add(key);
+        boardNames.push(board.boardName);
+      }
+      boardNames.sort();
+
       return {
         id: epic.id,
         externalId: epic.externalId,
@@ -1619,6 +1914,8 @@ export class AnalyticsService {
         externalStatusName: epic.externalStatusName,
         productId: epic.productId,
         productName: epic.product.name,
+        externalAssigneeId: epic.externalAssigneeId,
+        externalAssigneeName: epic.externalAssigneeName,
         updatedAt: epic.updatedAt.toISOString(),
         totalChildren,
         childCounts,
@@ -1629,7 +1926,9 @@ export class AnalyticsService {
         timeComplete: anyTime && estimateSeconds > 0
           ? { spentSeconds, estimateSeconds, percent: Math.round((spentSeconds / estimateSeconds) * 1000) / 10 }
           : null,
-        health
+        health,
+        bugSummary,
+        boardNames
       };
     });
 
@@ -1656,10 +1955,693 @@ export class AnalyticsService {
         : null,
       byHealth,
       byStatus,
-      byProgressBucket
+      byProgressBucket,
+      orphanBugCount,
+      totalBugCount
     };
 
     return { epics: allRows.slice(0, limit), summary, hasData: allRows.length > 0 };
+  }
+
+  /**
+   * The three signals named verbatim in Yavar's Jira Adoption Policy §9.2
+   * ("unlogged work, orphaned issues, boards not reflecting real status") —
+   * today a manual, anecdotal check the policy assigns to a human; this
+   * makes it a live, auditable query instead.
+   */
+  async getComplianceSignals(productId?: string, tenantId?: string, limit: number = 300, startDate?: Date, endDate?: Date): Promise<{
+    unloggedWork: Array<{ id: string; externalId: string | null; title: string; type: string; status: string; externalStatusName: string | null; productId: string; productName: string; updatedAt: string }>;
+    orphanedIssues: Array<{ id: string; externalId: string | null; title: string; type: string; status: string; productId: string; productName: string; updatedAt: string }>;
+    staleInProgress: Array<{ id: string; externalId: string | null; title: string; type: string; status: string; productId: string; productName: string; updatedAt: string; daysStale: number }>;
+    counts: { unloggedWork: number; orphanedIssues: number; staleInProgress: number };
+    /** Denominator for each signal's percentage-of-total framing — the same
+     * where-clause as the signal itself, minus the one condition that
+     * defines it (e.g. unloggedWork's denominator drops the timeSpentSeconds
+     * filter, leaving "all completed items"). */
+    denominators: { unloggedWork: number; orphanedIssues: number; staleInProgress: number };
+    /** Full, UNCAPPED per-product breakdown (Prisma groupBy, not a client-side
+     * count over the capped preview rows above — those are oldest-first and
+     * would silently bias a ranking). Null in single-product scope, where a
+     * groupby degenerates to one row. */
+    byProduct: {
+      unloggedWork: Array<{ label: string; count: number }>;
+      orphanedIssues: Array<{ label: string; count: number }>;
+      staleInProgress: Array<{ label: string; count: number }>;
+    } | null;
+    /** Real period-over-period trend — only honestly reconstructable for
+     * unlogged work, since resolvedAt/timeSpentSeconds are stable once an
+     * item is resolved. Null unless startDate/endDate are both given. */
+    unloggedWorkTrend: { current: number; previous: number; changePercent: number | null } | null;
+    /** Composition, NOT a trend — orphanedIssues/staleInProgress have no
+     * historical snapshot of parentId/status (WorkItemActivity only tracks
+     * status transitions, and only for Jira-sourced tenants), so a literal
+     * "up/down X%" would be fabricated. These split the CURRENT total by an
+     * immutable timestamp instead — a verifiable fact about each ticket, not
+     * a claim about when it became orphaned/stale. Both null unless
+     * startDate/endDate are given; the two fields in each always sum to the
+     * signal's own count (predates.../longStanding are computed by
+     * subtraction, never as an independent count that could drift).
+     */
+    orphanedBreakdown: { createdThisWindow: number; predatesWindow: number } | null;
+    staleBreakdown: { justCrossedThreshold: number; longStanding: number } | null;
+    hasData: boolean;
+  }> {
+    const STALE_DAYS = STALE_ITEM_THRESHOLD_DAYS;
+    const scopeWhere = productId ? { productId } : tenantId ? { tenantId } : {};
+    const workableTypes = ['story', 'task', 'subtask', 'bug'];
+    const selectFields = {
+      id: true, externalId: true, title: true, type: true, status: true,
+      externalStatusName: true, updatedAt: true, statusChangedAt: true,
+      productId: true, product: { select: { name: true } }
+    } as const;
+
+    const unloggedWhere = {
+      ...scopeWhere, isActive: true,
+      type: { in: workableTypes },
+      status: { in: ['resolved', 'completed'] },
+      OR: [{ timeSpentSeconds: null }, { timeSpentSeconds: 0 }]
+    };
+    const orphanedWhere = {
+      ...scopeWhere, isActive: true,
+      type: { in: workableTypes },
+      parentId: null
+    };
+    const staleThreshold = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000);
+    const staleWhere = {
+      ...scopeWhere, isActive: true,
+      status: 'in_progress',
+      // Neither statusChangedAt nor updatedAt individually captures every
+      // case (statusChangedAt is null until the first real transition since
+      // this field was introduced) — OR-ing both against the threshold
+      // mirrors the `?? ` fallback used everywhere else in this file without
+      // needing a raw SQL COALESCE.
+      OR: [
+        { statusChangedAt: { lt: staleThreshold } },
+        { statusChangedAt: null, updatedAt: { lt: staleThreshold } }
+      ]
+    };
+
+    // Denominators mirror each signal's own where-clause minus the one
+    // condition that defines it — "all completed items" / "all active
+    // workable items" / "all in_progress items", so the signal's count can
+    // be framed as a percentage of a real total, not a bare number.
+    const unloggedDenominatorWhere = { ...scopeWhere, isActive: true, type: { in: workableTypes }, status: { in: ['resolved', 'completed'] } };
+    const orphanedDenominatorWhere = { ...scopeWhere, isActive: true, type: { in: workableTypes } };
+    const staleDenominatorWhere = { ...scopeWhere, isActive: true, status: 'in_progress' };
+
+    const [
+      unloggedRows, unloggedCount, orphanedRows, orphanedCount, staleRows, staleCount,
+      unloggedDenominator, orphanedDenominator, staleDenominator
+    ] = await Promise.all([
+      this.prisma.workItem.findMany({ where: unloggedWhere, select: selectFields, orderBy: { updatedAt: 'asc' }, take: limit }),
+      this.prisma.workItem.count({ where: unloggedWhere }),
+      this.prisma.workItem.findMany({ where: orphanedWhere, select: selectFields, orderBy: { updatedAt: 'asc' }, take: limit }),
+      this.prisma.workItem.count({ where: orphanedWhere }),
+      this.prisma.workItem.findMany({ where: staleWhere, select: selectFields, orderBy: { updatedAt: 'asc' }, take: limit }),
+      this.prisma.workItem.count({ where: staleWhere }),
+      this.prisma.workItem.count({ where: unloggedDenominatorWhere }),
+      this.prisma.workItem.count({ where: orphanedDenominatorWhere }),
+      this.prisma.workItem.count({ where: staleDenominatorWhere })
+    ]);
+
+    const toRow = (r: (typeof unloggedRows)[number]) => ({
+      id: r.id, externalId: r.externalId, title: r.title, type: r.type, status: r.status,
+      externalStatusName: r.externalStatusName, productId: r.productId, productName: r.product.name,
+      updatedAt: r.updatedAt.toISOString()
+    });
+    const now = Date.now();
+
+    // Per-product ranking — full uncapped groupBy, not a client-side count
+    // over unloggedRows/orphanedRows/staleRows (those are capped at `limit`
+    // and ordered oldest-first, which would silently bias the ranking
+    // toward whichever product's backlog happens to be oldest). Only
+    // meaningful in portfolio scope; a single-product view degenerates a
+    // groupby to one row, same reasoning epics.index.tsx's byProductData
+    // panel already gates on !currentProduct.
+    let byProduct: {
+      unloggedWork: Array<{ label: string; count: number }>;
+      orphanedIssues: Array<{ label: string; count: number }>;
+      staleInProgress: Array<{ label: string; count: number }>;
+    } | null = null;
+    if (!productId && tenantId) {
+      const [products, unloggedGroups, orphanedGroups, staleGroups] = await Promise.all([
+        this.prisma.product.findMany({ where: { tenantId, isActive: true }, select: { id: true, name: true } }),
+        this.prisma.workItem.groupBy({ by: ['productId'], where: unloggedWhere, _count: true }),
+        this.prisma.workItem.groupBy({ by: ['productId'], where: orphanedWhere, _count: true }),
+        this.prisma.workItem.groupBy({ by: ['productId'], where: staleWhere, _count: true })
+      ]);
+      const nameById = new Map(products.map((p) => [p.id, p.name]));
+      const toCategoryCounts = (groups: Array<{ productId: string; _count: unknown }>) =>
+        groups
+          .map((g) => ({ label: nameById.get(g.productId) ?? 'Unknown', count: g._count as unknown as number }))
+          .sort((a, b) => b.count - a.count);
+      byProduct = {
+        unloggedWork: toCategoryCounts(unloggedGroups),
+        orphanedIssues: toCategoryCounts(orphanedGroups),
+        staleInProgress: toCategoryCounts(staleGroups)
+      };
+    }
+
+    // Trend/breakdown — only computed when the caller supplies a window
+    // (the frontend's date-range selector). See this method's return-type
+    // doc comments for why unloggedWork gets a real trend but the other two
+    // get an honest composition split instead.
+    let unloggedWorkTrend: { current: number; previous: number; changePercent: number | null } | null = null;
+    let orphanedBreakdown: { createdThisWindow: number; predatesWindow: number } | null = null;
+    let staleBreakdown: { justCrossedThreshold: number; longStanding: number } | null = null;
+
+    if (startDate && endDate) {
+      const windowMs = endDate.getTime() - startDate.getTime();
+      const previousEnd = new Date(startDate.getTime() - 1);
+      const previousStart = new Date(previousEnd.getTime() - windowMs);
+      const staleWindowStart = new Date(staleThreshold.getTime() - windowMs);
+
+      const [trendRows, createdThisWindow] = await Promise.all([
+        this.prisma.workItem.findMany({ where: unloggedWhere, select: { resolvedAt: true, statusChangedAt: true, updatedAt: true } }),
+        this.prisma.workItem.count({ where: { ...orphanedWhere, createdAt: { gte: startDate } } })
+      ]);
+
+      const countInWindow = (start: Date, end: Date) => trendRows.filter((r) => {
+        const at = (r.resolvedAt ?? r.statusChangedAt ?? r.updatedAt).getTime();
+        return at >= start.getTime() && at <= end.getTime();
+      }).length;
+      const current = countInWindow(startDate, endDate);
+      const previous = countInWindow(previousStart, previousEnd);
+      unloggedWorkTrend = {
+        current, previous,
+        changePercent: previous > 0 ? Math.round(((current - previous) / previous) * 1000) / 10 : null
+      };
+
+      orphanedBreakdown = { createdThisWindow, predatesWindow: orphanedCount - createdThisWindow };
+
+      const justCrossedThreshold = await this.prisma.workItem.count({
+        where: {
+          ...scopeWhere, isActive: true, status: 'in_progress',
+          OR: [
+            { statusChangedAt: { gte: staleWindowStart, lt: staleThreshold } },
+            { statusChangedAt: null, updatedAt: { gte: staleWindowStart, lt: staleThreshold } }
+          ]
+        }
+      });
+      staleBreakdown = { justCrossedThreshold, longStanding: staleCount - justCrossedThreshold };
+    }
+
+    return {
+      unloggedWork: unloggedRows.map(toRow),
+      orphanedIssues: orphanedRows.map(toRow),
+      staleInProgress: staleRows.map((r) => ({
+        ...toRow(r),
+        daysStale: Math.floor((now - (r.statusChangedAt ?? r.updatedAt).getTime()) / (24 * 60 * 60 * 1000))
+      })),
+      counts: { unloggedWork: unloggedCount, orphanedIssues: orphanedCount, staleInProgress: staleCount },
+      denominators: { unloggedWork: unloggedDenominator, orphanedIssues: orphanedDenominator, staleInProgress: staleDenominator },
+      byProduct,
+      unloggedWorkTrend,
+      orphanedBreakdown,
+      staleBreakdown,
+      hasData: unloggedCount > 0 || orphanedCount > 0 || staleCount > 0
+    };
+  }
+
+  /**
+   * Per-assignee workload — item counts by status and real Jira worklog
+   * hours — keyed by WorkItem.externalAssigneeId (Jira accountId / Azure
+   * DevOps identity id), NOT by internal User.assigneeId or email.
+   *
+   * This is deliberately independent of two separate things that
+   * getDeveloperHealthProfiles (Engineering Health) requires and this does
+   * not: (1) the person having a QualiMetrix account at all, and (2) their
+   * Jira email being visible via the API (Jira's per-user email-visibility
+   * privacy setting can hide it for most real users on a given site — this
+   * was confirmed against a real, live tenant's Jira connection during
+   * development, not assumed, though the exact proportion varies by site).
+   * externalAssigneeId/displayName come straight from Jira's assignee object
+   * and Azure DevOps's AssignedTo identity, both of which are always present
+   * regardless of email visibility — so this shows real workload for anyone
+   * assigned a work item, whether or not they've ever logged into
+   * QualiMetrix. `linkedUserId` is included only as a courtesy cross-
+   * reference when an internal User happens to share the resolved email;
+   * nothing here depends on it being present.
+   */
+  async getAssigneeWorkload(productId?: string, tenantId?: string, limit: number = 100): Promise<{
+    assignees: Array<{
+      externalAssigneeId: string;
+      displayName: string;
+      linkedUserId: string | null;
+      totalItems: number;
+      itemsByStatus: Record<string, number>;
+      hoursLoggedSeconds: number;
+    }>;
+    unassignedCount: number;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      isActive: true,
+      externalAssigneeId: { not: null },
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const [statusGroups, unassignedCount] = await Promise.all([
+      this.prisma.workItem.groupBy({
+        by: ['externalAssigneeId', 'status'],
+        where,
+        _count: true
+      }),
+      this.prisma.workItem.count({
+        where: {
+          isActive: true,
+          externalAssigneeId: null,
+          ...(productId ? { productId } : tenantId ? { tenantId } : {})
+        }
+      })
+    ]);
+
+    if (statusGroups.length === 0) {
+      return { assignees: [], unassignedCount, hasData: false };
+    }
+
+    const assigneeIds = Array.from(new Set(statusGroups.map((g) => g.externalAssigneeId as string)));
+
+    // One representative displayName (and, if present, assigneeEmail from
+    // externalMetadata) per assignee — groupBy can't return a non-grouped
+    // column, so this is a second, targeted lookup rather than scanning
+    // every matching WorkItem row again.
+    const [nameRows, worklogSums] = await Promise.all([
+      this.prisma.workItem.findMany({
+        where: { externalAssigneeId: { in: assigneeIds } },
+        distinct: ['externalAssigneeId'],
+        select: { externalAssigneeId: true, externalAssigneeName: true, externalMetadata: true }
+      }),
+      this.prisma.workLog.groupBy({
+        by: ['authorAccountId'],
+        where: {
+          authorAccountId: { in: assigneeIds },
+          ...(productId ? { workItem: { productId } } : tenantId ? { tenantId } : {})
+        },
+        _sum: { timeSpentSeconds: true }
+      })
+    ]);
+
+    const nameByAssigneeId = new Map(nameRows.map((r) => [r.externalAssigneeId as string, r.externalAssigneeName]));
+    const emailByAssigneeId = new Map(
+      nameRows.map((r) => [r.externalAssigneeId as string, (r.externalMetadata as any)?.assigneeEmail as string | undefined])
+    );
+    const candidateEmails = Array.from(new Set(
+      Array.from(emailByAssigneeId.values()).filter((e): e is string => !!e)
+    ));
+    // Courtesy cross-reference only — matched purely for display, never used
+    // to gate whether an assignee's workload shows up (unlike
+    // getDeveloperHealthProfiles, which requires this match to exist at all).
+    const linkedUsers = candidateEmails.length
+      ? await this.prisma.user.findMany({
+          where: { email: { in: candidateEmails, mode: 'insensitive' } },
+          select: { id: true, email: true }
+        })
+      : [];
+    const userIdByEmail = new Map(linkedUsers.map((u) => [u.email.toLowerCase(), u.id]));
+    const hoursByAssigneeId = new Map(worklogSums.map((w) => [w.authorAccountId as string, w._sum.timeSpentSeconds ?? 0]));
+
+    const rows = assigneeIds.map((id) => {
+      const itemsByStatus: Record<string, number> = {};
+      let totalItems = 0;
+      for (const g of statusGroups) {
+        if (g.externalAssigneeId !== id) continue;
+        const count = g._count as unknown as number;
+        itemsByStatus[g.status] = (itemsByStatus[g.status] ?? 0) + count;
+        totalItems += count;
+      }
+      const email = emailByAssigneeId.get(id);
+      return {
+        externalAssigneeId: id,
+        displayName: nameByAssigneeId.get(id) ?? id,
+        linkedUserId: email ? userIdByEmail.get(email.toLowerCase()) ?? null : null,
+        totalItems,
+        itemsByStatus,
+        hoursLoggedSeconds: hoursByAssigneeId.get(id) ?? 0
+      };
+    });
+
+    rows.sort((a, b) => b.totalItems - a.totalItems);
+
+    return { assignees: rows.slice(0, limit), unassignedCount, hasData: rows.length > 0 };
+  }
+
+  /**
+   * Real logged hours (from Jira worklogs) per person against an ASSUMED
+   * standard capacity of 8h per business day in the range — Jira has no
+   * leave/PTO/capacity calendar, so this denominator is a stated assumption,
+   * never a measured fact. Someone part-time, or on leave for part of the
+   * range, will show a misleadingly low or high % against this baseline.
+   * Callers must keep the assumption visible in the UI, not just the number.
+   *
+   * Jira-only (WorkLog has no Azure DevOps equivalent — see the WorkLog
+   * model's own doc comment on why that's a permanent platform gap, not a
+   * v1 omission).
+   */
+  async getTeamUtilization(productId?: string, tenantId?: string, startDate?: Date, endDate?: Date): Promise<{
+    people: Array<{ authorAccountId: string | null; name: string; loggedHours: number; capacityHours: number; utilizationPercent: number }>;
+    capacityHoursPerPerson: number;
+    businessDays: number;
+    avgUtilizationPercent: number | null;
+    hasData: boolean;
+  }> {
+    const end = endDate ?? new Date();
+    const start = startDate ?? new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const scopeWhere = productId ? { workItem: { productId } } : tenantId ? { tenantId } : {};
+
+    const rows = await this.prisma.workLog.groupBy({
+      by: ['authorAccountId'],
+      where: { ...scopeWhere, authorAccountId: { not: null }, startedAt: { gte: start, lte: end } },
+      _sum: { timeSpentSeconds: true }
+    });
+
+    if (rows.length === 0) {
+      return { people: [], capacityHoursPerPerson: 0, businessDays: 0, avgUtilizationPercent: null, hasData: false };
+    }
+
+    const accountIds = rows.map((r) => r.authorAccountId as string);
+    const nameRows = await this.prisma.workLog.findMany({
+      where: { authorAccountId: { in: accountIds } },
+      distinct: ['authorAccountId'],
+      select: { authorAccountId: true, authorName: true }
+    });
+    const nameByAccountId = new Map(nameRows.map((r) => [r.authorAccountId, r.authorName]));
+
+    const businessDays = countBusinessDays(start, end);
+    const capacityHoursPerPerson = businessDays * 8;
+
+    const people = rows
+      .map((r) => {
+        const loggedHours = Math.round(((r._sum.timeSpentSeconds ?? 0) / 3600) * 10) / 10;
+        const utilizationPercent = capacityHoursPerPerson > 0
+          ? Math.round((loggedHours / capacityHoursPerPerson) * 1000) / 10
+          : 0;
+        return {
+          authorAccountId: r.authorAccountId,
+          name: nameByAccountId.get(r.authorAccountId) ?? (r.authorAccountId as string),
+          loggedHours,
+          capacityHours: capacityHoursPerPerson,
+          utilizationPercent
+        };
+      })
+      .sort((a, b) => b.loggedHours - a.loggedHours);
+
+    const avgUtilizationPercent = Math.round(
+      (people.reduce((sum, p) => sum + p.utilizationPercent, 0) / people.length) * 10
+    ) / 10;
+
+    return { people, capacityHoursPerPerson, businessDays, avgUtilizationPercent, hasData: true };
+  }
+
+  /**
+   * Real $ cost = hours logged x hourly rate — computed ONLY for worklog
+   * authors who have a rate set via setWorklogAuthorRate below (keyed by
+   * their real Jira accountId, never a QualiMetrix account or email — see
+   * WorklogAuthorRate's model comment for why).
+   *
+   * Most real teammates won't have a rate set yet (a PM sets these
+   * incrementally, never defaulted or estimated) — so `unmatchedHours` and
+   * `hoursWithoutRate` disclose exactly how much real logged time is
+   * missing from totalCostCents, rather than silently under-reporting cost
+   * as if the total were complete.
+   *
+   * @param rateTenantId Always the caller's own tenant, independent of
+   * `productId`/`tenantId` scoping below — rates are set per accountId per
+   * tenant, not per product, so the rate lookup needs the tenant even when
+   * `productId` narrows which worklogs count toward the hours.
+   */
+  async getTeamCost(rateTenantId: string, productId?: string, tenantId?: string, startDate?: Date, endDate?: Date): Promise<{
+    totalCostCents: number;
+    people: Array<{ name: string; loggedHours: number; hourlyRateCents: number; costCents: number }>;
+    /** Real logged hours with no author accountId at all — can never be matched to anyone. */
+    unmatchedHours: number;
+    /** Real logged hours from an author with no rate set yet. */
+    hoursWithoutRate: number;
+    hasData: boolean;
+  }> {
+    const end = endDate ?? new Date();
+    const start = startDate ?? new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const scopeWhere = productId ? { workItem: { productId } } : tenantId ? { tenantId } : {};
+
+    const rows = await this.prisma.workLog.groupBy({
+      by: ['authorAccountId', 'authorName'],
+      where: { ...scopeWhere, startedAt: { gte: start, lte: end } },
+      _sum: { timeSpentSeconds: true }
+    });
+
+    if (rows.length === 0) {
+      return { totalCostCents: 0, people: [], unmatchedHours: 0, hoursWithoutRate: 0, hasData: false };
+    }
+
+    const rates = await this.prisma.worklogAuthorRate.findMany({ where: { tenantId: rateTenantId } });
+    const rateByAccountId = new Map(rates.map((r) => [r.authorAccountId, r.hourlyRateCents]));
+
+    let totalCostCents = 0;
+    let unmatchedHours = 0;
+    let hoursWithoutRate = 0;
+    const people: Array<{ name: string; loggedHours: number; hourlyRateCents: number; costCents: number }> = [];
+
+    for (const row of rows) {
+      const seconds = row._sum.timeSpentSeconds ?? 0;
+      const hours = seconds / 3600;
+      if (!row.authorAccountId) {
+        unmatchedHours += hours;
+        continue;
+      }
+      const rate = rateByAccountId.get(row.authorAccountId);
+      if (rate == null) {
+        hoursWithoutRate += hours;
+        continue;
+      }
+      const costCents = Math.round(hours * rate);
+      totalCostCents += costCents;
+      people.push({ name: row.authorName ?? row.authorAccountId, loggedHours: Math.round(hours * 10) / 10, hourlyRateCents: rate, costCents });
+    }
+
+    people.sort((a, b) => b.costCents - a.costCents);
+
+    return {
+      totalCostCents,
+      people,
+      unmatchedHours: Math.round(unmatchedHours * 10) / 10,
+      hoursWithoutRate: Math.round(hoursWithoutRate * 10) / 10,
+      hasData: true
+    };
+  }
+
+  /**
+   * Real, all-time (no date window — rate eligibility isn't a report metric)
+   * roster of Jira/ADO worklog authors for this tenant, with any rate
+   * already set. Drives the hourly-rate editor: every entry here is a real
+   * contributor by construction, since it's built from actual WorkLog rows,
+   * not the QualiMetrix user directory (which may hold unrelated accounts).
+   */
+  async getWorklogAuthors(tenantId: string): Promise<Array<{
+    authorAccountId: string;
+    authorName: string | null;
+    totalHours: number;
+    hourlyRateCents: number | null;
+  }>> {
+    const rows = await this.prisma.workLog.groupBy({
+      by: ['authorAccountId', 'authorName'],
+      where: { tenantId, authorAccountId: { not: null } },
+      _sum: { timeSpentSeconds: true }
+    });
+
+    const rates = await this.prisma.worklogAuthorRate.findMany({ where: { tenantId } });
+    const rateByAccountId = new Map(rates.map((r) => [r.authorAccountId, r.hourlyRateCents]));
+
+    // A person's display name can appear more than once if it ever changed
+    // between worklog entries — collapse to one row per accountId, summing
+    // hours and keeping the latest-seen name (arbitrary tie-break; names
+    // rarely differ across a person's own worklogs).
+    const byAccount = new Map<string, { authorAccountId: string; authorName: string | null; totalHours: number }>();
+    for (const row of rows) {
+      const hours = (row._sum.timeSpentSeconds ?? 0) / 3600;
+      const existing = byAccount.get(row.authorAccountId!);
+      if (existing) {
+        existing.totalHours += hours;
+        if (row.authorName) existing.authorName = row.authorName;
+      } else {
+        byAccount.set(row.authorAccountId!, { authorAccountId: row.authorAccountId!, authorName: row.authorName, totalHours: hours });
+      }
+    }
+
+    return Array.from(byAccount.values())
+      .map((a) => ({ ...a, totalHours: Math.round(a.totalHours * 10) / 10, hourlyRateCents: rateByAccountId.get(a.authorAccountId) ?? null }))
+      .sort((a, b) => b.totalHours - a.totalHours);
+  }
+
+  /** `hourlyRateCents: null` clears a previously-set rate. */
+  async setWorklogAuthorRate(
+    tenantId: string,
+    authorAccountId: string,
+    authorName: string | null,
+    hourlyRateCents: number | null
+  ): Promise<{ authorAccountId: string; hourlyRateCents: number | null }> {
+    if (hourlyRateCents === null) {
+      await this.prisma.worklogAuthorRate.deleteMany({ where: { tenantId, authorAccountId } });
+      return { authorAccountId, hourlyRateCents: null };
+    }
+    const rate = await this.prisma.worklogAuthorRate.upsert({
+      where: { tenantId_authorAccountId: { tenantId, authorAccountId } },
+      create: { tenantId, authorAccountId, authorName, hourlyRateCents },
+      update: { hourlyRateCents, ...(authorName ? { authorName } : {}) }
+    });
+    return { authorAccountId: rate.authorAccountId, hourlyRateCents: rate.hourlyRateCents };
+  }
+
+  /**
+   * Per-assignee feature/fix/maintenance split from real WorkItem.type —
+   * story->feature, bug->fix, task->maintenance. Scoped to resolved/completed
+   * items only (an in-progress item hasn't actually landed as one category
+   * of work yet) and keyed by externalAssigneeId, same reasoning as
+   * getAssigneeWorkload: works for anyone Jira knows about, no QualiMetrix
+   * account required. Subtasks and epics are excluded — they'd double-count
+   * work already attributed to their parent story/bug/task.
+   */
+  async getFeatureFixAllocation(productId?: string, tenantId?: string): Promise<{
+    assignees: Array<{
+      externalAssigneeId: string;
+      displayName: string;
+      feature: number;
+      fix: number;
+      maintenance: number;
+      total: number;
+    }>;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      isActive: true,
+      externalAssigneeId: { not: null },
+      status: { in: ['resolved', 'completed'] },
+      type: { in: ['story', 'bug', 'task'] },
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const groups = await this.prisma.workItem.groupBy({
+      by: ['externalAssigneeId', 'type'],
+      where,
+      _count: true
+    });
+
+    if (groups.length === 0) return { assignees: [], hasData: false };
+
+    const assigneeIds = Array.from(new Set(groups.map((g) => g.externalAssigneeId as string)));
+    const nameRows = await this.prisma.workItem.findMany({
+      where: { externalAssigneeId: { in: assigneeIds } },
+      distinct: ['externalAssigneeId'],
+      select: { externalAssigneeId: true, externalAssigneeName: true }
+    });
+    const nameByAssigneeId = new Map(nameRows.map((r) => [r.externalAssigneeId as string, r.externalAssigneeName]));
+
+    const TYPE_TO_CATEGORY: Record<string, 'feature' | 'fix' | 'maintenance'> = {
+      story: 'feature', bug: 'fix', task: 'maintenance'
+    };
+
+    const byAssignee = new Map<string, { feature: number; fix: number; maintenance: number }>();
+    for (const g of groups) {
+      const id = g.externalAssigneeId as string;
+      const category = TYPE_TO_CATEGORY[g.type];
+      if (!category) continue;
+      const entry = byAssignee.get(id) ?? { feature: 0, fix: 0, maintenance: 0 };
+      entry[category] += g._count as unknown as number;
+      byAssignee.set(id, entry);
+    }
+
+    const assignees = Array.from(byAssignee.entries())
+      .map(([id, counts]) => ({
+        externalAssigneeId: id,
+        displayName: nameByAssigneeId.get(id) ?? id,
+        ...counts,
+        total: counts.feature + counts.fix + counts.maintenance
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    return { assignees, hasData: assignees.length > 0 };
+  }
+
+  /**
+   * Knowledge-silo / bus-factor detection: for each label/tag attached to
+   * resolved bugs (Jira labels or Azure DevOps tags — whichever the
+   * connected tenant uses), what share was resolved by a single assignee.
+   * Built on labels/tags rather than a dedicated "component" field: Jira's
+   * Components field and ADO's Area Path both exist for this purpose, but
+   * plenty of real teams never populate them, whereas labels/tags are
+   * free-text and used opportunistically almost everywhere — shipping a
+   * feature that's honestly-empty for any team that hasn't adopted
+   * Components isn't more useful than one built on whatever tagging data
+   * actually exists. Process/severity/sprint labels (e.g. "severity-2",
+   * "sprint-aug-sprint-1") are filtered out as noise — they're not a module
+   * or category in any sense relevant to bus-factor risk.
+   *
+   * A label/tag needs at least `minBugsPerLabel` resolved bugs before it's
+   * surfaced at all, so one bug with one label never reads as "100% risk."
+   */
+  async getKnowledgeSilo(productId?: string, tenantId?: string, minBugsPerLabel: number = 3): Promise<{
+    labels: Array<{
+      label: string;
+      totalBugs: number;
+      topAssignee: { externalAssigneeId: string; displayName: string; count: number; percent: number };
+      risk: 'high' | 'medium' | 'low';
+    }>;
+    hasData: boolean;
+  }> {
+    const where: any = {
+      isActive: true,
+      type: 'bug',
+      status: { in: ['resolved', 'completed'] },
+      externalAssigneeId: { not: null },
+      ...(productId ? { productId } : tenantId ? { tenantId } : {})
+    };
+
+    const items = await this.prisma.workItem.findMany({
+      where,
+      select: { labels: true, externalAssigneeId: true, externalAssigneeName: true }
+    });
+
+    const countsByLabel = new Map<string, Map<string, { name: string; count: number }>>();
+    for (const item of items) {
+      const assigneeId = item.externalAssigneeId as string;
+      const assigneeName = item.externalAssigneeName ?? assigneeId;
+      for (const label of item.labels) {
+        if (NOISE_LABEL.test(label)) continue;
+        const byAssignee = countsByLabel.get(label) ?? new Map();
+        const entry = byAssignee.get(assigneeId) ?? { name: assigneeName, count: 0 };
+        entry.count += 1;
+        byAssignee.set(assigneeId, entry);
+        countsByLabel.set(label, byAssignee);
+      }
+    }
+
+    const rows: Array<{
+      label: string;
+      totalBugs: number;
+      topAssignee: { externalAssigneeId: string; displayName: string; count: number; percent: number };
+      risk: 'high' | 'medium' | 'low';
+    }> = [];
+
+    for (const [label, byAssignee] of countsByLabel) {
+      const totalBugs = Array.from(byAssignee.values()).reduce((sum, v) => sum + v.count, 0);
+      if (totalBugs < minBugsPerLabel) continue;
+
+      const [topId, top] = Array.from(byAssignee.entries()).sort((a, b) => b[1].count - a[1].count)[0];
+      const percent = Math.round((top.count / totalBugs) * 1000) / 10;
+      const risk: 'high' | 'medium' | 'low' = percent >= 70 ? 'high' : percent >= 50 ? 'medium' : 'low';
+
+      rows.push({
+        label,
+        totalBugs,
+        topAssignee: { externalAssigneeId: topId, displayName: top.name, count: top.count, percent },
+        risk
+      });
+    }
+
+    rows.sort((a, b) => b.topAssignee.percent - a.topAssignee.percent);
+
+    return { labels: rows, hasData: rows.length > 0 };
   }
 }
 

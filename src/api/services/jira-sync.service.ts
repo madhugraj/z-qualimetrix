@@ -1,11 +1,10 @@
 import prisma from '../../lib/prisma';
 import integrationService from './integration.service';
-import jiraOAuthService from './jira-oauth.service';
+import { ensureValidAtlassianToken } from './atlassian-token.service';
 import { generateEmbeddings } from './local-embeddings.service';
 import { adfToPlainText } from '../utils/adf-to-text';
 import type { Integration, Product } from '@prisma/client';
 
-const TOKEN_REFRESH_BUFFER_MS = 2 * 60 * 1000;
 const MAX_RATE_LIMIT_WAIT_MS = 60 * 1000;
 const RECONCILE_MISS_THRESHOLD = 2;
 
@@ -93,36 +92,14 @@ async function jiraFetch(client: JiraClient, path: string, init?: RequestInit): 
 }
 
 /**
- * Ensures a valid, non-expired access token, refreshing via jiraOAuthService
- * if within TOKEN_REFRESH_BUFFER_MS of expiry. Throws a distinguishable error
+ * Ensures a valid, non-expired access token, refreshing (via the shared
+ * atlassian-token.service.ts, which also keeps a sibling 'confluence' row's
+ * token pair in sync) if close to expiry. Throws a distinguishable error
  * (marks Integration.status = 'reauth_required') if the refresh token itself
  * is dead — caller must stop the sync run for this integration on that error.
  */
 async function ensureValidToken(integration: Integration): Promise<string> {
-  const tokens = await integrationService.getDecryptedTokens(integration.tenantId, 'jira');
-  if (!tokens) throw new Error('Jira integration has no stored tokens');
-
-  const expiresAt = tokens.expiresAt?.getTime() ?? 0;
-  if (expiresAt - Date.now() > TOKEN_REFRESH_BUFFER_MS) {
-    return tokens.accessToken;
-  }
-
-  if (!tokens.refreshToken) {
-    await integrationService.markReauthRequired(integration.tenantId, 'jira', 'Access token expired and no refresh token is stored');
-    throw new Error('reauth_required');
-  }
-
-  try {
-    const refreshed = await jiraOAuthService.refreshAccessToken(tokens.refreshToken);
-    await integrationService.recordTokenRefresh(integration.tenantId, 'jira', refreshed);
-    return refreshed.accessToken;
-  } catch (err) {
-    await integrationService.markReauthRequired(
-      integration.tenantId, 'jira',
-      `Token refresh failed: ${err instanceof Error ? err.message : String(err)}`
-    );
-    throw new Error('reauth_required');
-  }
+  return ensureValidAtlassianToken(integration.tenantId, 'jira');
 }
 
 /**
@@ -170,8 +147,31 @@ async function getEpicLinkFieldId(client: JiraClient, integration: Integration):
   return fieldId;
 }
 
+/**
+ * Sprint, like story points and epic link, is always a custom field (id
+ * varies per site) — the literal string 'sprint' is not a real field name/
+ * alias the search API recognizes, and requesting it as-is causes Jira to
+ * silently omit it from the response (no error, just absent), leaving every
+ * WorkItem.sprintId null forever. Discovered and cached the same way.
+ */
+async function getSprintFieldId(client: JiraClient, integration: Integration): Promise<string | null> {
+  const metadata = (integration.externalMetadata as Record<string, unknown>) ?? {};
+  if (typeof metadata.sprintFieldId === 'string') return metadata.sprintFieldId;
+
+  const fields: Array<{ id: string; name: string }> = await jiraFetch(client, '/rest/api/3/field');
+  const match = fields.find((f) => /^sprint$/i.test(f.name));
+
+  const fieldId = match?.id ?? null;
+  await prisma.integration.update({
+    where: { id: integration.id },
+    data: { externalMetadata: { ...metadata, sprintFieldId: fieldId } },
+  });
+  return fieldId;
+}
+
 async function fetchSprintsForProject(client: JiraClient, jiraProjectId: string): Promise<Array<{
   id: number; name: string; state: string; startDate?: string; endDate?: string; goal?: string;
+  boardId?: number; boardName?: string;
 }>> {
   let boards: { values?: any[] };
   try {
@@ -192,7 +192,9 @@ async function fetchSprintsForProject(client: JiraClient, jiraProjectId: string)
       for (;;) {
         const page = await jiraFetch(client, `/rest/agile/1.0/board/${board.id}/sprint?startAt=${startAt}&maxResults=50&state=active,closed,future`);
         for (const sprint of page.values ?? []) {
-          sprintsById.set(sprint.id, sprint);
+          // A sprint can rarely be shared across boards — last board seen wins,
+          // same "no ordering guarantee" posture as the rest of this dedup map.
+          sprintsById.set(sprint.id, { ...sprint, boardId: board.id, boardName: board.name });
         }
         if (page.isLast !== false || !page.values?.length) break;
         startAt += page.values.length;
@@ -208,11 +210,13 @@ async function fetchSprintsForProject(client: JiraClient, jiraProjectId: string)
 
 async function upsertSprints(tenantId: string, product: Product, sprints: Array<{
   id: number; name: string; state: string; startDate?: string; endDate?: string; goal?: string;
+  boardId?: number; boardName?: string;
 }>): Promise<Map<number, string>> {
   const sprintIdMap = new Map<number, string>();
 
   for (const sprint of sprints) {
     const status = sprint.state === 'active' ? 'active' : sprint.state === 'future' ? 'planning' : 'completed';
+    const boardId = sprint.boardId != null ? String(sprint.boardId) : null;
     const row = await prisma.sprint.upsert({
       where: {
         productId_externalSystem_externalId: {
@@ -225,6 +229,7 @@ async function upsertSprints(tenantId: string, product: Product, sprints: Array<
         startDate: sprint.startDate ? new Date(sprint.startDate) : new Date(),
         endDate: sprint.endDate ? new Date(sprint.endDate) : new Date(),
         goal: sprint.goal ?? null,
+        externalBoardId: boardId, boardName: sprint.boardName ?? null,
         isActive: true, lastSeenAtSourceAt: new Date(),
       },
       update: {
@@ -232,6 +237,7 @@ async function upsertSprints(tenantId: string, product: Product, sprints: Array<
         startDate: sprint.startDate ? new Date(sprint.startDate) : undefined,
         endDate: sprint.endDate ? new Date(sprint.endDate) : undefined,
         goal: sprint.goal ?? null,
+        externalBoardId: boardId, boardName: sprint.boardName ?? null,
         isActive: true, lastSeenAtSourceAt: new Date(),
       },
     });
@@ -322,12 +328,14 @@ async function* fetchIssuePages(
   client: JiraClient,
   jql: string,
   storyPointsFieldId: string | null,
-  epicLinkFieldId: string | null
+  epicLinkFieldId: string | null,
+  sprintFieldId: string | null
 ): AsyncGenerator<any[]> {
   let nextPageToken: string | undefined;
-  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'sprint', 'created', 'updated', 'resolutiondate', 'labels', 'issuelinks', 'parent', 'timetracking'];
+  const fields = ['summary', 'description', 'issuetype', 'status', 'priority', 'assignee', 'reporter', 'created', 'updated', 'resolutiondate', 'labels', 'issuelinks', 'parent', 'timetracking'];
   if (storyPointsFieldId) fields.push(storyPointsFieldId);
   if (epicLinkFieldId) fields.push(epicLinkFieldId);
+  if (sprintFieldId) fields.push(sprintFieldId);
 
   for (;;) {
     const body: Record<string, unknown> = { jql, maxResults: 100, fields };
@@ -357,6 +365,7 @@ export async function syncProduct(integration: Integration, product: Product): P
   const priorityOverrides = ((integration.externalMetadata as any)?.statusMap?.priority as Record<string, string>) ?? {};
   const storyPointsFieldId = await getStoryPointsFieldId(client, integration);
   const epicLinkFieldId = await getEpicLinkFieldId(client, integration);
+  const sprintFieldId = await getSprintFieldId(client, integration);
   const systemUserId = await integrationService.getOrCreateSystemUser(integration.tenantId);
 
   const sprints = await fetchSprintsForProject(client, product.jiraProjectId);
@@ -383,7 +392,7 @@ export async function syncProduct(integration: Integration, product: Product): P
   // next sync onward, same as any other incremental signal.
   const changelogWatermark = integration.lastSyncedAt;
 
-  for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId, epicLinkFieldId)) {
+  for await (const issues of fetchIssuePages(client, jql, storyPointsFieldId, epicLinkFieldId, sprintFieldId)) {
     // Batched once per page (not per issue) so reopen/status-change detection
     // doesn't turn into an extra ~2500 findUnique calls at full-tenant scale —
     // this stays the same order of magnitude as the existing pagination cost.
@@ -476,7 +485,8 @@ export async function syncProduct(integration: Integration, product: Product): P
       if (f.assignee?.accountId && f.assignee?.emailAddress) accountIdToEmail.set(f.assignee.accountId, f.assignee.emailAddress);
       if (f.reporter?.accountId && f.reporter?.emailAddress) accountIdToEmail.set(f.reporter.accountId, f.reporter.emailAddress);
 
-      const jiraSprintField = Array.isArray(f.sprint) ? f.sprint[f.sprint.length - 1] : f.sprint;
+      const sprintFieldValue = sprintFieldId ? f[sprintFieldId] : undefined;
+      const jiraSprintField = Array.isArray(sprintFieldValue) ? sprintFieldValue[sprintFieldValue.length - 1] : sprintFieldValue;
       const sprintId = jiraSprintField?.id ? sprintIdMap.get(jiraSprintField.id) ?? null : null;
 
       const externalMetadata = {
@@ -502,6 +512,9 @@ export async function syncProduct(integration: Integration, product: Product): P
       // "not embedded" on every routine sync touch.
       const embedding = embeddingsByExternalId.get(String(issue.id)) ?? existing?.embedding ?? [];
 
+      const externalAssigneeId = f.assignee?.accountId ?? null;
+      const externalAssigneeName = f.assignee?.displayName ?? null;
+
       const workItemRow = await prisma.workItem.upsert({
         where: {
           productId_externalSystem_externalId: {
@@ -513,7 +526,7 @@ export async function syncProduct(integration: Integration, product: Product): P
           externalSystem: 'jira', externalId: String(issue.id),
           type: workItemType, status, priority,
           title, description,
-          assigneeId, sprintId, storyPoints, labels, embedding,
+          assigneeId, externalAssigneeId, externalAssigneeName, sprintId, storyPoints, labels, embedding,
           originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           externalStatusName: rawStatusName, statusChangedAt: new Date(), reopenCount: 0,
           createdBy: systemUserId,
@@ -528,7 +541,7 @@ export async function syncProduct(integration: Integration, product: Product): P
         update: {
           type: workItemType, status, priority,
           title, description,
-          assigneeId, sprintId, storyPoints, labels, embedding,
+          assigneeId, externalAssigneeId, externalAssigneeName, sprintId, storyPoints, labels, embedding,
           originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           externalStatusName: rawStatusName,
           // Only touch these when something actually changed, so an
@@ -784,6 +797,10 @@ async function syncWorklogs(integration: Integration): Promise<void> {
  * paying for that extra call would be pure waste. authorName is always
  * available and always stored; authorEmail is null for privacy-restricted
  * authors, same accepted gap Commit.authorEmail already has elsewhere.
+ * authorAccountId is ALSO always available (same author object, but Jira
+ * never hides accountId the way it hides email) — it's the reliable join
+ * key for per-assignee workload metrics that don't depend on email visibility
+ * or on the person having a QualiMetrix account at all.
  */
 async function persistWorklogs(tenantId: string, worklogs: any[]): Promise<void> {
   if (worklogs.length === 0) return;
@@ -801,17 +818,18 @@ async function persistWorklogs(tenantId: string, worklogs: any[]): Promise<void>
 
     const authorName = w.author?.displayName ?? null;
     const authorEmail = w.author?.emailAddress ?? null;
+    const authorAccountId = w.author?.accountId ?? null;
 
     await prisma.workLog.upsert({
       where: { externalSystem_externalId: { externalSystem: 'jira', externalId: String(w.id) } },
       create: {
-        tenantId, workItemId, authorName, authorEmail,
+        tenantId, workItemId, authorName, authorEmail, authorAccountId,
         timeSpentSeconds: w.timeSpentSeconds,
         startedAt: new Date(w.started),
         externalSystem: 'jira', externalId: String(w.id),
       },
       update: {
-        authorName, authorEmail,
+        authorName, authorEmail, authorAccountId,
         timeSpentSeconds: w.timeSpentSeconds,
         startedAt: new Date(w.started),
       },

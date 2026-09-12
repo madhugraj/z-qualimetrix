@@ -191,7 +191,7 @@ async function* fetchWorkItemBatches(client: AdoClient, ids: number[], stateCate
     'System.Title', 'System.Description', 'System.WorkItemType', 'System.State', 'System.AssignedTo', 'System.CreatedBy',
     'System.IterationId', 'System.IterationPath', 'Microsoft.VSTS.Common.Priority',
     'Microsoft.VSTS.Scheduling.StoryPoints', 'Microsoft.VSTS.Scheduling.Effort',
-    'Microsoft.VSTS.Common.ResolvedDate', 'System.Parent',
+    'Microsoft.VSTS.Common.ResolvedDate', 'System.Parent', 'System.Tags',
     'Microsoft.VSTS.Scheduling.OriginalEstimate', 'Microsoft.VSTS.Scheduling.RemainingWork', 'Microsoft.VSTS.Scheduling.CompletedWork',
   ];
 
@@ -279,6 +279,16 @@ export async function syncProduct(integration: Integration, product: Product): P
       const remainingEstimateSeconds = hoursToSeconds(f['Microsoft.VSTS.Scheduling.RemainingWork']);
       const timeSpentSeconds = hoursToSeconds(f['Microsoft.VSTS.Scheduling.CompletedWork']);
       const embedding = embeddingsByExternalId.get(String(item.id)) ?? existing?.embedding ?? [];
+      // ADO's identity id (a stable GUID) — unlike Jira there's no per-user
+      // privacy setting hiding uniqueName/email here, but storing this keeps
+      // the assignee-workload query the same shape across both providers.
+      const externalAssigneeId = f['System.AssignedTo']?.id ?? null;
+      const externalAssigneeName = f['System.AssignedTo']?.displayName ?? null;
+      // ADO's tag equivalent of Jira's labels — a single "; "-delimited
+      // string, not an array — so getKnowledgeSilo (and anything else keyed
+      // on WorkItem.labels) works the same regardless of source system.
+      const labels = (f['System.Tags'] as string | undefined)
+        ?.split(';').map((t) => t.trim()).filter(Boolean) ?? [];
 
       const parentField = f['System.Parent'];
       collectedParents.push({
@@ -304,8 +314,8 @@ export async function syncProduct(integration: Integration, product: Product): P
           externalSystem: 'azure_devops', externalId: String(item.id),
           type: workItemType, status, priority,
           title, description, embedding,
-          assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
-          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
+          assigneeId, externalAssigneeId, externalAssigneeName, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
+          labels, originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           createdBy: systemUserId,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
@@ -313,8 +323,8 @@ export async function syncProduct(integration: Integration, product: Product): P
         update: {
           type: workItemType, status, priority,
           title, description, embedding,
-          assigneeId, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
-          originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
+          assigneeId, externalAssigneeId, externalAssigneeName, sprintId, storyPoints: storyPoints ? Math.round(storyPoints) : null,
+          labels, originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds,
           resolvedAt: f['Microsoft.VSTS.Common.ResolvedDate'] ? new Date(f['Microsoft.VSTS.Common.ResolvedDate']) : null,
           isActive: true, lastSeenAtSourceAt: new Date(), externalMetadata,
         },

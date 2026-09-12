@@ -13,7 +13,14 @@ import { getGpuSpendSummary, getGpuSpendTrend, getGpuSpendBySquad, getGpuSpendBy
 import { healthCheck, databaseInfo } from '../controllers/health.controller';
 import githubRoutes from './github.routes';
 import productRepositoryRoutes from './product-repository.routes';
+import notificationRoutes from './notification.routes';
 import integrationRoutes from './integration.routes';
+import {
+  listLinkedDocuments,
+  suggestLinks as suggestLinkedDocuments,
+  createLink as createLinkedDocument,
+  deleteLink as deleteLinkedDocument,
+} from '../controllers/confluence.controller';
 import authRoutes from './auth.routes';
 import membershipRoutes from './membership.routes';
 import {
@@ -83,6 +90,14 @@ router.get('/products/:productId/work-items', requireAuth, requireProductScope((
 router.get('/sprints/:sprintId/work-items', requireAuth, workItemController.getWorkItemsBySprint);
 router.post('/work-items/bulk-update-status', requireAuth, workItemController.bulkUpdateStatus);
 
+// Confluence page links (a work item's, typically an Epic's, documentation)
+// — kept here rather than under /integrations/confluence since a link is a
+// property of the work item, matching every other work-item sub-resource.
+router.get('/work-items/:workItemId/documents', requireAuth, listLinkedDocuments);
+router.get('/work-items/:workItemId/documents/suggested', requireAuth, suggestLinkedDocuments);
+router.post('/work-items/:workItemId/documents', requireAuth, createLinkedDocument);
+router.delete('/work-items/:workItemId/documents/:linkId', requireAuth, deleteLinkedDocument);
+
 // Test Case routes
 router.get('/test-cases', requireAuth, testCaseController.getAllTestCases);
 router.get('/test-cases/:id', requireAuth, testCaseController.getTestCaseById);
@@ -120,6 +135,7 @@ router.get('/analytics/bug-label-distribution', requireAuth, analyticsController
 router.get('/analytics/open-p0-p1-count', requireAuth, analyticsController.getOpenP0P1Count);
 router.get('/analytics/reopen-metrics', requireAuth, analyticsController.getReopenMetrics);
 router.get('/analytics/qa-bottlenecks', requireAuth, analyticsController.getQaBottlenecks);
+router.get('/analytics/cycle-time-by-stage', requireAuth, analyticsController.getCycleTimeByStage);
 router.get('/products/:productId/work-items/:workItemId/similar-bugs', requireAuth, requireProductScope((req) => paramString(req.params.productId)), analyticsController.getSimilarBugs);
 router.get('/analytics/projects-overview', requireAuth, analyticsController.getProjectsOverview);
 router.get('/analytics/backlog-summary', requireAuth, analyticsController.getBacklogSummary);
@@ -129,6 +145,14 @@ router.get('/analytics/age-distribution', requireAuth, analyticsController.getAg
 router.get('/analytics/backlog-flow', requireAuth, analyticsController.getBacklogFlow);
 router.get('/analytics/requirement-traceability', requireAuth, analyticsController.getRequirementTraceability);
 router.get('/analytics/epics', requireAuth, analyticsController.getEpicRollups);
+router.get('/analytics/compliance', requireAuth, analyticsController.getComplianceSignals);
+router.get('/analytics/assignee-workload', requireAuth, analyticsController.getAssigneeWorkload);
+router.get('/analytics/team-utilization', requireAuth, analyticsController.getTeamUtilization);
+router.get('/analytics/team-cost', requireAuth, analyticsController.getTeamCost);
+router.get('/analytics/worklog-authors', requireAuth, analyticsController.getWorklogAuthors);
+router.put('/analytics/worklog-author-rate', requireAuth, analyticsController.setWorklogAuthorRate);
+router.get('/analytics/feature-fix-allocation', requireAuth, analyticsController.getFeatureFixAllocation);
+router.get('/analytics/knowledge-silo', requireAuth, analyticsController.getKnowledgeSilo);
 
 // PM/Leadership analytics assistant — role-gated at the route layer, and
 // independently re-scoped to req.user!.tenantId inside every service call
@@ -155,19 +179,26 @@ router.get('/gpu-spend/by-type', requireAuth, getGpuSpendByType);
 router.use('/github', githubRoutes);
 
 // GitHub token management routes (directly defined) — saving/deleting the
-// token is PM-only, same as connecting Jira/ADO; status/validate/test are
-// read-only checks against an already-stored token. Tenant always comes
-// from req.user (see github-token.controller.ts), never a URL param — no
-// :tenantId here, unlike the old routes, or one tenant could read/delete
-// another's connection by guessing a UUID.
+// token is PM-only, same as connecting Jira/ADO. status/test read connection
+// metadata (username, token type, last-validated time) for an already-stored
+// token — not secret, but still admin/integration-setup detail; the only
+// frontend consumer (integrations.tsx) is itself PM-gated, so this matches
+// existing behavior rather than changing it. validate stays requireAuth —
+// it only checks a caller-supplied token's validity, no tenant data read.
+// Tenant always comes from req.user (see github-token.controller.ts), never
+// a URL param — no :tenantId here, unlike the old routes, or one tenant
+// could read/delete another's connection by guessing a UUID.
 router.post('/github-token/validate', requireAuth, validateGitHubToken);
 router.post('/github-token/tokens', requireAdmin, saveGitHubToken);
-router.get('/github-token/status', requireAuth, getGitHubStatus);
-router.get('/github-token/test', requireAuth, testGitHubToken);
+router.get('/github-token/status', requireAdmin, getGitHubStatus);
+router.get('/github-token/test', requireAdmin, testGitHubToken);
 router.delete('/github-token/tokens', requireAdmin, deleteGitHubToken);
 
 // Product repository routes
 router.use('/product-repository', productRepositoryRoutes);
+
+// Real per-user notification bell (replaces the old fully-mock qm-alerts.ts)
+router.use('/notifications', notificationRoutes);
 
 // AI Usage Analytics routes
 router.get('/ai-usage/analytics', requireAuth, getAiUsageAnalyticsHandler);

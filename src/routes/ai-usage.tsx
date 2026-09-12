@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Lock, Loader2 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 import { AppShell } from "@/components/qm/AppShell";
 import { GlassPanel } from "@/components/qm/GlassPanel";
 import { DemoDataBadge } from "@/components/qm/DemoDataNotice";
@@ -40,7 +41,12 @@ export const Route = createFileRoute("/ai-usage")({
   component: AiUsagePage,
 });
 
-const LEVELS: { id: AiVisibility; label: string }[] = [
+// "team"/"org"/"finance" expose colleagues' individual usage, rework rate,
+// and (org/finance) real dollar cost — the backend now clamps these to
+// "self" for anyone who isn't pm/executive (see ai-usage.controller.ts),
+// so only offering the buttons a role can actually use avoids a click that
+// silently does nothing.
+const ALL_LEVELS: { id: AiVisibility; label: string }[] = [
   { id: "self", label: "My usage" },
   { id: "team", label: "Squad lead" },
   { id: "org", label: "Manager / HR" },
@@ -56,7 +62,13 @@ const toneBorder: Record<string, string> = {
 };
 
 function AiUsagePage() {
-  const [level, setLevel] = useState<AiVisibility>("org");
+  const { user } = useAuth();
+  const isPortfolioRole = user?.role === "pm" || user?.role === "executive";
+  const LEVELS = isPortfolioRole ? ALL_LEVELS : ALL_LEVELS.filter((l) => l.id === "self");
+  // Safe default regardless of role/auth-loading timing — non-portfolio
+  // roles never see a button for anything else, so this can never change
+  // for them; portfolio roles can switch freely once loaded.
+  const [level, setLevel] = useState<AiVisibility>("self");
 
   // Fetch live AI usage data from API using session-based authentication
   const { data: analytics, isLoading, error } = useQuery({
@@ -76,9 +88,10 @@ function AiUsagePage() {
 
   const seesPeople = analytics?.canSeePeople ?? false;
   const seesCost = analytics?.canSeeCost ?? false;
-  const budgetPct = analytics
-    ? Math.round((analytics.totals.currentSprintCostUsd / analytics.totals.budgetUsd) * 100)
-    : 0;
+  // Use the server's own figure rather than recomputing — it already
+  // handles the budgetUsd=0 case and was showing a different rounding
+  // (1 decimal server-side vs whole-percent here) for the same number.
+  const budgetPct = analytics?.totals.budgetConsumedPct ?? 0;
 
   return (
     <AppShell>
@@ -135,7 +148,7 @@ function AiUsagePage() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-3">
             {seesCost && (
               <GlassPanel
                 title="Spend by model per sprint"

@@ -44,7 +44,7 @@ const tooltipStyle = {
   labelStyle: { color: "var(--muted-foreground)" },
 } as const;
 
-function EmptyChartState({ message }: { message: string }) {
+export function EmptyChartState({ message }: { message: string }) {
   return (
     <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
       {message}
@@ -507,6 +507,42 @@ export function SpendBreakdownChart({
         <YAxis type="category" dataKey="label" {...axis} width={110} />
         <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} formatter={(v: number) => `$${v.toFixed(2)}`} />
         <Bar dataKey="costUsd" name="Spend" fill="var(--ops)" radius={[0, 4, 4, 0]} isAnimationActive={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export interface CategoryCount {
+  label: string;
+  count: number;
+}
+
+/** Horizontal count breakdown by an arbitrary category (product, assignee, ...) — same
+ * shape/layout as SpendBreakdownChart, generalized off the $-specific dataKey/formatting. */
+export function CategoryCountChart({
+  data,
+  emptyMessage = "No data for this scope yet.",
+  seriesName = "Epics",
+}: {
+  data?: CategoryCount[];
+  emptyMessage?: string;
+  /** Tooltip series label — defaults to "Epics" (this component's original,
+   * still most common caller) so existing usages are unaffected; non-epic
+   * callers (e.g. Compliance's per-product item counts) should pass their
+   * own noun so the tooltip doesn't mislabel what's being counted. */
+  seriesName?: string;
+}) {
+  if (!data || data.length === 0) {
+    return <EmptyChartState message={emptyMessage} />;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 36)}>
+      <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+        <CartesianGrid horizontal={false} stroke="var(--border)" {...gridProps} />
+        <XAxis type="number" {...axis} allowDecimals={false} />
+        <YAxis type="category" dataKey="label" {...axis} width={130} />
+        <Tooltip cursor={{ fill: "var(--accent)" }} {...tooltipStyle} />
+        <Bar dataKey="count" name={seriesName} fill="var(--primary)" radius={[0, 4, 4, 0]} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>
   );

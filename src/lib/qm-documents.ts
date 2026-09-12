@@ -1,11 +1,14 @@
 // ---------------------------------------------------------------------------
 // Document download system — mock catalogue of project documentation held in
-// external repositories (Drive / SharePoint / Confluence / OneDrive).
-// No backend: connections live in component state, downloads are generated
-// client-side so the UX is complete and ready to swap for real APIs.
+// external repositories (Drive / SharePoint / OneDrive). No backend for
+// these three: connections live in component state, downloads are generated
+// client-side. Confluence is NOT here anymore — it's a real integration now
+// (see src/api/services/confluence-sync.service.ts and
+// src/lib/queries/confluence.ts), rendered separately in DocumentHub.tsx so
+// it never reads as just another entry in this mock catalogue.
 // ---------------------------------------------------------------------------
 
-export type DocSourceId = "gdrive" | "sharepoint" | "confluence" | "onedrive";
+export type DocSourceId = "gdrive" | "sharepoint" | "onedrive";
 
 export interface DocSource {
   id: DocSourceId;
@@ -27,12 +30,6 @@ export const DOC_SOURCES: DocSource[] = [
     name: "Microsoft SharePoint",
     detail: "Connect a site and document library for release and QA artefacts.",
     scope: "Sites.Read.All · document library sync",
-  },
-  {
-    id: "confluence",
-    name: "Atlassian Confluence",
-    detail: "Pull spaces and pages linked to the project's Jira key.",
-    scope: "read:page · space export",
   },
   {
     id: "onedrive",
@@ -70,17 +67,6 @@ export const PROJECT_DOCUMENTS: ProjectDocument[] = [
     body: "Scope: regression across Auth, Billing sync and Search.\nEntry criteria: build 24.6.3 deployed to staging.\nExit criteria: 0 open P0/P1, execution coverage >= 90%.",
   },
   {
-    id: "DOC-1002",
-    project: "Atlas Core",
-    title: "RCA — payment webhook duplication",
-    kind: "RCA",
-    source: "confluence",
-    owner: "Sofia R.",
-    updated: "5 days ago",
-    size: "188 KB",
-    body: "Trigger: retry storm on webhook consumer.\nRoot cause: idempotency key derived from mutable payload field.\nCorrective action: hash immutable event id; add consumer-side dedupe window.",
-  },
-  {
     id: "DOC-1003",
     project: "Nimbus Billing",
     title: "Nimbus Billing — release notes v3.4",
@@ -90,17 +76,6 @@ export const PROJECT_DOCUMENTS: ProjectDocument[] = [
     updated: "1 day ago",
     size: "96 KB",
     body: "Added: proration preview API.\nFixed: invoice rounding on multi-currency plans.\nKnown issues: tax engine latency under bulk import.",
-  },
-  {
-    id: "DOC-1004",
-    project: "Nimbus Billing",
-    title: "Invoice engine functional specification",
-    kind: "Spec",
-    source: "confluence",
-    owner: "Meera S.",
-    updated: "3 weeks ago",
-    size: "1.2 MB",
-    body: "Defines invoice lifecycle states, proration rules and dunning retries with acceptance criteria per requirement id.",
   },
   {
     id: "DOC-1005",
@@ -134,17 +109,6 @@ export const PROJECT_DOCUMENTS: ProjectDocument[] = [
     updated: "6 days ago",
     size: "3.1 MB",
     body: "Quarterly evaluation of ranking model: precision@10, drift on feature distribution, retraining recommendation.",
-  },
-  {
-    id: "DOC-1008",
-    project: "Vertex Analytics",
-    title: "Data pipeline QA checklist",
-    kind: "Test plan",
-    source: "confluence",
-    owner: "Priya N.",
-    updated: "2 weeks ago",
-    size: "132 KB",
-    body: "Schema contract checks, null-rate thresholds, late-arrival handling and backfill verification steps.",
   },
 ];
 

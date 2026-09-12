@@ -12,6 +12,8 @@ import {
   ListTodo,
   Cpu,
   Layers,
+  HelpCircle,
+  ShieldAlert,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { GlobalSearch } from "@/components/qm/GlobalSearch";
@@ -29,6 +31,7 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/projects", label: "Projects", icon: FolderKanban, roles: ["pm", "executive"] },
   { to: "/epics", label: "Epics", icon: Layers, roles: ["pm", "executive"] },
+  { to: "/compliance", label: "Compliance", icon: ShieldAlert, roles: ["pm", "executive"] },
   { to: "/backlog", label: "Backlog", icon: ListTodo },
   { to: "/bugs", label: "Bug Intelligence", icon: Bug },
   { to: "/ai-usage", label: "AI Usage & Tokens", icon: Bot },
@@ -38,6 +41,7 @@ const NAV = [
   { to: "/integrations", label: "Integrations", icon: PlugZap, roles: ["pm"] },
   { to: "/manual-log", label: "Manual Log", icon: PenLine },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["pm"] },
+  { to: "/help", label: "Help", icon: HelpCircle },
 ] as const;
 
 

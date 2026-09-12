@@ -10,6 +10,13 @@ async function fetchApi<T>(path: string): Promise<T> {
   return body.data as T;
 }
 
+export interface WorkItemParentSummary {
+  id: string;
+  title: string;
+  externalId: string | null;
+  type: string;
+}
+
 export interface WorkItemSummary {
   id: string;
   externalId: string | null;
@@ -20,6 +27,10 @@ export interface WorkItemSummary {
   priority: "critical" | "high" | "medium" | "low" | null;
   labels: string[];
   productId: string;
+  parentId: string | null;
+  parent: WorkItemParentSummary | null;
+  externalAssigneeId: string | null;
+  externalAssigneeName: string | null;
   externalMetadata: { assigneeName?: string; assigneeEmail?: string; jiraKey?: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +41,8 @@ export interface BugListParams {
   labels?: string[];
   status?: string[];
   search?: string;
+  /** Filter to bugs under one epic, or the literal "none" for bugs with no epic at all. */
+  parentId?: string | "none";
   page?: number;
   limit?: number;
   sortBy?: string;
@@ -47,6 +60,7 @@ function buildBugsListPath(params: BugListParams): string {
   if (params.labels?.length) q.set("labels", params.labels.join(","));
   if (params.status?.length) q.set("status", params.status.join(","));
   if (params.search) q.set("search", params.search);
+  if (params.parentId) q.set("parentId", params.parentId);
   if (params.page) q.set("page", String(params.page));
   if (params.limit) q.set("limit", String(params.limit));
   if (params.sortBy) q.set("sortBy", params.sortBy);

@@ -1,8 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 
-async function fetchAnalytics<T>(path: string): Promise<T> {
-  const res = await apiFetch(path);
+async function fetchAnalytics<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, init);
   const body = await res.json();
   if (!res.ok || !body.success) {
     throw new Error(body.error ?? `Request failed: ${path}`);
@@ -39,12 +39,12 @@ export interface MttrResult {
  * this before src/lib/product-context.tsx resolves would surface a spurious
  * 400 for po/developer/tester during the initial load.
  */
-export function useMttr(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
+export function useMttr(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date, assigneeId?: string) {
   return useQuery({
-    queryKey: ["analytics-mttr", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryKey: ["analytics-mttr", productId, startDate?.toISOString(), endDate?.toISOString(), assigneeId],
     queryFn: () =>
       fetchAnalytics<MttrResult>(
-        withParams("/analytics/mttr", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+        withParams("/analytics/mttr", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString(), assigneeId })
       ),
     enabled,
   });
@@ -135,12 +135,12 @@ export interface RecentHighPriorityFixesResult {
   hasData: boolean;
 }
 
-export function useRecentHighPriorityFixes(productId?: string, enabled: boolean = true, limit?: number) {
+export function useRecentHighPriorityFixes(productId?: string, enabled: boolean = true, limit?: number, assigneeId?: string) {
   return useQuery({
-    queryKey: ["analytics-recent-high-priority-fixes", productId, limit],
+    queryKey: ["analytics-recent-high-priority-fixes", productId, limit, assigneeId],
     queryFn: () =>
       fetchAnalytics<RecentHighPriorityFixesResult>(
-        withParams("/analytics/recent-high-priority-fixes", { productId, limit: limit?.toString() })
+        withParams("/analytics/recent-high-priority-fixes", { productId, limit: limit?.toString(), assigneeId })
       ),
     enabled,
   });
@@ -210,6 +210,8 @@ export interface EpicRollupRow {
   externalStatusName: string | null;
   productId: string;
   productName: string;
+  externalAssigneeId: string | null;
+  externalAssigneeName: string | null;
   updatedAt: string;
   totalChildren: number;
   childCounts: Record<string, number>;
@@ -217,6 +219,10 @@ export interface EpicRollupRow {
   pointsComplete: { done: number; total: number; percent: number } | null;
   timeComplete: { spentSeconds: number; estimateSeconds: number; percent: number } | null;
   health: EpicHealth;
+  bugSummary: { openBugs: number; totalBugs: number; oldestOpenBugAgeDays: number | null };
+  /** Jira board name(s) this epic is scheduled on, derived from its own sprint
+   * and/or its children's sprints. Empty until Jira sync has board data. */
+  boardNames: string[];
 }
 
 export interface EpicRollupsSummary {
@@ -226,6 +232,8 @@ export interface EpicRollupsSummary {
   byHealth: Record<EpicHealth, number>;
   byStatus: Record<string, number>;
   byProgressBucket: { no_data: number; "0-25": number; "25-50": number; "50-75": number; "75-100": number };
+  orphanBugCount: number;
+  totalBugCount: number;
 }
 
 export interface EpicRollupsResult {
@@ -241,6 +249,167 @@ export function useEpicRollups(productId?: string, enabled: boolean = true, limi
       fetchAnalytics<EpicRollupsResult>(
         withParams("/analytics/epics", { productId, limit: limit?.toString() })
       ),
+    enabled,
+  });
+}
+
+export interface AssigneeWorkloadRow {
+  externalAssigneeId: string;
+  displayName: string;
+  linkedUserId: string | null;
+  totalItems: number;
+  itemsByStatus: Record<string, number>;
+  hoursLoggedSeconds: number;
+}
+
+export interface AssigneeWorkloadResult {
+  assignees: AssigneeWorkloadRow[];
+  unassignedCount: number;
+  hasData: boolean;
+}
+
+export function useAssigneeWorkload(productId?: string, enabled: boolean = true, limit?: number) {
+  return useQuery({
+    queryKey: ["analytics-assignee-workload", productId, limit],
+    queryFn: () =>
+      fetchAnalytics<AssigneeWorkloadResult>(
+        withParams("/analytics/assignee-workload", { productId, limit: limit?.toString() })
+      ),
+    enabled,
+  });
+}
+
+export interface TeamUtilizationPerson {
+  authorAccountId: string | null;
+  name: string;
+  loggedHours: number;
+  capacityHours: number;
+  utilizationPercent: number;
+}
+
+export interface TeamUtilizationResult {
+  people: TeamUtilizationPerson[];
+  capacityHoursPerPerson: number;
+  businessDays: number;
+  avgUtilizationPercent: number | null;
+  hasData: boolean;
+}
+
+export function useTeamUtilization(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
+  return useQuery({
+    queryKey: ["analytics-team-utilization", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<TeamUtilizationResult>(
+        withParams("/analytics/team-utilization", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
+    enabled,
+  });
+}
+
+export interface TeamCostPerson {
+  name: string;
+  loggedHours: number;
+  hourlyRateCents: number;
+  costCents: number;
+}
+
+export interface TeamCostResult {
+  totalCostCents: number;
+  people: TeamCostPerson[];
+  unmatchedHours: number;
+  hoursWithoutRate: number;
+  hasData: boolean;
+}
+
+export function useTeamCost(productId?: string, enabled: boolean = true, startDate?: Date, endDate?: Date) {
+  return useQuery({
+    queryKey: ["analytics-team-cost", productId, startDate?.toISOString(), endDate?.toISOString()],
+    queryFn: () =>
+      fetchAnalytics<TeamCostResult>(
+        withParams("/analytics/team-cost", { productId, startDate: startDate?.toISOString(), endDate: endDate?.toISOString() })
+      ),
+    enabled,
+  });
+}
+
+/** Real, all-time Jira/ADO worklog author — keyed by accountId, so every
+ * entry here is a genuine contributor regardless of Jira's per-user email
+ * privacy setting or whether they have a QualiMetrix login at all. */
+export interface WorklogAuthor {
+  authorAccountId: string;
+  authorName: string | null;
+  totalHours: number;
+  hourlyRateCents: number | null;
+}
+
+interface WorklogAuthorsResult {
+  authors: WorklogAuthor[];
+}
+
+export function useWorklogAuthors(enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-worklog-authors"],
+    queryFn: () => fetchAnalytics<WorklogAuthorsResult>("/analytics/worklog-authors"),
+    enabled,
+  });
+}
+
+export function useSetWorklogAuthorRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { authorAccountId: string; authorName: string | null; hourlyRateCents: number | null }) =>
+      fetchAnalytics("/analytics/worklog-author-rate", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["analytics-worklog-authors"] });
+      queryClient.invalidateQueries({ queryKey: ["analytics-team-cost"] });
+    },
+  });
+}
+
+export interface FeatureFixAllocationRow {
+  externalAssigneeId: string;
+  displayName: string;
+  feature: number;
+  fix: number;
+  maintenance: number;
+  total: number;
+}
+
+export interface FeatureFixAllocationResult {
+  assignees: FeatureFixAllocationRow[];
+  hasData: boolean;
+}
+
+export function useFeatureFixAllocation(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-feature-fix-allocation", productId],
+    queryFn: () => fetchAnalytics<FeatureFixAllocationResult>(withParams("/analytics/feature-fix-allocation", { productId })),
+    enabled,
+  });
+}
+
+export type KnowledgeSiloRisk = "high" | "medium" | "low";
+
+export interface KnowledgeSiloRow {
+  label: string;
+  totalBugs: number;
+  topAssignee: { externalAssigneeId: string; displayName: string; count: number; percent: number };
+  risk: KnowledgeSiloRisk;
+}
+
+export interface KnowledgeSiloResult {
+  labels: KnowledgeSiloRow[];
+  hasData: boolean;
+}
+
+export function useKnowledgeSilo(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-knowledge-silo", productId],
+    queryFn: () => fetchAnalytics<KnowledgeSiloResult>(withParams("/analytics/knowledge-silo", { productId })),
     enabled,
   });
 }
@@ -293,11 +462,14 @@ export interface TenantAnalyticsResult {
   hasData: boolean;
 }
 
-export function useTenantAnalytics(tenantId?: string) {
+// Portfolio-wide by nature — the backend restricts this to pm/executive
+// (see analytics.controller.ts's getTenantAnalytics), so callers outside
+// that role should pass enabled=false rather than let the request 403.
+export function useTenantAnalytics(tenantId?: string, enabled: boolean = true) {
   return useQuery({
     queryKey: ["analytics-tenant", tenantId],
     queryFn: () => fetchAnalytics<TenantAnalyticsResult>(`/tenants/${tenantId}/analytics`),
-    enabled: !!tenantId,
+    enabled: !!tenantId && enabled,
   });
 }
 
@@ -395,6 +567,28 @@ export function useQaBottlenecks(productId?: string, enabled: boolean = true) {
   });
 }
 
+export interface CycleTimeStage {
+  status: string;
+  avgDays: number;
+  medianDays: number;
+  transitionCount: number;
+  totalDays: number;
+}
+
+export interface CycleTimeByStageResult {
+  stages: CycleTimeStage[];
+  bottleneckStage: string | null;
+  hasData: boolean;
+}
+
+export function useCycleTimeByStage(productId?: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ["analytics-cycle-time-by-stage", productId],
+    queryFn: () => fetchAnalytics<CycleTimeByStageResult>(withProduct("/analytics/cycle-time-by-stage", productId)),
+    enabled,
+  });
+}
+
 export interface SimilarBugRow {
   id: string;
   externalId: string | null;
@@ -443,6 +637,8 @@ export interface ProjectOverviewRow {
   /** Null (not 0) when there's nothing measurable — e.g. every bug is cancelled/closed. */
   resolutionRate: number | null;
   healthScore: number;
+  /** Distinct real assignees with at least one active item — not headcount, just who's actually touching this backlog. */
+  teamSize: number;
   hasData: boolean;
 }
 

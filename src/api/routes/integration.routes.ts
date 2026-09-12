@@ -10,6 +10,7 @@ import {
   listProjects,
   listJiraUsers,
   saveJiraSelection,
+  saveAzureDevOpsSelection,
   connectOpenAi,
   listKeyMappings,
   upsertKeyMapping,
@@ -53,6 +54,13 @@ import {
   listKrutrimConnections,
   syncKrutrimNow,
 } from "../controllers/krutrim-connection.controller";
+import {
+  listSpaces as listConfluenceSpaces,
+  saveSelection as saveConfluenceSelection,
+  listPages as listConfluencePages,
+  getPage as getConfluencePage,
+  search as searchConfluence,
+} from "../controllers/confluence.controller";
 
 const router = Router();
 
@@ -115,6 +123,19 @@ router.post("/krutrim/connections", requireAdmin, createKrutrimConnection);
 router.post("/krutrim/connections/:id/sync", requireAdmin, syncKrutrimNow);
 router.delete("/krutrim/connections/:id", requireAdmin, disconnectKrutrimConnection);
 
+// Confluence: no /connect or /callback of its own (it rides Jira's OAuth
+// grant — see jira-oauth.service.ts's SCOPES comment and handleCallback's
+// 'jira' branch), so these are its only provider-specific routes. Registered
+// before the generic /:provider wildcards below, same reasoning as the
+// pasted-credential routes further down. The generic /confluence/status,
+// /confluence/sync, /confluence/sync-frequency and DELETE /confluence
+// routes already work unmodified once isKnownProvider includes it.
+router.get("/confluence/spaces", requireAdmin, listConfluenceSpaces);
+router.put("/confluence/selection", requireAdmin, saveConfluenceSelection);
+router.get("/confluence/pages", requireAuth, listConfluencePages);
+router.get("/confluence/pages/:id", requireAuth, getConfluencePage);
+router.get("/confluence/search", requireAuth, searchConfluence);
+
 // Deliberate exception to admin-gating: reached via browser redirect from the
 // provider, no custom headers (or cookies from a different origin) survive
 // the trip. See handleCallback's docstring — it self-authenticates via the
@@ -133,12 +154,17 @@ router.delete("/key-mappings/:id", requireAdmin, deleteKeyMapping);
 
 // Raw OAuth credentials are PM-only — a PO's delegation only ever reaches
 // Product.jiraProjectKey/azureDevopsAreaPath (see membership.routes.ts), never
-// the tenant-wide Integration record itself.
+// the tenant-wide Integration record itself. status/projects fall under that
+// same record (externalMetadata, scopes, a live call using the stored token)
+// and were previously left at requireAuth — every actual frontend consumer
+// (integrations.tsx, settings.tsx) is already PM-gated, so this closes the
+// gap rather than changing any real behavior.
 router.post("/:provider/connect", requireAdmin, startConnect);
-router.get("/:provider/status", requireAuth, getStatus);
-router.get("/:provider/projects", requireAuth, listProjects);
+router.get("/:provider/status", requireAdmin, getStatus);
+router.get("/:provider/projects", requireAdmin, listProjects);
 router.get("/jira/users", requireAdmin, listJiraUsers);
 router.put("/jira/selection", requireAdmin, saveJiraSelection);
+router.put("/azure_devops/selection", requireAdmin, saveAzureDevOpsSelection);
 router.put("/:provider/sync-frequency", requireAdmin, updateSyncFrequency);
 router.post("/:provider/sync", requireAdmin, triggerSync);
 router.delete("/:provider", requireAdmin, disconnect);

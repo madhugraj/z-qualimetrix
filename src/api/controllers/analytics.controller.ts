@@ -76,6 +76,20 @@ export class AnalyticsController extends BaseController {
   }
 
   /**
+   * "My work" scoping (Reports page, Developer role) — only ever honors a
+   * client-supplied `assigneeId` when it's the caller's own id, or the
+   * caller is pm/executive (who already see per-assignee breakdowns via
+   * getAssigneeWorkload). Anything else is silently ignored rather than
+   * 403'd, since falling back to the unfiltered result is a safe default.
+   */
+  private resolveRequestedAssigneeId(req: Request): string | undefined {
+    const requested = req.query.assigneeId as string | undefined;
+    if (!requested) return undefined;
+    if (requested === req.user?.id || this.isPortfolioRole(req.user?.role)) return requested;
+    return undefined;
+  }
+
+  /**
    * Get MTTR (Mean Time To Resolve) metrics
    */
   getMTTR = this.asyncHandler(async (req: Request, res: Response) => {
@@ -86,8 +100,9 @@ export class AnalyticsController extends BaseController {
 
     const startDateObj = startDate ? new Date(startDate as string) : undefined;
     const endDateObj = endDate ? new Date(endDate as string) : undefined;
+    const assigneeId = this.resolveRequestedAssigneeId(req);
 
-    const mttr = await analyticsService.calculateMTTR(scope.productId, startDateObj, endDateObj, scope.tenantId);
+    const mttr = await analyticsService.calculateMTTR(scope.productId, startDateObj, endDateObj, scope.tenantId, assigneeId);
 
     return this.success(res, mttr);
   });
@@ -227,6 +242,190 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
+   * Get the Jira Adoption Policy §9.2 compliance signals — unlogged work,
+   * orphaned issues, stale in-progress items.
+   */
+  getComplianceSignals = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, limit, startDate, endDate } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const startDateObj = startDate ? new Date(startDate as string) : undefined;
+    const endDateObj = endDate ? new Date(endDate as string) : undefined;
+
+    const signals = await analyticsService.getComplianceSignals(
+      scope.productId,
+      scope.tenantId,
+      limit ? Number(limit) : undefined,
+      startDateObj,
+      endDateObj
+    );
+
+    return this.success(res, signals);
+  });
+
+  /**
+   * Get per-assignee workload (item counts by status, hours logged) keyed by
+   * Jira accountId / Azure DevOps identity id — works for anyone assigned a
+   * work item, independent of whether they have a QualiMetrix account or a
+   * public Jira email.
+   */
+  getAssigneeWorkload = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, limit } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const workload = await analyticsService.getAssigneeWorkload(
+      scope.productId,
+      scope.tenantId,
+      limit ? Number(limit) : undefined
+    );
+
+    return this.success(res, workload);
+  });
+
+  /**
+   * Get real logged hours per person against an assumed capacity baseline.
+   * Restricted to pm/executive regardless of productId scope — this is
+   * per-person data the dashboard itself only ever renders inside its
+   * pm/executive branch (dashboard.tsx), never for a developer/tester
+   * viewing their own product, so the same boundary must hold server-side.
+   */
+  getTeamUtilization = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to view team utilization', 403);
+    }
+
+    const { productId, startDate, endDate } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const result = await analyticsService.getTeamUtilization(
+      scope.productId,
+      scope.tenantId,
+      startDate ? new Date(startDate as string) : undefined,
+      endDate ? new Date(endDate as string) : undefined
+    );
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Get real $ labor cost (hours logged x real hourly rate), for worklog
+   * authors who have a rate set via setWorklogAuthorRate below. Restricted
+   * to pm/executive regardless of productId scope — same reasoning as
+   * getTeamUtilization above; per-person $/hr cost is not something a
+   * fellow product member should be able to pull directly even though the
+   * dashboard never renders this panel for them.
+   */
+  getTeamCost = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to view team cost', 403);
+    }
+
+    const { productId, startDate, endDate } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const result = await analyticsService.getTeamCost(
+      req.user!.tenantId!,
+      scope.productId,
+      scope.tenantId,
+      startDate ? new Date(startDate as string) : undefined,
+      endDate ? new Date(endDate as string) : undefined
+    );
+
+    return this.success(res, result);
+  });
+
+  /**
+   * Real, all-time roster of Jira/ADO worklog authors for the caller's
+   * tenant, with any hourly rate already set — backs the rate editor.
+   * Restricted to pm/executive — dashboard.tsx only ever fetches this for
+   * a pm (`current?.id === "pm"`), and it returns every author's name +
+   * $/hr rate tenant-wide, so that gate has to be enforced server-side too.
+   */
+  getWorklogAuthors = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to view worklog authors', 403);
+    }
+
+    const tenantId = this.resolveScopedTenantId(req, res);
+    if (!tenantId) return;
+
+    const authors = await analyticsService.getWorklogAuthors(tenantId);
+    return this.success(res, { authors });
+  });
+
+  /**
+   * Set (or, with `hourlyRateCents: null`, clear) a real worklog author's
+   * $/hr rate — keyed by their Jira accountId, not a QualiMetrix account.
+   * Restricted to pm/executive — this is a write, not just a read; without
+   * this check any authenticated tenant member could set or clear anyone
+   * else's hourly rate, which then feeds getTeamCost for everyone.
+   */
+  setWorklogAuthorRate = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to set worklog author rates', 403);
+    }
+
+    const tenantId = this.resolveScopedTenantId(req, res);
+    if (!tenantId) return;
+
+    const { authorAccountId, authorName, hourlyRateCents } = req.body ?? {};
+    if (!authorAccountId || typeof authorAccountId !== 'string') {
+      return this.error(res, 'authorAccountId is required', 400);
+    }
+    if (hourlyRateCents !== null && (typeof hourlyRateCents !== 'number' || !Number.isInteger(hourlyRateCents) || hourlyRateCents < 0)) {
+      return this.error(res, 'hourlyRateCents must be a non-negative integer, or null to clear', 400);
+    }
+
+    const result = await analyticsService.setWorklogAuthorRate(
+      tenantId,
+      authorAccountId,
+      typeof authorName === 'string' ? authorName : null,
+      hourlyRateCents
+    );
+    return this.success(res, result);
+  });
+
+  /**
+   * Get per-assignee feature/fix/maintenance allocation from real WorkItem.type.
+   */
+  getFeatureFixAllocation = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const allocation = await analyticsService.getFeatureFixAllocation(scope.productId, scope.tenantId);
+
+    return this.success(res, allocation);
+  });
+
+  /**
+   * Get knowledge-silo / bus-factor detection by Jira label.
+   */
+  getKnowledgeSilo = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, minBugsPerLabel } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const silo = await analyticsService.getKnowledgeSilo(
+      scope.productId,
+      scope.tenantId,
+      minBugsPerLabel ? Number(minBugsPerLabel) : undefined
+    );
+
+    return this.success(res, silo);
+  });
+
+  /**
    * Get backlog flow (items created vs. completed per period)
    */
   getBacklogFlow = this.asyncHandler(async (req: Request, res: Response) => {
@@ -262,7 +461,8 @@ export class AnalyticsController extends BaseController {
     const fixes = await analyticsService.getRecentHighPriorityFixes(
       scope.productId,
       scope.tenantId,
-      limit ? Number(limit) : undefined
+      limit ? Number(limit) : undefined,
+      this.resolveRequestedAssigneeId(req)
     );
 
     return this.success(res, fixes);
@@ -346,7 +546,16 @@ export class AnalyticsController extends BaseController {
   /**
    * Get comprehensive tenant analytics
    */
+  // Portfolio-wide by nature — restricted to pm/executive like every other
+  // tenant-wide view (getProjectsOverview, getQualityDashboard's tenant
+  // branch). resolveScopedTenantId alone only confirms tenant OWNERSHIP,
+  // not that the caller's role is allowed a tenant-wide view — this check
+  // was missing here even though the sibling handlers already have it.
   getTenantAnalytics = this.asyncHandler(async (req: Request, res: Response) => {
+    if (!this.isPortfolioRole(req.user?.role)) {
+      return this.error(res, 'Not scoped to view tenant-wide analytics', 403);
+    }
+
     const { startDate, endDate } = req.query;
 
     const tenantId = this.resolveScopedTenantId(req, res, this.paramString(req, 'tenantId'));
@@ -554,6 +763,26 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
+   * Get average real dwell time per workflow stage, from real status-
+   * transition history — where the process is systemically slow, not just
+   * what's stuck right now.
+   */
+  getCycleTimeByStage = this.asyncHandler(async (req: Request, res: Response) => {
+    const { productId, minTransitions } = req.query;
+
+    const scope = await this.resolveProductOrTenantScope(req, res, productId as string | undefined);
+    if (!scope) return;
+
+    const result = await analyticsService.getCycleTimeByStage(
+      scope.productId,
+      scope.tenantId,
+      minTransitions ? Number(minTransitions) : undefined
+    );
+
+    return this.success(res, result);
+  });
+
+  /**
    * Get items sitting in a QA/review/blocked-like raw Jira status too long
    */
   getQaBottlenecks = this.asyncHandler(async (req: Request, res: Response) => {
@@ -572,8 +801,12 @@ export class AnalyticsController extends BaseController {
   });
 
   /**
-   * Get real related/similar bugs for one bug (product access already
-   * enforced by requireProductScope at the route level)
+   * Get real related/similar bugs for one bug. requireProductScope at the
+   * route level only checks the caller can access the :productId param —
+   * it never confirms workItemId actually belongs to that product, so a
+   * caller could otherwise pass any productId they have plus an unrelated
+   * workItemId to read another product's (or tenant's) bug data. Re-check
+   * with the same 404-not-403 convention as getWorkItemById.
    */
   getSimilarBugs = this.asyncHandler(async (req: Request, res: Response) => {
     const workItemId = this.paramString(req, 'workItemId');
@@ -582,6 +815,14 @@ export class AnalyticsController extends BaseController {
     const error = this.validateRequired(req.params, ['workItemId']);
     if (error) {
       return this.error(res, error, 400);
+    }
+
+    const workItem = await this.prisma.workItem.findUnique({ where: { id: workItemId }, select: { productId: true } });
+    if (!workItem) {
+      return this.error(res, 'Work item not found', 404);
+    }
+    if (!req.user || !(await canAccessProduct(req.user, workItem.productId))) {
+      return this.error(res, 'Work item not found', 404);
     }
 
     const result = await analyticsService.getSimilarBugs(workItemId, limit ? Number(limit) : undefined);

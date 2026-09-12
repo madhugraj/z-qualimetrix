@@ -25,9 +25,15 @@ function getUserId(req: Request): string {
 }
 
 function isKnownProvider(provider: string): provider is IntegrationProvider {
-  return provider === 'jira' || provider === 'azure_devops' || provider === 'openai';
+  return provider === 'jira' || provider === 'azure_devops' || provider === 'openai' || provider === 'confluence';
 }
 
+// 'confluence' is deliberately excluded — it never gets its own /connect or
+// /callback round-trip. Its Integration row is created inside handleCallback's
+// 'jira' branch, from the same token response (see jira-oauth.service.ts's
+// SCOPES comment for why). Everything else generic (status/sync/
+// sync-frequency/disconnect) still works for it via the isKnownProvider check
+// alone on those routes.
 function isOAuthProvider(provider: IntegrationProvider): provider is 'jira' | 'azure_devops' {
   return provider === 'jira' || provider === 'azure_devops';
 }
@@ -95,7 +101,30 @@ export async function handleCallback(req: Request, res: Response) {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresAt: tokens.expiresAt,
-        scopes: ['read:jira-work', 'read:jira-user', 'offline_access'],
+        // Whatever Atlassian's token response actually granted — not the
+        // requested list, which the app's Developer Console permissions can
+        // silently narrow (this is exactly the gap that broke sprint/board sync).
+        scopes: tokens.scope,
+        externalMetadata: { cloudId: site.cloudId, siteUrl: site.siteUrl, siteName: site.siteName },
+        connectedAccountLabel: site.siteName,
+        createdBy: statePayload.userId,
+      });
+
+      // Confluence rides the same consent screen as Jira (jira-oauth.service.ts's
+      // SCOPES comment) — the SAME token response and accessible-resources site
+      // back both, so this never needs its own OAuth round-trip. If the app's
+      // Developer Console permissions don't (yet) include Confluence API, or the
+      // tenant is re-authorizing before that's configured, tokens.scope simply
+      // won't contain the Confluence scopes — still create the row (so status
+      // reflects "connected, but missing scopes" rather than "never connected"),
+      // confluence-sync.service.ts's own token check surfaces the real gap.
+      await integrationService.upsertConnection({
+        tenantId: statePayload.tenantId,
+        provider: 'confluence',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
+        scopes: tokens.scope,
         externalMetadata: { cloudId: site.cloudId, siteUrl: site.siteUrl, siteName: site.siteName },
         connectedAccountLabel: site.siteName,
         createdBy: statePayload.userId,
@@ -254,11 +283,40 @@ export async function listProjects(req: Request, res: Response) {
   });
 }
 
-interface JiraUserSummary {
+export interface JiraUserSummary {
   accountId: string;
   displayName: string;
   emailAddress: string | null;
   avatarUrl: string | null;
+}
+
+export interface JiraUserSelectionResolution {
+  emails: string[];
+  /** Selected accountIds present in Jira's directory but with no resolvable email — most commonly because that person's Jira account has email visibility set to private, which the current Jira Cloud API has no way to override or bypass. Surfaced to the caller instead of silently dropped, since these people will never show up in per-person analytics until this changes. */
+  unresolvedAccountIds: string[];
+}
+
+/**
+ * Resolves selected Jira accountIds to emails against the site's available
+ * user list. Deliberately reports which selections couldn't be resolved
+ * rather than silently dropping them — a selection where most people have
+ * privacy-restricted emails (common on real Jira Cloud sites) would
+ * otherwise look identical to "nobody selected" or "only one person
+ * selected" to whoever made the selection, with no way to tell why.
+ */
+export function resolveSelectedUserEmails(
+  userAccountIds: string[],
+  availableUsers: JiraUserSummary[]
+): JiraUserSelectionResolution {
+  const emailByAccountId = new Map(availableUsers.map((u) => [u.accountId, u.emailAddress]));
+  const emails: string[] = [];
+  const unresolvedAccountIds: string[] = [];
+  for (const id of new Set(userAccountIds)) {
+    const email = emailByAccountId.get(id);
+    if (email) emails.push(email);
+    else unresolvedAccountIds.push(id);
+  }
+  return { emails, unresolvedAccountIds };
 }
 
 /** Shared by listJiraUsers (display) and saveJiraSelection (server-side accountId->email resolution — never trust a client-supplied email for this). */
@@ -366,13 +424,17 @@ export async function saveJiraSelection(req: Request, res: Response) {
   // User.email, not Jira accountId, and there's no accountId column on User
   // to join against later.
   let selectedUserEmails: string[] = [];
+  let unresolvedUsers: Array<{ accountId: string; displayName: string }> = [];
   if (userAccountIds.length > 0) {
     try {
       const availableUsers = await fetchJiraUsers(cloudId, tokens.accessToken);
-      const emailByAccountId = new Map(availableUsers.map((u) => [u.accountId, u.emailAddress]));
-      selectedUserEmails = [...new Set(userAccountIds)]
-        .map((id) => emailByAccountId.get(id))
-        .filter((email): email is string => !!email);
+      const resolution = resolveSelectedUserEmails(userAccountIds, availableUsers);
+      selectedUserEmails = resolution.emails;
+      const displayNameByAccountId = new Map(availableUsers.map((u) => [u.accountId, u.displayName]));
+      unresolvedUsers = resolution.unresolvedAccountIds.map((accountId) => ({
+        accountId,
+        displayName: displayNameByAccountId.get(accountId) ?? accountId,
+      }));
     } catch {
       return res.status(502).json({ success: false, error: 'Failed to validate Jira users' });
     }
@@ -384,7 +446,101 @@ export async function saveJiraSelection(req: Request, res: Response) {
     selectedUserEmails,
     selectionUpdatedAt: new Date().toISOString(),
   });
-  return res.json({ success: true });
+  return res.json({
+    success: true,
+    data: {
+      resolvedCount: selectedUserEmails.length,
+      // Most commonly: that person's Jira account has email visibility set
+      // to private, which the Jira Cloud API has no way to override — not
+      // something a retry or a different scope can fix. Surfaced so the
+      // caller can tell a real gap apart from "nothing selected."
+      unresolvedUsers,
+    },
+  });
+}
+
+/**
+ * Turns an Azure DevOps project name into a valid `Product.key` (VarChar(50),
+ * unique per tenant). Exported as a pure function so the mapping is
+ * unit-testable without hitting the ADO API or the database.
+ */
+export function deriveProductKey(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
+  return slug || 'project';
+}
+
+/**
+ * Azure DevOps equivalent of saveJiraSelection, minus the user-resolution
+ * step — ADO has no per-user email-privacy setting (assignee identity is
+ * always visible) and no per-person worklog entity to scope, so there's
+ * nothing here to key analytics visibility to. Each selected project maps
+ * to a whole-project Product by default (azureDevopsAreaPath set to the
+ * project's own name — WIQL's `UNDER` matches the entire subtree, so this
+ * syncs everything in the project); a team wanting a specific sub-team's
+ * area path instead can still edit that on the Product afterward.
+ */
+export async function saveAzureDevOpsSelection(req: Request, res: Response) {
+  const tenantId = getTenantId(req);
+  const { projectIds } = req.body ?? {};
+  if (!Array.isArray(projectIds) || !projectIds.every((id) => typeof id === 'string')) {
+    return res.status(400).json({ success: false, error: 'projectIds must be an array of strings' });
+  }
+
+  const integration = await prisma.integration.findUnique({
+    where: { tenantId_provider: { tenantId, provider: 'azure_devops' } },
+  });
+  if (!integration || !integration.isActive) {
+    return res.status(404).json({ success: false, error: 'Azure DevOps integration not connected' });
+  }
+
+  const tokens = await integrationService.getDecryptedTokens(tenantId, 'azure_devops');
+  const organization = (tokens?.externalMetadata as any)?.organization;
+  if (!tokens || !organization) {
+    return res.status(409).json({ success: false, error: 'Azure DevOps organization is not configured' });
+  }
+
+  const projectsResponse = await fetch(`https://dev.azure.com/${organization}/_apis/projects?api-version=7.0`, {
+    headers: { Authorization: `Bearer ${tokens.accessToken}`, Accept: 'application/json' },
+  });
+  if (!projectsResponse.ok) {
+    return res.status(502).json({ success: false, error: 'Failed to validate Azure DevOps projects' });
+  }
+  const availableProjects = ((await projectsResponse.json()).value ?? []) as Array<{ id: string; name: string }>;
+  const selectedProjects = availableProjects.filter((project) => projectIds.includes(String(project.id)));
+  if (selectedProjects.length !== new Set(projectIds).size) {
+    return res.status(400).json({ success: false, error: 'One or more selected Azure DevOps projects are not accessible' });
+  }
+
+  // A selected ADO project becomes a QualiMetrix product automatically, same
+  // as Jira's projects above, so the next scheduled sync has a destination.
+  await prisma.$transaction(selectedProjects.map((project) => {
+    const key = deriveProductKey(project.name);
+    return prisma.product.upsert({
+      where: { tenantId_key: { tenantId, key } },
+      create: {
+        tenantId,
+        name: project.name,
+        key,
+        azureDevopsAreaPath: project.name,
+      },
+      update: {
+        name: project.name,
+        azureDevopsAreaPath: project.name,
+        isActive: true,
+      },
+    });
+  }));
+
+  await integrationService.updateExternalMetadata(tenantId, 'azure_devops', {
+    selectedProjectIds: [...new Set(projectIds)],
+    selectionUpdatedAt: new Date().toISOString(),
+  });
+  return res.json({ success: true, data: { mappedCount: selectedProjects.length } });
 }
 
 /**
